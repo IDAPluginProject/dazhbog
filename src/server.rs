@@ -5,6 +5,7 @@ use tokio::{
     net::TcpListener,
     time::timeout,
 };
+use tokio::io::AsyncReadExt as _; // for TcpStream::peek
 
 async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     mut stream: S,
@@ -443,6 +444,21 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     }
 }
 
+/// Return true iff the peeked bytes look like a TLS ClientHello record.
+/// Heuristics (conservative to minimize false positives):
+///   - TLS record header: [ContentType=0x16][Major=0x03][Minor in 0x00..=0x04][len_hi][len_lo]
+///   - First handshake byte after record header: 0x01 (ClientHello)
+#[inline]
+fn looks_like_tls_client_hello(hdr6: &[u8]) -> bool {
+    if hdr6.len() < 6 { return false; }
+    if hdr6[0] != 0x16 { return false; }          // Handshake record
+    if hdr6[1] != 0x03 { return false; }          // SSLv3/TLS major
+    if hdr6[2] > 0x04 { return false; }           // <= TLS1.3 minor
+    let len = u16::from_be_bytes([hdr6[3], hdr6[4]]) as usize;
+    if len == 0 || len > (16 * 1024) { return false; } // sane record length
+    hdr6[5] == 0x01                                // HandshakeType::ClientHello
+}
+
 pub async fn serve_binary_rpc(cfg: Arc<Config>, db: Arc<Database>) {
     let listener = TcpListener::bind(&cfg.lumina.bind_addr).await.expect("bind failed");
     let mut tls_acceptor = None;
@@ -480,15 +496,38 @@ pub async fn serve_binary_rpc(cfg: Arc<Config>, db: Arc<Database>) {
         tokio::spawn(async move {
             debug!("New connection from {}", addr);
             let res = if let Some(acc) = acceptor {
-                match tokio::time::timeout(std::time::Duration::from_millis(cfg.limits.tls_handshake_timeout_ms), acc.accept(socket)).await {
-                    Ok(Ok(s)) => {
-                        debug!("TLS handshake completed for {}", addr);
-                        handle_client(s, cfg, db).await
-                    },
-                    Ok(Err(e)) => { debug!("tls accept {}: {}", addr, e); Ok(()) },
-                    Err(_) => { debug!("tls handshake timeout {}", addr); Ok(()) },
+                // TLS is enabled in config: sniff first bytes and choose TLS vs cleartext.
+                let sniff_deadline = Duration::from_millis(cfg.limits.tls_handshake_timeout_ms);
+                let is_tls = match tokio::time::timeout(sniff_deadline, async {
+                    // Wait until there is data to peek or the timeout elapses.
+                    socket.readable().await.ok();
+                    let mut hdr = [0u8; 6];
+                    match socket.peek(&mut hdr).await {
+                        Ok(n) if n >= 6 => looks_like_tls_client_hello(&hdr),
+                        Ok(_) => false,
+                        Err(_) => false,
+                    }
+                }).await {
+                    Ok(v) => v,
+                    Err(_) => false, // sniff timed out: treat as cleartext to let normal timeouts apply
+                };
+
+                if is_tls {
+                    debug!("{}: sniffed TLS ClientHello; upgrading connection", addr);
+                    match tokio::time::timeout(Duration::from_millis(cfg.limits.tls_handshake_timeout_ms), acc.accept(socket)).await {
+                        Ok(Ok(s)) => {
+                            debug!("TLS handshake completed for {}", addr);
+                            handle_client(s, cfg, db).await
+                        },
+                        Ok(Err(e)) => { debug!("tls accept {}: {}", addr, e); Ok(()) },
+                        Err(_) => { debug!("tls handshake timeout {}", addr); Ok(()) },
+                    }
+                } else {
+                    debug!("{}: cleartext detected; proceeding without TLS", addr);
+                    handle_client(socket, cfg, db).await
                 }
             } else {
+                // TLS disabled in config → cleartext only.
                 handle_client(socket, cfg, db).await
             };
             if let Err(e) = res { 
@@ -498,5 +537,19 @@ pub async fn serve_binary_rpc(cfg: Arc<Config>, db: Arc<Database>) {
             }
             METRICS.active_connections.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         });
+    }
+}
+
+#[cfg(test)]
+mod sniff_tests {
+    use super::looks_like_tls_client_hello;
+    #[test]
+    fn tls_header_positive_and_negative() {
+        // 16 03 03 00 2a 01 : Handshake, TLS1.2, len=42, ClientHello
+        let good = [0x16, 0x03, 0x03, 0x00, 0x2a, 0x01];
+        assert!(looks_like_tls_client_hello(&good));
+        // Our cleartext frame example: [len=5 be] [type=0x01]
+        let clear = [0x00, 0x00, 0x00, 0x05, 0x01, 0xff];
+        assert!(!looks_like_tls_client_hello(&clear));
     }
 }
