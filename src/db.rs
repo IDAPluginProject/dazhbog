@@ -1,4 +1,4 @@
-use crate::engine::{EngineRuntime, Record};
+use crate::engine::{EngineRuntime, Record, UpsertResult, IndexError};
 use crate::config::Config;
 use crate::util::{addr_off, addr_seg};
 
@@ -48,7 +48,7 @@ impl Database {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "name too long (> u16::MAX)"));
             }
             if data.len() > u32::MAX as usize {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "data too large (> u32::MAX)"));
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "data large (> u32::MAX)"));
             }
 
             let old = self.rt.index.get(*key);
@@ -63,8 +63,14 @@ impl Database {
                 flags: 0,
             };
             let addr = self.rt.segments.append(&rec)?;
-            let was = self.rt.index.upsert(*key, addr);
-            status.push(if was.is_none() { 1 } else { 0 });
+            match self.rt.index.upsert(*key, addr) {
+                Ok(UpsertResult::Inserted) => status.push(1),
+                Ok(UpsertResult::Replaced(_)) => status.push(0),
+                Err(IndexError::Full) => {
+                    crate::metrics::METRICS.append_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    return Err(io::Error::new(io::ErrorKind::Other, "index full"));
+                }
+            }
         }
         Ok(status)
     }
@@ -84,7 +90,8 @@ impl Database {
                 flags: 0x01, // tombstone
             };
             let addr = self.rt.segments.append(&rec)?;
-            self.rt.index.upsert(key, addr);
+            // For tombstones, we still write to disk even if index is full
+            let _ = self.rt.index.upsert(key, addr);
             if old != 0 { deleted += 1; }
         }
         Ok(deleted)

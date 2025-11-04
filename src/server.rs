@@ -617,10 +617,12 @@ pub async fn serve_binary_rpc(cfg: Arc<Config>, db: Arc<Database>) {
         crt.iter_mut().for_each(|b| *b = 0); // zeroize
 
         let mut builder = native_tls::TlsAcceptor::builder(id);
+
         if tls.min_protocol_sslv3 {
             // *** Retained per request (IDA Pro requirement) ***
             builder.min_protocol_version(Some(native_tls::Protocol::Sslv3));
         }
+
         let acc = builder.build().expect("tls build");
         tls_acceptor = Some(tokio_native_tls::TlsAcceptor::from(acc));
     }

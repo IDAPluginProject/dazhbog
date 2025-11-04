@@ -4,7 +4,7 @@ mod index;
 mod spin;
 
 pub use segment::{Record, OpenSegments};
-pub use index::ShardedIndex;
+pub use index::{ShardedIndex, UpsertResult, IndexError};
 
 use crate::config::Engine;
 use std::{io, path::PathBuf, sync::Arc};

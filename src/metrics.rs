@@ -14,6 +14,10 @@ pub struct Metrics {
     pub shutting_down: AtomicBool,
     // Index overflow guard trips
     pub index_overflows: AtomicU64,
+    // Database operation failures
+    pub append_failures: AtomicU64,
+    // Decoder rejections due to size limits
+    pub decoder_rejects: AtomicU64,
 }
 
 pub static METRICS: once_cell::sync::Lazy<&'static Metrics> = once_cell::sync::Lazy::new(|| {
@@ -36,6 +40,8 @@ impl Metrics {
         s.push_str(&g("lumen_errors_total","Errors", self.errors.load(Ordering::Relaxed)));
         s.push_str(&g("lumen_timeouts_total","Timeouts", self.timeouts.load(Ordering::Relaxed)));
         s.push_str(&g("lumen_index_overflows_total","Index insertion overflows (no overwrite)", self.index_overflows.load(Ordering::Relaxed)));
+        s.push_str(&g("lumen_append_failures_total","Database append operation failures", self.append_failures.load(Ordering::Relaxed)));
+        s.push_str(&g("lumen_decoder_rejects_total","Protocol decoder rejections due to size limits", self.decoder_rejects.load(Ordering::Relaxed)));
         s
     }
 }

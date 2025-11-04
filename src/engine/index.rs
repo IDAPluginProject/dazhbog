@@ -3,6 +3,15 @@ use crate::engine::spin::SpinLock;
 use crate::util::key_tag;
 use crate::metrics::METRICS;
 
+pub enum UpsertResult {
+    Inserted,
+    Replaced(u64),
+}
+
+pub enum IndexError {
+    Full,
+}
+
 #[derive(Debug)]
 pub struct Slot {
     pub tag: AtomicU64,  // 0 means empty
@@ -60,7 +69,7 @@ impl ShardedIndex {
         0
     }
 
-    pub fn upsert(&self, key: u128, addr: u64) -> Option<u64> {
+    pub fn upsert(&self, key: u128, addr: u64) -> Result<UpsertResult, IndexError> {
         let tag = key_tag(key);
         let sidx = self.shard_index(tag);
         let shard = &self.shards[sidx];
@@ -75,14 +84,14 @@ impl ShardedIndex {
                     slots[idx].tag.store(tag, Ordering::Release);
                 }
                 let old = slots[idx].addr.swap(addr, Ordering::AcqRel);
-                return if old == 0 { None } else { Some(old) };
+                return Ok(if old == 0 { UpsertResult::Inserted } else { UpsertResult::Replaced(old) });
             }
             idx = (idx + 1) & mask;
         }
-        // --- CHANGED: do NOT overwrite arbitrary slot; signal overflow ---
+        // Overflow: cannot insert into any slot in the probe sequence
         METRICS.index_overflows.fetch_add(1, Ordering::Relaxed);
         log::error!("ShardedIndex overflow on shard {}; refusing to overwrite existing entry", sidx);
-        None
+        Err(IndexError::Full)
     }
 
     pub fn delete(&self, key: u128) -> Option<u64> {

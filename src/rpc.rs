@@ -69,7 +69,10 @@ pub fn decode_pull(payload: &[u8], max_items: usize) -> Result<Vec<u128>, CodecE
     let mut p = payload;
     if p.len() < 4 { return Err(CodecError::Short); }
     let n = u32::from_le_bytes(p[0..4].try_into().unwrap()) as usize;
-    if n > max_items { return Err(CodecError::Malformed("pull count exceeds cap")); }
+    if n > max_items {
+        crate::metrics::METRICS.decoder_rejects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(CodecError::Malformed("pull count exceeds cap"));
+    }
     p = &p[4..];
     if p.len() < 16 * n { return Err(CodecError::Short); }
     let mut v = Vec::with_capacity(n);
@@ -91,7 +94,10 @@ pub fn decode_push(payload: &[u8], caps: &PushCaps) -> Result<Vec<PushItem>, Cod
     let mut p = payload;
     if p.len() < 4 { return Err(CodecError::Short); }
     let n = u32::from_le_bytes(p[0..4].try_into().unwrap()) as usize;
-    if n > caps.max_items { return Err(CodecError::Malformed("push count exceeds cap")); }
+    if n > caps.max_items {
+        crate::metrics::METRICS.decoder_rejects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(CodecError::Malformed("push count exceeds cap"));
+    }
     p = &p[4..];
     let mut v = Vec::with_capacity(n);
     for _ in 0..n {
@@ -101,8 +107,22 @@ pub fn decode_push(payload: &[u8], caps: &PushCaps) -> Result<Vec<PushItem>, Cod
         let len_bytes_declared = u32::from_le_bytes(p[4..8].try_into().unwrap());
         p = &p[8..];
         // bounded string/bytes
-        let name = get_str_max(&mut p, caps.max_name_bytes)?;
-        let data = get_bytes_max(&mut p, caps.max_data_bytes)?;
+        let name = match get_str_max(&mut p, caps.max_name_bytes) {
+            Ok(s) => s,
+            Err(CodecError::Malformed("string too large")) => {
+                crate::metrics::METRICS.decoder_rejects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return Err(CodecError::Malformed("string too large"));
+            }
+            Err(e) => return Err(e),
+        };
+        let data = match get_bytes_max(&mut p, caps.max_data_bytes) {
+            Ok(b) => b,
+            Err(CodecError::Malformed("bytes too large")) => {
+                crate::metrics::METRICS.decoder_rejects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return Err(CodecError::Malformed("bytes too large"));
+            }
+            Err(e) => return Err(e),
+        };
         // len_bytes will be rigorously revalidated/normalized by DB & segment write path
         v.push(PushItem { key, popularity, len_bytes: len_bytes_declared, name, data });
     }
@@ -130,7 +150,10 @@ pub fn decode_hist(payload: &[u8], max_items: usize) -> Result<(u32, Vec<u128>),
     if p.len() < 8 { return Err(CodecError::Short); }
     let limit = u32::from_le_bytes(p[0..4].try_into().unwrap());
     let n = u32::from_le_bytes(p[4..8].try_into().unwrap()) as usize;
-    if n > max_items { return Err(CodecError::Malformed("hist count exceeds cap")); }
+    if n > max_items {
+        crate::metrics::METRICS.decoder_rejects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Err(CodecError::Malformed("hist count exceeds cap"));
+    }
     p = &p[8..];
     if p.len() < 16 * n { return Err(CodecError::Short); }
     let mut v = Vec::with_capacity(n);

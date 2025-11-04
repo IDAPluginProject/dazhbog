@@ -232,13 +232,21 @@ impl OpenSegments {
                 if magic != super::segment::MAGIC { break; }
                 let rec_len = u32::from_le_bytes(hdr[4..8].try_into().unwrap()) as u64;
                 if rec_len == 0 || off + rec_len > len { break; }
+                // Validate record has minimum structured body size before reading flags
+                // Header(12) + key(16) + ts(8) + prev_addr(8) + len_bytes(4) + popularity(4) + name_len(2) + data_len(4) + flags(1) = 59 bytes
+                const MIN_STRUCTURED_SIZE: u64 = 12 + 16 + 8 + 8 + 4 + 4 + 2 + 4 + 1;
+                if rec_len < MIN_STRUCTURED_SIZE {
+                    log::warn!("Skipping malformed record at offset {}: rec_len {} < minimum {}", off, rec_len, MIN_STRUCTURED_SIZE);
+                    off += rec_len;
+                    continue;
+                }
                 // Read body minimal key+flags to seed index fast
                 let mut keybuf = [0u8; 16 + 1 + 4]; // key + flags align (read enough)
                 r.file.read_exact_at(&mut keybuf, off + 12)?;
                 let lo = u64::from_le_bytes(keybuf[0..8].try_into().unwrap());
                 let hi = u64::from_le_bytes(keybuf[8..16].try_into().unwrap());
                 let key = ((hi as u128) << 64) | (lo as u128);
-                let flags = { 
+                let flags = {
                     let mut fb = [0u8;1];
                     r.file.read_exact_at(&mut fb, off + 12 + 8 + 8 + 8 + 8 + 4 + 4 + 2 + 4)?; // offset to flags byte
                     fb[0]
@@ -249,7 +257,10 @@ impl OpenSegments {
                     // tombstone: delete head
                     index.delete(key);
                 } else {
-                    index.upsert(key, addr);
+                    // During rebuild, log but ignore index full errors
+                    if let Err(_) = index.upsert(key, addr) {
+                        log::warn!("Index full during rebuild for key {:032x}", key);
+                    }
                 }
                 off += rec_len as u64;
             }
