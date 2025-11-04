@@ -85,9 +85,9 @@ impl Default for Config {
                 // Defaults (balanced for safety with compatibility):
                 max_hello_frame_bytes: 4 * 1024 * 1024,  // 4 MiB
                 max_cmd_frame_bytes: 16 * 1024 * 1024,   // 16 MiB
-                max_pull_items: 16384,
-                max_push_items: 8192,
-                max_del_items: 16384,
+                max_pull_items: 524288,  // 512k items
+                max_push_items: 524288,  // 512k items - handle very large binaries
+                max_del_items: 524288,   // 512k items
                 max_hist_items: 4096,
                 max_name_bytes: 65535,       // u16::MAX; required by on-disk format
                 max_data_bytes: 8 * 1024 * 1024, // 8 MiB per item

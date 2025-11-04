@@ -68,8 +68,8 @@ fn unpack_dd(data: &[u8]) -> (u32, usize) {
         if data.len() < 4 {
             return (0, 0);
         }
-        // For C0 class: data[3], data[2], data[1] (reverse order)
-        let val = ((data[3] as u32) << 16) | ((data[2] as u32) << 8) | (data[1] as u32);
+        // Little-endian: val[0] = data[3], val[1] = data[2], val[2] = data[1], val[3] = b & 0x1F
+        let val = u32::from_le_bytes([data[3], data[2], data[1], b & 0x1F]);
         return (val, 4);
     }
     
@@ -79,7 +79,7 @@ fn unpack_dd(data: &[u8]) -> (u32, usize) {
         if data.len() < 5 {
             return (0, 0);
         }
-        let val = u32::from_le_bytes([data[1], data[2], data[3], data[4]]);
+        let val = u32::from_le_bytes([data[4], data[3], data[2], data[1]]);
         return (val, 5);
     }
     
@@ -307,8 +307,14 @@ pub fn parse_legacy_push_metadata(payload: &[u8], caps: LegacyCaps) -> Result<Le
     let (count_funcs, c) = unpack_dd(&payload[offset..]);
     if c == 0 { return Err(LegacyError::UnexpectedEof); }
     offset += c;
+    
+    // Reject requests that exceed the cap instead of silently truncating
+    if count_funcs as usize > caps.max_funcs {
+        log::warn!("Push request contains {} functions but limit is {}", count_funcs, caps.max_funcs);
+        return Err(LegacyError::InvalidData);
+    }
 
-    let n = (count_funcs as usize).min(caps.max_funcs);
+    let n = count_funcs as usize;
     let mut funcs = Vec::with_capacity(n);
 
     for i in 0..count_funcs {
@@ -329,11 +335,9 @@ pub fn parse_legacy_push_metadata(payload: &[u8], caps: LegacyCaps) -> Result<Le
         let (hash, c) = unpack_var_bytes_capped(&payload[offset..], caps.max_hash_bytes)?;
         offset += c;
 
-        if (i as usize) < n {
-            funcs.push(LegacyPushMetadataFunc {
-                name, func_len, func_data: func_data.to_vec(), unk2, hash: hash.to_vec(),
-            });
-        }
+        funcs.push(LegacyPushMetadataFunc {
+            name, func_len, func_data: func_data.to_vec(), unk2, hash: hash.to_vec(),
+        });
     }
 
     // unk1: Vec<u64> (capped by reasonable upper bound)
@@ -537,11 +541,13 @@ mod tests {
         assert_eq!(unpack_dd(&[0x80, 0x00]), (0x0000, 2));
         assert_eq!(unpack_dd(&[0x81, 0x23]), (0x0123, 2));
         assert_eq!(unpack_dd(&[0xBF, 0xFF]), (0x3FFF, 2));
-        // 0xC0 class consumes 4 bytes (LE assembly)
-        assert_eq!(unpack_dd(&[0xC0, 0x00, 0x00, 0x00]), (0x0000, 4));
-        assert_eq!(unpack_dd(&[0xC1, 0x23, 0x45, 0x00]), (0x004523, 4));
-        // 0xFF prefix: 5 bytes, LE
-        assert_eq!(unpack_dd(&[0xFF, 0x78, 0x56, 0x34, 0x12]), (0x12345678, 5));
+        // 0xC0 class consumes 4 bytes: [data[3], data[2], data[1], b & 0x1F]
+        assert_eq!(unpack_dd(&[0xC0, 0x00, 0x00, 0x00]), (0x00000000, 4));
+        // [0xC1, 0x23, 0x45, 0x00] -> from_le_bytes([0x00, 0x45, 0x23, 0x01]) = 0x01234500
+        assert_eq!(unpack_dd(&[0xC1, 0x23, 0x45, 0x00]), (0x01234500, 4));
+        // 0xFF prefix: 5 bytes, from_le_bytes([data[4], data[3], data[2], data[1]])
+        // [0xFF, 0x78, 0x56, 0x34, 0x12] -> from_le_bytes([0x12, 0x34, 0x56, 0x78]) = 0x78563412
+        assert_eq!(unpack_dd(&[0xFF, 0x78, 0x56, 0x34, 0x12]), (0x78563412, 5));
     }
     
     #[test]
