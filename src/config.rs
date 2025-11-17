@@ -66,6 +66,7 @@ pub struct Lumina {
 #[derive(Clone, Debug)]
 pub struct Upstream {
     pub enabled: bool,
+    pub priority: u32,
     pub host: String,
     pub port: u16,
     pub use_tls: bool,
@@ -82,7 +83,7 @@ pub struct Config {
     pub http: Option<Http>,
     pub engine: Engine,
     pub lumina: Lumina,
-    pub upstream: Option<Upstream>,
+    pub upstreams: Vec<Upstream>,
 }
 
 impl Default for Config {
@@ -131,7 +132,7 @@ impl Default for Config {
                 use_tls: false,
                 tls: None,
             },
-            upstream: None,
+            upstreams: Vec::new(),
         }
     }
 }
@@ -208,71 +209,38 @@ impl Config {
                     ("tls","min_protocol_sslv3") => { cfg.lumina.tls.get_or_insert_with(|| super::config::TLS { pkcs12_path: "".into(), env_password_var: "PKCSPASSWD".into(), min_protocol_sslv3: true }).min_protocol_sslv3 = parse!(b); },
 
                     // ---------------- Upstream (optional) ----------------
-                    ("upstream","enabled") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).enabled = parse!(b);
-                    },
-                    ("upstream","host") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).host = parse!(s);
-                    },
-                    ("upstream","port") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).port = parse!(u16_);
-                    },
-                    ("upstream","use_tls") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).use_tls = parse!(b);
-                    },
-                    ("upstream","insecure_no_verify") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).insecure_no_verify = parse!(b);
-                    },
-                    ("upstream","hello_protocol_version") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).hello_protocol_version = parse!(u32_);
-                    },
-                    ("upstream","license_path") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).license_path = {
-                            let v = parse!(s);
-                            if v.is_empty() { None } else { Some(v) }
-                        };
-                    },
-                    ("upstream","timeout_ms") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).timeout_ms = parse!(u);
-                    },
-                    ("upstream","batch_max") => {
-                        cfg.upstream.get_or_insert_with(|| Upstream {
-                            enabled: false, host: String::new(), port: 0, use_tls: true,
-                            insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                            timeout_ms: 8000, batch_max: 1024
-                        }).batch_max = parse!(usize_);
+                    ("upstream", key) if key.starts_with(|c: char| c.is_ascii_digit()) => {
+                        // Parse upstream.N.field format
+                        let parts: Vec<&str> = key.splitn(2, '.').collect();
+                        if parts.len() != 2 { return Err(format!("invalid upstream key format: {}", key)); }
+                        let idx = parts[0].parse::<usize>().map_err(|e| e.to_string())?;
+                        let field = parts[1];
+                        
+                        // Ensure vector is large enough
+                        while cfg.upstreams.len() <= idx {
+                            cfg.upstreams.push(Upstream {
+                                enabled: false, priority: cfg.upstreams.len() as u32, host: String::new(), port: 0, use_tls: true,
+                                insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
+                                timeout_ms: 8000, batch_max: 1024
+                            });
+                        }
+                        
+                        match field {
+                            "enabled" => cfg.upstreams[idx].enabled = parse!(b),
+                            "priority" => cfg.upstreams[idx].priority = parse!(u32_),
+                            "host" => cfg.upstreams[idx].host = parse!(s),
+                            "port" => cfg.upstreams[idx].port = parse!(u16_),
+                            "use_tls" => cfg.upstreams[idx].use_tls = parse!(b),
+                            "insecure_no_verify" => cfg.upstreams[idx].insecure_no_verify = parse!(b),
+                            "hello_protocol_version" => cfg.upstreams[idx].hello_protocol_version = parse!(u32_),
+                            "license_path" => {
+                                let v = parse!(s);
+                                cfg.upstreams[idx].license_path = if v.is_empty() { None } else { Some(v) };
+                            },
+                            "timeout_ms" => cfg.upstreams[idx].timeout_ms = parse!(u),
+                            "batch_max" => cfg.upstreams[idx].batch_max = parse!(usize_),
+                            _ => return Err(format!("unknown upstream field: {}", field)),
+                        }
                     },
 
                     _ => return Err(format!("unknown key {section}.{key}")),

@@ -158,15 +158,84 @@ async fn upstream_handshake(conn: &mut UpstreamConn, up: &Upstream) -> io::Resul
     Ok(())
 }
 
-/// Fetch missing items from upstream. Returns vector aligned to `keys`.
-pub async fn fetch_from_upstream(up: Upstream, keys: &[u128]) -> io::Result<Vec<UpItem>> {
+/// Fetch missing items from upstream servers. Returns vector aligned to `keys`.
+/// Tries servers in priority order (lower priority number = higher priority).
+/// Stops querying once all functions are found or all servers are exhausted.
+pub async fn fetch_from_upstreams(upstreams: &[crate::config::Upstream], keys: &[u128]) -> io::Result<Vec<UpItem>> {
     if keys.is_empty() {
         return Ok(Vec::new());
     }
 
-    debug!("upstream: fetch_from_upstream called for {} keys (upstream={}:{}, use_tls={}, batch_max={})", 
-           keys.len(), up.host, up.port, up.use_tls, up.batch_max);
-    METRICS.upstream_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // Filter and sort enabled upstreams by priority
+    let mut sorted_upstreams: Vec<_> = upstreams.iter()
+        .filter(|up| up.enabled)
+        .collect();
+    sorted_upstreams.sort_by_key(|up| up.priority);
+
+    if sorted_upstreams.is_empty() {
+        debug!("upstream: no enabled upstreams configured");
+        return Ok(vec![None; keys.len()]);
+    }
+
+    debug!("upstream: fetch_from_upstreams called for {} keys, trying {} servers in priority order", 
+           keys.len(), sorted_upstreams.len());
+
+    // Track results for all keys
+    let mut results: Vec<UpItem> = vec![None; keys.len()];
+    
+    // Try each upstream server in priority order
+    for (server_idx, up) in sorted_upstreams.iter().enumerate() {
+        // Find which keys are still missing
+        let mut missing_keys = Vec::new();
+        let mut missing_positions = Vec::new();
+        
+        for (i, item) in results.iter().enumerate() {
+            if item.is_none() {
+                missing_keys.push(keys[i]);
+                missing_positions.push(i);
+            }
+        }
+        
+        if missing_keys.is_empty() {
+            debug!("upstream: all functions found after {} server(s)", server_idx);
+            break;
+        }
+        
+        debug!("upstream: querying server {} (priority={}, host={}:{}) for {} missing keys", 
+               server_idx, up.priority, up.host, up.port, missing_keys.len());
+        
+        METRICS.upstream_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        
+        // Fetch from this upstream
+        match fetch_from_single_upstream(up, &missing_keys).await {
+            Ok(fetched) => {
+                let mut found_count = 0;
+                for (j, item) in fetched.into_iter().enumerate() {
+                    if let Some(func_data) = item {
+                        let original_idx = missing_positions[j];
+                        results[original_idx] = Some(func_data);
+                        found_count += 1;
+                    }
+                }
+                debug!("upstream: server {} returned {} functions", server_idx, found_count);
+                METRICS.upstream_fetched.fetch_add(found_count, std::sync::atomic::Ordering::Relaxed);
+            }
+            Err(e) => {
+                METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                warn!("upstream: server {} ({}:{}) failed: {}", server_idx, up.host, up.port, e);
+                // Continue to next server
+            }
+        }
+    }
+    
+    Ok(results)
+}
+
+/// Fetch missing items from a single upstream server. Returns vector aligned to `keys`.
+async fn fetch_from_single_upstream(up: &crate::config::Upstream, keys: &[u128]) -> io::Result<Vec<UpItem>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
     
     let batch = up.batch_max.max(1);
     let mut results: Vec<UpItem> = vec![None; keys.len()];

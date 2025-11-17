@@ -292,53 +292,46 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                     }
 
                     // Upstream fetch for remaining misses
-                    if let Some(ref up) = cfg.upstream {
-                        if up.enabled {
-                            let mut missing_keys = Vec::new();
-                            let mut missing_pos = Vec::new();
-                            for (i, (&k, st)) in keys.iter().zip(statuses.iter()).enumerate() {
-                                if k != 0 && *st == 1 {
-                                    missing_keys.push(k);
-                                    missing_pos.push(i);
-                                }
+                    if !cfg.upstreams.is_empty() {
+                        let mut missing_keys = Vec::new();
+                        let mut missing_pos = Vec::new();
+                        for (i, (&k, st)) in keys.iter().zip(statuses.iter()).enumerate() {
+                            if k != 0 && *st == 1 {
+                                missing_keys.push(k);
+                                missing_pos.push(i);
                             }
-                            if !missing_keys.is_empty() {
-                                METRICS.upstream_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                match crate::upstream::fetch_from_upstream(up.clone(), &missing_keys).await {
-                                Ok(fetched) => {
-                                    let mut new_inserts_owned: Vec<(u128, u32, u32, String, Vec<u8>)> = Vec::new();
-                                    let mut found_count = 0u64;
-                                    for (j, item) in fetched.into_iter().enumerate() {
-                                        let idx = missing_pos[j];
-                                        if let Some((pop, len, name, data)) = item {
-                                            statuses[idx] = 0;
-                                            new_inserts_owned.push((missing_keys[j], pop, len, name.clone(), data.clone()));
-                                            maybe_funcs[idx] = Some((pop, len, name, data));
-                                            found_count += 1;
-                                        }
+                        }
+                        if !missing_keys.is_empty() {
+                            match crate::upstream::fetch_from_upstreams(&cfg.upstreams, &missing_keys).await {
+                            Ok(fetched) => {
+                                let mut new_inserts_owned: Vec<(u128, u32, u32, String, Vec<u8>)> = Vec::new();
+                                for (j, item) in fetched.into_iter().enumerate() {
+                                    let idx = missing_pos[j];
+                                    if let Some((pop, len, name, data)) = item {
+                                        statuses[idx] = 0;
+                                        new_inserts_owned.push((missing_keys[j], pop, len, name.clone(), data.clone()));
+                                        maybe_funcs[idx] = Some((pop, len, name, data));
                                     }
-                                    let new_inserts: Vec<(u128, u32, u32, &str, &[u8])> = new_inserts_owned.iter()
-                                        .map(|(k, p, l, n, d)| (*k, *p, *l, n.as_str(), d.as_slice()))
-                                        .collect();
-                                        if !new_inserts.is_empty() {
-                                            match db.push(&new_inserts).await {
-                                                Ok(st) => {
-                                                    let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
-                                                    let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
-                                                    METRICS.pushes.fetch_add((new_funcs + updated_funcs) as u64, std::sync::atomic::Ordering::Relaxed);
-                                                    METRICS.new_funcs.fetch_add(new_funcs, std::sync::atomic::Ordering::Relaxed);
-                                                }
-                                                Err(e) => {
-                                                    error!("db push after upstream: {}", e);
-                                                }
+                                }
+                                let new_inserts: Vec<(u128, u32, u32, &str, &[u8])> = new_inserts_owned.iter()
+                                    .map(|(k, p, l, n, d)| (*k, *p, *l, n.as_str(), d.as_slice()))
+                                    .collect();
+                                    if !new_inserts.is_empty() {
+                                        match db.push(&new_inserts).await {
+                                            Ok(st) => {
+                                                let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
+                                                let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
+                                                METRICS.pushes.fetch_add((new_funcs + updated_funcs) as u64, std::sync::atomic::Ordering::Relaxed);
+                                                METRICS.new_funcs.fetch_add(new_funcs, std::sync::atomic::Ordering::Relaxed);
+                                            }
+                                            Err(e) => {
+                                                error!("db push after upstream: {}", e);
                                             }
                                         }
-                                        METRICS.upstream_fetched.fetch_add(found_count, std::sync::atomic::Ordering::Relaxed);
                                     }
-                                    Err(e) => {
-                                        METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                        warn!("upstream pull failed: {}", e);
-                                    }
+                                }
+                                Err(e) => {
+                                    warn!("upstream pull failed: {}", e);
                                 }
                             }
                         }
@@ -517,53 +510,46 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 }
 
                 // Upstream fetch for misses
-                if let Some(ref up) = cfg.upstream {
-                    if up.enabled {
-                        let mut missing_keys = Vec::new();
-                        let mut missing_pos = Vec::new();
-                        for (i, (&k, st)) in keys.iter().zip(statuses.iter()).enumerate() {
-                            if *st == 1 {
-                                missing_keys.push(k);
-                                missing_pos.push(i);
-                            }
+                if !cfg.upstreams.is_empty() {
+                    let mut missing_keys = Vec::new();
+                    let mut missing_pos = Vec::new();
+                    for (i, (&k, st)) in keys.iter().zip(statuses.iter()).enumerate() {
+                        if *st == 1 {
+                            missing_keys.push(k);
+                            missing_pos.push(i);
                         }
-                        if !missing_keys.is_empty() {
-                            METRICS.upstream_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            match crate::upstream::fetch_from_upstream(up.clone(), &missing_keys).await {
-                            Ok(fetched) => {
-                                let mut new_inserts_owned: Vec<(u128, u32, u32, String, Vec<u8>)> = Vec::new();
-                                let mut found_count = 0u64;
-                                for (j, item) in fetched.into_iter().enumerate() {
-                                    let idx = missing_pos[j];
-                                    if let Some((pop, len, name, data)) = item {
-                                        statuses[idx] = 0;
-                                        new_inserts_owned.push((missing_keys[j], pop, len, name.clone(), data.clone()));
-                                        maybe_funcs[idx] = Some((pop, len, name, data));
-                                        found_count += 1;
-                                    }
+                    }
+                    if !missing_keys.is_empty() {
+                        match crate::upstream::fetch_from_upstreams(&cfg.upstreams, &missing_keys).await {
+                        Ok(fetched) => {
+                            let mut new_inserts_owned: Vec<(u128, u32, u32, String, Vec<u8>)> = Vec::new();
+                            for (j, item) in fetched.into_iter().enumerate() {
+                                let idx = missing_pos[j];
+                                if let Some((pop, len, name, data)) = item {
+                                    statuses[idx] = 0;
+                                    new_inserts_owned.push((missing_keys[j], pop, len, name.clone(), data.clone()));
+                                    maybe_funcs[idx] = Some((pop, len, name, data));
                                 }
-                                let new_inserts: Vec<(u128, u32, u32, &str, &[u8])> = new_inserts_owned.iter()
-                                    .map(|(k, p, l, n, d)| (*k, *p, *l, n.as_str(), d.as_slice()))
-                                    .collect();
-                                if !new_inserts_owned.is_empty() {
-                                        match db.push(&new_inserts).await {
-                                            Ok(st) => {
-                                                let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
-                                                let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
-                                                METRICS.pushes.fetch_add((new_funcs + updated_funcs) as u64, std::sync::atomic::Ordering::Relaxed);
-                                                METRICS.new_funcs.fetch_add(new_funcs, std::sync::atomic::Ordering::Relaxed);
-                                            }
-                                            Err(e) => {
-                                                error!("db push after upstream: {}", e);
-                                            }
+                            }
+                            let new_inserts: Vec<(u128, u32, u32, &str, &[u8])> = new_inserts_owned.iter()
+                                .map(|(k, p, l, n, d)| (*k, *p, *l, n.as_str(), d.as_slice()))
+                                .collect();
+                            if !new_inserts_owned.is_empty() {
+                                    match db.push(&new_inserts).await {
+                                        Ok(st) => {
+                                            let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
+                                            let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
+                                            METRICS.pushes.fetch_add((new_funcs + updated_funcs) as u64, std::sync::atomic::Ordering::Relaxed);
+                                            METRICS.new_funcs.fetch_add(new_funcs, std::sync::atomic::Ordering::Relaxed);
+                                        }
+                                        Err(e) => {
+                                            error!("db push after upstream: {}", e);
                                         }
                                     }
-                                    METRICS.upstream_fetched.fetch_add(found_count, std::sync::atomic::Ordering::Relaxed);
                                 }
-                                Err(e) => {
-                                    METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    warn!("upstream pull failed: {}", e);
-                                }
+                            }
+                            Err(e) => {
+                                warn!("upstream pull failed: {}", e);
                             }
                         }
                     }
