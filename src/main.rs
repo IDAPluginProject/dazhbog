@@ -1,22 +1,22 @@
 #![deny(clippy::all)]
 #![warn(unused_crate_dependencies)]
 
-mod config;
 mod codec;
-mod rpc;
-mod engine;
+mod config;
 mod db;
-mod server;
+mod engine;
 mod http;
-mod metrics;
-mod util;
 mod lumina;
+mod metrics;
+mod rpc;
+mod server;
 mod upstream;
+mod util;
 
-use crate::server::serve_binary_rpc;
-use crate::http::serve_http;
 use crate::config::Config;
+use crate::http::serve_http;
 use crate::metrics::METRICS;
+use crate::server::serve_binary_rpc;
 
 use log::*;
 use std::sync::Arc;
@@ -56,7 +56,9 @@ fn print_help() {
     println!("  max_data_bytes = 8388608                   # Max size of data field (8MB)");
     println!("  per_connection_inflight_bytes = 33554432   # Per-connection memory limit (32MB)");
     println!("  global_inflight_bytes = 536870912          # Global memory limit (512MB)");
-    println!("  lumina_max_cstr_bytes = 4096               # Max C-string length in Lumina protocol");
+    println!(
+        "  lumina_max_cstr_bytes = 4096               # Max C-string length in Lumina protocol"
+    );
     println!("  lumina_max_hash_bytes = 64                 # Max hash length\n");
     println!("[engine] - Storage engine configuration");
     println!("  data_dir = \"data\"                          # Data directory path");
@@ -79,7 +81,9 @@ fn print_help() {
     println!("  use_tls = false                            # Enable TLS\n");
     println!("[tls] - TLS configuration (when lumina.use_tls = true)");
     println!("  pkcs12_path = \"\"                           # Path to PKCS12 certificate file");
-    println!("  env_password_var = \"PKCSPASSWD\"            # Environment variable for PKCS12 password");
+    println!(
+        "  env_password_var = \"PKCSPASSWD\"            # Environment variable for PKCS12 password"
+    );
     println!("  min_protocol_sslv3 = true                  # Allow SSLv3 as minimum protocol\n");
     println!("[http] - HTTP API server configuration");
     println!("  bind_addr = \"127.0.0.1:8080\"               # HTTP server bind address\n");
@@ -134,12 +138,10 @@ async fn main() {
 }
 
 async fn run_server(cfg: Arc<Config>) {
-    let db = db::Database::open(cfg.clone())
-        .await
-        .unwrap_or_else(|e| {
-            eprintln!("failed to open storage: {e}");
-            std::process::exit(1);
-        });
+    let db = db::Database::open(cfg.clone()).await.unwrap_or_else(|e| {
+        eprintln!("failed to open storage: {e}");
+        std::process::exit(1);
+    });
 
     let http_task = {
         let cfg = cfg.clone();
@@ -158,10 +160,14 @@ async fn run_server(cfg: Arc<Config>) {
     };
 
     info!("dazhbog server started; press Ctrl-C to stop.");
-    tokio::signal::ctrl_c().await.expect("failed to install Ctrl-C handler");
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install Ctrl-C handler");
     info!("shutting down...");
 
-    METRICS.shutting_down.store(true, std::sync::atomic::Ordering::Relaxed);
+    METRICS
+        .shutting_down
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 
     rpc_task.abort();
     http_task.abort();

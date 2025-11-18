@@ -49,14 +49,20 @@ fn main() -> io::Result<()> {
 
     let tree_name = "seg.00001";
     println!("Opening tree: {}", tree_name);
-    let tree = db.open_tree(tree_name)
+    let tree = db
+        .open_tree(tree_name)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {}", e)))?;
 
     let first_item = tree.iter().next();
 
     let record_bytes = match first_item {
         Some(Ok((_, val))) => val,
-        Some(Err(e)) => return Err(io::Error::new(io::ErrorKind::Other, format!("sled iter: {}", e))),
+        Some(Err(e)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("sled iter: {}", e),
+            ))
+        }
         None => {
             eprintln!("Tree {} is empty or could not read first item.", tree_name);
             return Ok(());
@@ -81,8 +87,24 @@ fn main() -> io::Result<()> {
     let computed_table = crc::crc32c_table(0, body);
 
     println!("Stored CRC:      0x{:08x}", stored_crc);
-    println!("Computed inline: 0x{:08x} {}", computed_inline, if stored_crc == computed_inline {"✓"} else {"✗"});
-    println!("Computed table:  0x{:08x} {}", computed_table, if stored_crc == computed_table {"✓"} else {"✗"});
+    println!(
+        "Computed inline: 0x{:08x} {}",
+        computed_inline,
+        if stored_crc == computed_inline {
+            "✓"
+        } else {
+            "✗"
+        }
+    );
+    println!(
+        "Computed table:  0x{:08x} {}",
+        computed_table,
+        if stored_crc == computed_table {
+            "✓"
+        } else {
+            "✗"
+        }
+    );
 
     Ok(())
 }

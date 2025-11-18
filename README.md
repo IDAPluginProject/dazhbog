@@ -43,6 +43,7 @@ export LUMINA_TLS=false
 *   **Embedded Storage:** Uses sled embedded databases for both segment storage and indexing—no external database required
 *   **Full Lumina Protocol Support:** Compatible with IDA Pro 7.2+ (protocol versions 0-6)
 *   **Sled-Backed Index:** Persistent key-value index with automatic recovery and efficient lookups
+*   **Context-Aware Scoring:** Intelligent version selection based on binary context, function co-occurrence, and historical patterns
 *   **Append-Only Segments:** Immutable segment storage with CRC32C integrity validation and backward compatibility
 *   **Function History:** Complete revision history via `prev_addr` linked lists
 *   **Upstream Forwarding:** Multi-server upstream support with priority-based fallback for cache-miss scenarios
@@ -53,9 +54,9 @@ export LUMINA_TLS=false
 
 ### Architecture
 
-`dazhbog` is built around three core components:
+`dazhbog` is built around four core components:
 
-1.  **Storage Engine** - Sled-backed append-only segments with persistent index
+1.  **Storage Engine** - Sled-backed append-only segments with persistent index and context tracking
 2.  **RPC Server** - Lumina protocol TCP server with TLS support and multi-protocol handshake detection
 3.  **HTTP Server** - Metrics and monitoring interface
 4.  **Upstream Forwarding** - Optional proxy layer with priority-based multi-server support
@@ -95,6 +96,17 @@ The storage engine uses **sled** (an embedded key-value database) for both segme
 *   Automatic rebuild from segments if empty (on first startup)
 *   Legacy index files (`wal.dat`, `sst.*.ldb`) automatically migrated to `.legacy_index_*` backup
 
+#### Context Index (sled-backed)
+
+The context index tracks relationships between functions, binaries, and versions to enable intelligent version selection:
+
+*   **Per-Key Binary Tracking:** Maps each function key to the top-N binary MD5s that contain it (ranked by observation count)
+*   **Per-Version Statistics:** Tracks total observations, first/last seen timestamps, and associated binary MD5s for each version
+*   **Binary Metadata:** Records basename, hostname, first/last seen timestamps, and observation counts for each binary
+*   **Key-Binary-Version Links:** Maintains statistics on how often each (key, binary MD5) pair maps to specific versions
+*   **Automatic Population:** Context is recorded during push operations and queried during pulls
+*   **Configurable Limits:** Top-16 binaries per key and per version (configurable)
+
 #### History Tracking
 
 Each record's `prev_addr` field points to the previous version:
@@ -103,6 +115,45 @@ Index → Latest (v3) → Older (v2) → Oldest (v1) → NULL
 ```
 
 History queries traverse this chain up to `lumina.get_history_limit`.
+
+### Context-Aware Scoring
+
+When multiple versions of a function exist, `dazhbog` uses a weighted scoring system to select the most relevant version based on the query context:
+
+#### Scoring Signals
+
+1.  **Binary MD5 Match (s_md5):** Exact binary match—returns 1.0 if this version was last seen in the querying binary
+2.  **Basename Similarity (s_name):** String similarity between query binary name and version's associated binaries (suffix matching)
+3.  **Co-occurrence (s_coh):** Probability that this version appears in binaries containing the other queried functions (P(md5|Q))
+4.  **Stability (s_stab):** Total observations of this version relative to the most-observed version
+5.  **Recency (s_rec):** How recently this version was created (0.0 = oldest, 1.0 = newest)
+6.  **Binary Popularity (s_pop_bin):** Number of distinct binaries containing this version (log-normalized)
+7.  **Hostname Match (s_host):** Reserved for future hostname-based scoring (currently 0.0)
+8.  **Origin Match (s_origin):** Reserved for future origin-based scoring (currently 0.0)
+
+#### Scoring Formula
+
+```
+score = w_md5 × s_md5 + w_name × s_name + w_coh × s_coh + w_stab × s_stab
+      + w_rec × s_rec + w_pop_bin × s_pop_bin + w_host × s_host + w_origin × s_origin
+```
+
+**Default Weights:**
+*   `w_md5 = 2.0` (strong preference for exact binary match)
+*   `w_name = 1.0` (moderate preference for basename similarity)
+*   `w_coh = 2.0` (strong preference for co-occurring functions)
+*   `w_stab = 0.5` (light preference for frequently-observed versions)
+*   `w_rec = 0.5` (light preference for newer versions)
+*   `w_pop_bin = 0.5` (light preference for versions in many binaries)
+*   `w_host = 0.25`, `w_origin = 0.25` (reserved)
+
+#### Tiebreaking
+
+When scores are equal (within 1e-12), versions are ranked by: MD5 match → co-occurrence → stability → recency
+
+#### Fallback Behavior
+
+If the context index is empty (e.g., on first query after server start), `dazhbog` falls back to returning the latest version for each key without scoring.
 
 #### Tombstones
 
@@ -206,6 +257,19 @@ engine.deduplicate_on_startup = false  # Set true to deduplicate on startup (slo
 engine.index_memtable_max_entries = 200000
 engine.index_block_entries = 128
 engine.index_level0_compact_trigger = 8
+
+# Context-aware scoring configuration
+scoring.w_md5 = 2.0              # Weight for binary MD5 match
+scoring.w_name = 1.0             # Weight for basename similarity
+scoring.w_coh = 2.0              # Weight for function co-occurrence
+scoring.w_stab = 0.5             # Weight for version stability
+scoring.w_rec = 0.5              # Weight for recency
+scoring.w_pop_bin = 0.5          # Weight for binary popularity
+scoring.w_host = 0.25            # Weight for hostname match (reserved)
+scoring.w_origin = 0.25          # Weight for origin match (reserved)
+scoring.max_versions_per_key = 16    # Max version history to consider per key
+scoring.max_md5_per_key = 16         # Max binaries tracked per key
+scoring.max_md5_per_version = 16     # Max binaries tracked per version
 
 # Lumina protocol server
 lumina.bind_addr = "0.0.0.0:1234"
@@ -325,6 +389,10 @@ The HTTP server exposes Prometheus-compatible metrics at `http://localhost:8080/
 *   `dazhbog_index_overflows_total` - Index insertion failures
 *   `dazhbog_append_failures_total` - Database append failures
 *   `dazhbog_decoder_rejects_total` - Protocol decoder rejections
+*   `dazhbog_scoring_batches` - Number of scoring batch operations
+*   `dazhbog_scoring_versions_considered` - Total versions evaluated during scoring
+*   `dazhbog_scoring_fallback_latest` - Times fallback to latest-version was used
+*   `dazhbog_scoring_time_ns` - Total nanoseconds spent in scoring logic
 
 ### Additional Tools
 

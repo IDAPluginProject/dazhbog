@@ -1,8 +1,8 @@
 // Lumina protocol support for IDA Pro's Lumina plugin
-use log::*;
 use bytes::BytesMut;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use log::*;
 use std::io;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug)]
 pub enum LuminaError {
@@ -68,13 +68,21 @@ fn unpack_dd(data: &[u8]) -> (u32, usize) {
     if data.len() < 4 {
         return (0, 0);
     }
-    let val = (((b & 0x1F) as u32) << 24) | ((data[1] as u32) << 16) | ((data[2] as u32) << 8) | (data[3] as u32);
+    let val = (((b & 0x1F) as u32) << 24)
+        | ((data[1] as u32) << 16)
+        | ((data[2] as u32) << 8)
+        | (data[3] as u32);
     (val, 4)
 }
 
 fn unpack_cstr_capped(data: &[u8], max: usize) -> Result<(String, usize), LuminaError> {
-    let null_pos = data.iter().position(|&b| b == 0).ok_or(LuminaError::UnexpectedEof)?;
-    if null_pos > max { return Err(LuminaError::InvalidData); }
+    let null_pos = data
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or(LuminaError::UnexpectedEof)?;
+    if null_pos > max {
+        return Err(LuminaError::InvalidData);
+    }
     let s = std::str::from_utf8(&data[..null_pos]).map_err(|_| LuminaError::InvalidData)?;
     Ok((s.to_string(), null_pos + 1))
 }
@@ -90,7 +98,7 @@ fn pack_dd(v: u32) -> Vec<u8> {
             out.extend_from_slice(&[0xff]);
             out.extend_from_slice(&bytes);
             out
-        },
+        }
     }
 }
 
@@ -111,7 +119,9 @@ fn unpack_var_bytes_capped(data: &[u8], max_len: usize) -> Result<(&[u8], usize)
         return Err(LuminaError::UnexpectedEof);
     }
     let len = len as usize;
-    if len > max_len { return Err(LuminaError::InvalidData); }
+    if len > max_len {
+        return Err(LuminaError::InvalidData);
+    }
     let data = &data[consumed..];
     if data.len() < len {
         return Err(LuminaError::UnexpectedEof);
@@ -131,18 +141,24 @@ pub fn pack_var_bytes(bytes: &[u8]) -> Vec<u8> {
 pub fn parse_lumina_hello(payload: &[u8]) -> Result<LuminaHello, LuminaError> {
     let mut offset = 0;
     let (protocol_version, consumed) = unpack_dd(&payload[offset..]);
-    if consumed == 0 { return Err(LuminaError::UnexpectedEof); }
+    if consumed == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += consumed;
     debug!("Lumina Hello: protocol_version={}", protocol_version);
 
     let (_license_data, consumed) = unpack_var_bytes_capped(&payload[offset..], 16384)?;
     offset += consumed;
 
-    if payload.len() < offset + 6 { return Err(LuminaError::UnexpectedEof); }
+    if payload.len() < offset + 6 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += 6;
 
     let (_unk2, consumed) = unpack_dd(&payload[offset..]);
-    if consumed == 0 { return Err(LuminaError::UnexpectedEof); }
+    if consumed == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += consumed;
 
     let (username, password) = if protocol_version > 2 && offset < payload.len() {
@@ -160,7 +176,11 @@ pub fn parse_lumina_hello(payload: &[u8]) -> Result<LuminaHello, LuminaError> {
         ("guest".to_string(), String::new())
     };
 
-    Ok(LuminaHello { protocol_version, username, password })
+    Ok(LuminaHello {
+        protocol_version,
+        username,
+        password,
+    })
 }
 
 pub struct LuminaPullMetadataFunc {
@@ -205,28 +225,39 @@ pub struct LuminaGetFuncHistories {
     pub unk0: u32,
 }
 
-pub fn parse_lumina_pull_metadata(payload: &[u8], caps: LuminaCaps) -> Result<LuminaPullMetadata, LuminaError> {
+pub fn parse_lumina_pull_metadata(
+    payload: &[u8],
+    caps: LuminaCaps,
+) -> Result<LuminaPullMetadata, LuminaError> {
     let mut offset = 0;
     debug!("parse_lumina_pull_metadata: payload len={}", payload.len());
 
     let (unk0, consumed) = unpack_dd(&payload[offset..]);
-    if consumed == 0 { return Err(LuminaError::UnexpectedEof); }
+    if consumed == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += consumed;
 
     let (count1, consumed) = unpack_dd(&payload[offset..]);
-    if consumed == 0 { return Err(LuminaError::UnexpectedEof); }
+    if consumed == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += consumed;
 
     let mut unk1 = Vec::with_capacity((count1 as usize).min(1024));
     for _ in 0..count1 {
         let (v, c) = unpack_dd(&payload[offset..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         offset += c;
         unk1.push(v);
     }
 
     let (count_funcs, consumed) = unpack_dd(&payload[offset..]);
-    if consumed == 0 { return Err(LuminaError::UnexpectedEof); }
+    if consumed == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += consumed;
 
     let n = (count_funcs as usize).min(caps.max_funcs);
@@ -234,26 +265,36 @@ pub fn parse_lumina_pull_metadata(payload: &[u8], caps: LuminaCaps) -> Result<Lu
 
     for i in 0..count_funcs {
         let (func_unk0, c) = unpack_dd(&payload[offset..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         offset += c;
 
         let (hash, c) = unpack_var_bytes_capped(&payload[offset..], caps.max_hash_bytes)?;
         offset += c;
 
         if (i as usize) < n {
-            funcs.push(LuminaPullMetadataFunc { unk0: func_unk0, mb_hash: hash.to_vec() });
+            funcs.push(LuminaPullMetadataFunc {
+                unk0: func_unk0,
+                mb_hash: hash.to_vec(),
+            });
         }
     }
 
     Ok(LuminaPullMetadata { unk0, unk1, funcs })
 }
 
-pub fn parse_lumina_push_metadata(payload: &[u8], caps: LuminaCaps) -> Result<LuminaPushMetadata, LuminaError> {
+pub fn parse_lumina_push_metadata(
+    payload: &[u8],
+    caps: LuminaCaps,
+) -> Result<LuminaPushMetadata, LuminaError> {
     let mut offset = 0;
     debug!("parse_lumina_push_metadata: payload len={}", payload.len());
 
     let (unk0, consumed) = unpack_dd(&payload[offset..]);
-    if consumed == 0 { return Err(LuminaError::UnexpectedEof); }
+    if consumed == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += consumed;
 
     let (idb_path, c) = unpack_cstr_capped(&payload[offset..], caps.max_cstr_bytes)?;
@@ -262,20 +303,28 @@ pub fn parse_lumina_push_metadata(payload: &[u8], caps: LuminaCaps) -> Result<Lu
     let (file_path, c) = unpack_cstr_capped(&payload[offset..], caps.max_cstr_bytes)?;
     offset += c;
 
-    if payload.len() < offset + 16 { return Err(LuminaError::UnexpectedEof); }
+    if payload.len() < offset + 16 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     let mut md5 = [0u8; 16];
-    md5.copy_from_slice(&payload[offset..offset+16]);
+    md5.copy_from_slice(&payload[offset..offset + 16]);
     offset += 16;
 
     let (hostname, c) = unpack_cstr_capped(&payload[offset..], caps.max_cstr_bytes)?;
     offset += c;
 
     let (count_funcs, c) = unpack_dd(&payload[offset..]);
-    if c == 0 { return Err(LuminaError::UnexpectedEof); }
+    if c == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += c;
 
     if count_funcs as usize > caps.max_funcs {
-        log::warn!("Push request contains {} functions but limit is {}", count_funcs, caps.max_funcs);
+        log::warn!(
+            "Push request contains {} functions but limit is {}",
+            count_funcs,
+            caps.max_funcs
+        );
         return Err(LuminaError::InvalidData);
     }
 
@@ -287,26 +336,36 @@ pub fn parse_lumina_push_metadata(payload: &[u8], caps: LuminaCaps) -> Result<Lu
         offset += c;
 
         let (func_len, c) = unpack_dd(&payload[offset..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         offset += c;
 
         let (func_data, c) = unpack_var_bytes_capped(&payload[offset..], caps.max_data_bytes)?;
         offset += c;
 
         let (unk2, c) = unpack_dd(&payload[offset..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         offset += c;
 
         let (hash, c) = unpack_var_bytes_capped(&payload[offset..], caps.max_hash_bytes)?;
         offset += c;
 
         funcs.push(LuminaPushMetadataFunc {
-            name, func_len, func_data: func_data.to_vec(), unk2, hash: hash.to_vec(),
+            name,
+            func_len,
+            func_data: func_data.to_vec(),
+            unk2,
+            hash: hash.to_vec(),
         });
     }
 
     let (count_u64, c) = unpack_dd(&payload[offset..]);
-    if c == 0 { return Err(LuminaError::UnexpectedEof); }
+    if c == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += c;
 
     let cap_u64s = 4096usize.min(count_u64 as usize);
@@ -314,11 +373,15 @@ pub fn parse_lumina_push_metadata(payload: &[u8], caps: LuminaCaps) -> Result<Lu
 
     for i in 0..count_u64 {
         let (low, c) = unpack_dd(&payload[offset..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         offset += c;
 
         let (high, c) = unpack_dd(&payload[offset..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         offset += c;
 
         if (i as usize) < cap_u64s {
@@ -327,15 +390,26 @@ pub fn parse_lumina_push_metadata(payload: &[u8], caps: LuminaCaps) -> Result<Lu
     }
 
     Ok(LuminaPushMetadata {
-        unk0, idb_path, file_path, md5, hostname, funcs, unk1,
+        unk0,
+        idb_path,
+        file_path,
+        md5,
+        hostname,
+        funcs,
+        unk1,
     })
 }
 
-pub fn parse_lumina_get_func_histories(payload: &[u8], caps: LuminaCaps) -> Result<LuminaGetFuncHistories, LuminaError> {
+pub fn parse_lumina_get_func_histories(
+    payload: &[u8],
+    caps: LuminaCaps,
+) -> Result<LuminaGetFuncHistories, LuminaError> {
     let mut offset = 0;
 
     let (count, c) = unpack_dd(&payload[offset..]);
-    if c == 0 { return Err(LuminaError::UnexpectedEof); }
+    if c == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     offset += c;
 
     let n = (count as usize).min(caps.max_funcs);
@@ -343,14 +417,19 @@ pub fn parse_lumina_get_func_histories(payload: &[u8], caps: LuminaCaps) -> Resu
 
     for i in 0..count {
         let (func_unk0, c) = unpack_dd(&payload[offset..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         offset += c;
 
         let (hash, c) = unpack_var_bytes_capped(&payload[offset..], caps.max_hash_bytes)?;
         offset += c;
 
         if (i as usize) < n {
-            funcs.push(LuminaPullMetadataFunc { unk0: func_unk0, mb_hash: hash.to_vec() });
+            funcs.push(LuminaPullMetadataFunc {
+                unk0: func_unk0,
+                mb_hash: hash.to_vec(),
+            });
         }
     }
 
@@ -360,7 +439,14 @@ pub fn parse_lumina_get_func_histories(payload: &[u8], caps: LuminaCaps) -> Resu
 }
 
 /// Build a Lumina Hello payload (client-side)
-pub fn build_lumina_hello_payload(protocol_version: u32, license_data: &[u8], lic_number: [u8;6], username: &str, password: &str, unk2: u32) -> Vec<u8> {
+pub fn build_lumina_hello_payload(
+    protocol_version: u32,
+    license_data: &[u8],
+    lic_number: [u8; 6],
+    username: &str,
+    password: &str,
+    unk2: u32,
+) -> Vec<u8> {
     let mut payload = BytesMut::new();
     payload.extend_from_slice(&pack_dd(protocol_version));
     payload.extend_from_slice(&pack_dd(license_data.len() as u32));
@@ -377,7 +463,7 @@ pub fn build_lumina_hello_payload(protocol_version: u32, license_data: &[u8], li
 }
 
 /// Build PullMetadata payload for a set of 16-byte hashes (client-side)
-pub fn build_pull_metadata_payload(hashes_be: &[[u8;16]]) -> Vec<u8> {
+pub fn build_pull_metadata_payload(hashes_be: &[[u8; 16]]) -> Vec<u8> {
     let mut payload = BytesMut::new();
     payload.extend_from_slice(&pack_dd(0));
     payload.extend_from_slice(&pack_dd(0));
@@ -393,12 +479,20 @@ pub fn build_pull_metadata_payload(hashes_be: &[[u8;16]]) -> Vec<u8> {
 }
 
 /// Read a legacy Lumina packet (client-side)
-pub async fn read_lumina_packet<R: AsyncReadExt + Unpin>(r: &mut R, max_len: usize) -> io::Result<(u8, Vec<u8>)> {
-    let mut lenb = [0u8;4];
+pub async fn read_lumina_packet<R: AsyncReadExt + Unpin>(
+    r: &mut R,
+    max_len: usize,
+) -> io::Result<(u8, Vec<u8>)> {
+    let mut lenb = [0u8; 4];
     r.read_exact(&mut lenb).await?;
     let len = u32::from_be_bytes(lenb) as usize;
-    if len > max_len { return Err(io::Error::new(io::ErrorKind::InvalidData, "remote frame too large")); }
-    let mut typb = [0u8;1];
+    if len > max_len {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "remote frame too large",
+        ));
+    }
+    let mut typb = [0u8; 1];
     r.read_exact(&mut typb).await?;
     let mut payload = vec![0u8; len];
     r.read_exact(&mut payload).await?;
@@ -408,9 +502,14 @@ pub async fn read_lumina_packet<R: AsyncReadExt + Unpin>(r: &mut R, max_len: usi
 /// Decode Fail message payload (0x0b): returns (code, message)
 pub fn decode_lumina_fail(payload: &[u8]) -> Result<(u32, String), LuminaError> {
     let (code, consumed) = unpack_dd(payload);
-    if consumed == 0 { return Err(LuminaError::UnexpectedEof); }
+    if consumed == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     let msg_bytes = &payload[consumed..];
-    let null_pos = msg_bytes.iter().position(|&b| b == 0).unwrap_or(msg_bytes.len());
+    let null_pos = msg_bytes
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(msg_bytes.len());
     let message = std::str::from_utf8(&msg_bytes[..null_pos])
         .unwrap_or("<invalid utf8>")
         .to_string();
@@ -418,42 +517,63 @@ pub fn decode_lumina_fail(payload: &[u8]) -> Result<(u32, String), LuminaError> 
 }
 
 /// Decode PullResult payload (0x0f): returns (statuses, funcs)
-pub fn decode_lumina_pull_result(payload: &[u8]) -> Result<(Vec<u32>, Vec<(u32,u32,String,Vec<u8>)>), LuminaError> {
+pub fn decode_lumina_pull_result(
+    payload: &[u8],
+) -> Result<(Vec<u32>, Vec<(u32, u32, String, Vec<u8>)>), LuminaError> {
     let mut off = 0usize;
     let (n_status, c) = unpack_dd(&payload[off..]);
-    if c == 0 { return Err(LuminaError::UnexpectedEof); }
+    if c == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     off += c;
     let mut statuses = Vec::with_capacity(n_status as usize);
     for _ in 0..n_status {
         let (s, c) = unpack_dd(&payload[off..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         off += c;
         statuses.push(s);
     }
     let (n_funcs, c) = unpack_dd(&payload[off..]);
-    if c == 0 { return Err(LuminaError::UnexpectedEof); }
+    if c == 0 {
+        return Err(LuminaError::UnexpectedEof);
+    }
     off += c;
 
     let mut funcs = Vec::with_capacity(n_funcs as usize);
     for _ in 0..n_funcs {
         // cstr name
         let (name, _c) = {
-            let null_pos = payload[off..].iter().position(|&b| b == 0).ok_or(LuminaError::UnexpectedEof)?;
-            let s = std::str::from_utf8(&payload[off..off+null_pos]).map_err(|_| LuminaError::InvalidData)?.to_string();
+            let null_pos = payload[off..]
+                .iter()
+                .position(|&b| b == 0)
+                .ok_or(LuminaError::UnexpectedEof)?;
+            let s = std::str::from_utf8(&payload[off..off + null_pos])
+                .map_err(|_| LuminaError::InvalidData)?
+                .to_string();
             off += null_pos + 1;
             (s, null_pos + 1)
         };
         let (decl_len, c) = unpack_dd(&payload[off..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         off += c;
         let (meta_len, c) = unpack_dd(&payload[off..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         off += c;
-        if payload.len() < off + (meta_len as usize) { return Err(LuminaError::UnexpectedEof); }
-        let data = payload[off..off+(meta_len as usize)].to_vec();
+        if payload.len() < off + (meta_len as usize) {
+            return Err(LuminaError::UnexpectedEof);
+        }
+        let data = payload[off..off + (meta_len as usize)].to_vec();
         off += meta_len as usize;
         let (pop, c) = unpack_dd(&payload[off..]);
-        if c == 0 { return Err(LuminaError::UnexpectedEof); }
+        if c == 0 {
+            return Err(LuminaError::UnexpectedEof);
+        }
         off += c;
         funcs.push((pop, decl_len, name, data));
     }
@@ -468,7 +588,10 @@ pub async fn write_lumina_packet<W: AsyncWriteExt + Unpin>(
 ) -> io::Result<()> {
     let len = payload.len() as u32;
     let len_bytes = len.to_be_bytes();
-    debug!("write_lumina_packet: type=0x{:02x}, payload_len={}", msg_type, len);
+    debug!(
+        "write_lumina_packet: type=0x{:02x}, payload_len={}",
+        msg_type, len
+    );
     w.write_all(&len_bytes).await?;
     w.write_u8(msg_type).await?;
     w.write_all(payload).await?;
@@ -604,7 +727,10 @@ mod tests {
 
     #[test]
     fn test_unpack_cstr_capped() {
-        assert_eq!(unpack_cstr_capped(b"hello\0", 16).unwrap(), ("hello".to_string(), 6));
+        assert_eq!(
+            unpack_cstr_capped(b"hello\0", 16).unwrap(),
+            ("hello".to_string(), 6)
+        );
         assert!(unpack_cstr_capped(b"no null terminator", 64).is_err());
         assert!(unpack_cstr_capped(&[b'a'; 10_000], 1024).is_err());
     }
@@ -612,7 +738,7 @@ mod tests {
     #[test]
     fn test_decode_pull_result_roundtrip() {
         // Build a synthetic payload using the encoder and decode it back.
-        let funcs = vec![(10u32, 4u32, "name".to_string(), vec![1,2,3,4])];
+        let funcs = vec![(10u32, 4u32, "name".to_string(), vec![1, 2, 3, 4])];
         let statuses = vec![0u32];
         let mut buf = Vec::new();
         tokio_test::block_on(async {
@@ -630,7 +756,9 @@ mod tests {
         });
         let mut final_payload = Vec::new();
         final_payload.extend_from_slice(&pack_dd(statuses.len() as u32));
-        for s in &statuses { final_payload.extend_from_slice(&pack_dd(*s)); }
+        for s in &statuses {
+            final_payload.extend_from_slice(&pack_dd(*s));
+        }
         final_payload.extend_from_slice(&buf);
         let (st, ff) = decode_lumina_pull_result(&final_payload).unwrap();
         assert_eq!(st, statuses);
@@ -638,7 +766,7 @@ mod tests {
         assert_eq!(ff[0].0, 10);
         assert_eq!(ff[0].1, 4);
         assert_eq!(ff[0].2, "name");
-        assert_eq!(ff[0].3, vec![1,2,3,4]);
+        assert_eq!(ff[0].3, vec![1, 2, 3, 4]);
     }
 
     #[test]

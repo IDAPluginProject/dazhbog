@@ -1,9 +1,9 @@
-use crate::engine::{EngineRuntime, Record, UpsertResult, IndexError};
 use crate::config::Config;
+use crate::engine::{EngineRuntime, IndexError, Record, UpsertResult};
 use crate::util::{addr_off, addr_seg};
 
-use std::{io, sync::Arc};
 use std::collections::{HashMap, HashSet};
+use std::{io, sync::Arc};
 
 #[derive(Clone)]
 pub struct Database {
@@ -42,12 +42,20 @@ impl Database {
 
     pub async fn get_latest(&self, key: u128) -> io::Result<Option<FuncLatest>> {
         let addr = self.rt.index.get(key);
-        if addr == 0 { return Ok(None); }
+        if addr == 0 {
+            return Ok(None);
+        }
         let seg_id = addr_seg(addr);
         let off = addr_off(addr);
-        let reader = self.rt.segments.get_reader(seg_id).ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "segment not found"))?;
+        let reader = self
+            .rt
+            .segments
+            .get_reader(seg_id)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "segment not found"))?;
         let rec = reader.read_at(off)?;
-        if rec.flags & 0x01 == 0x01 { return Ok(None); }
+        if rec.flags & 0x01 == 0x01 {
+            return Ok(None);
+        }
         Ok(Some(FuncLatest {
             popularity: rec.popularity,
             len_bytes: rec.len_bytes,
@@ -57,18 +65,32 @@ impl Database {
     }
 
     pub async fn push(&self, items: &[(u128, u32, u32, &str, &[u8])]) -> io::Result<Vec<u32>> {
-        let null_ctx = PushContext { md5: None, basename: None, hostname: None };
+        let null_ctx = PushContext {
+            md5: None,
+            basename: None,
+            hostname: None,
+        };
         self.push_with_ctx(items, &null_ctx).await
     }
 
-    pub async fn push_with_ctx(&self, items: &[(u128, u32, u32, &str, &[u8])], ctx: &PushContext<'_>) -> io::Result<Vec<u32>> {
+    pub async fn push_with_ctx(
+        &self,
+        items: &[(u128, u32, u32, &str, &[u8])],
+        ctx: &PushContext<'_>,
+    ) -> io::Result<Vec<u32>> {
         let mut status = Vec::with_capacity(items.len());
         for (key, pop, _len_bytes_decl, name, data) in items.iter() {
             if name.len() > u16::MAX as usize {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "name too long (> u16::MAX)"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "name too long (> u16::MAX)",
+                ));
             }
             if data.len() > u32::MAX as usize {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "data large (> u32::MAX)"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "data large (> u32::MAX)",
+                ));
             }
 
             let old = self.rt.index.get(*key);
@@ -86,17 +108,32 @@ impl Database {
                                     if let Some(md5) = ctx.md5 {
                                         let ts = crate::util::now_ts_sec();
                                         let vid = crate::util::version_id(*key, name, data);
-                                        let _ = self.rt.ctx_index.record_binary_meta(md5, ctx.basename.unwrap_or(""), ctx.hostname.unwrap_or(""), ts);
-                                        let _ = self.rt.ctx_index.record_key_observation(*key, md5, Some(vid), ts);
+                                        let _ = self.rt.ctx_index.record_binary_meta(
+                                            md5,
+                                            ctx.basename.unwrap_or(""),
+                                            ctx.hostname.unwrap_or(""),
+                                            ts,
+                                        );
+                                        let _ = self.rt.ctx_index.record_key_observation(
+                                            *key,
+                                            md5,
+                                            Some(vid),
+                                            ts,
+                                        );
                                     }
                                     continue;
                                 }
-                            },
+                            }
                             Err(e) => {
-                                log::warn!("Failed to read existing record at seg={}, off={}: {}", seg_id, off, e);
+                                log::warn!(
+                                    "Failed to read existing record at seg={}, off={}: {}",
+                                    seg_id,
+                                    off,
+                                    e
+                                );
                             }
                         }
-                    },
+                    }
                     None => {
                         log::warn!("Segment {} not found for existing record", seg_id);
                     }
@@ -118,20 +155,35 @@ impl Database {
                 Ok(UpsertResult::Inserted) => status.push(1),
                 Ok(UpsertResult::Replaced(_)) => status.push(0),
                 Err(IndexError::Full) => {
-                    crate::metrics::METRICS.append_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    crate::metrics::METRICS
+                        .append_failures
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     return Err(io::Error::new(io::ErrorKind::Other, "index full"));
                 }
                 Err(IndexError::Io(e)) => {
-                    crate::metrics::METRICS.append_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("index io error: {}", e)));
+                    crate::metrics::METRICS
+                        .append_failures
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("index io error: {}", e),
+                    ));
                 }
             }
 
             if let Some(md5) = ctx.md5 {
                 let ts = rec.ts_sec;
                 let vid = crate::util::version_id(*key, name, data);
-                let _ = self.rt.ctx_index.record_binary_meta(md5, ctx.basename.unwrap_or(""), ctx.hostname.unwrap_or(""), ts);
-                let _ = self.rt.ctx_index.record_key_observation(*key, md5, Some(vid), ts);
+                let _ = self.rt.ctx_index.record_binary_meta(
+                    md5,
+                    ctx.basename.unwrap_or(""),
+                    ctx.hostname.unwrap_or(""),
+                    ts,
+                );
+                let _ = self
+                    .rt
+                    .ctx_index
+                    .record_key_observation(*key, md5, Some(vid), ts);
             }
         }
         Ok(status)
@@ -153,17 +205,29 @@ impl Database {
             };
             let addr = self.rt.segments.append(&rec)?;
             let _ = self.rt.index.upsert(key, addr);
-            if old != 0 { deleted += 1; }
+            if old != 0 {
+                deleted += 1;
+            }
         }
         Ok(deleted)
     }
 
-    pub async fn get_history(&self, key: u128, mut limit: u32) -> io::Result<Vec<(u64,String,Vec<u8>)>> {
-        if limit == 0 { return Ok(vec![]); }
+    pub async fn get_history(
+        &self,
+        key: u128,
+        mut limit: u32,
+    ) -> io::Result<Vec<(u64, String, Vec<u8>)>> {
+        if limit == 0 {
+            return Ok(vec![]);
+        }
         let mut out = Vec::new();
         let mut addr = self.rt.index.get(key);
         while addr != 0 && limit > 0 {
-            let r = self.rt.segments.get_reader(addr_seg(addr)).ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "seg"))?;
+            let r = self
+                .rt
+                .segments
+                .get_reader(addr_seg(addr))
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "seg"))?;
             let rec = r.read_at(addr_off(addr))?;
             if rec.flags & 0x01 == 0 {
                 out.push((rec.ts_sec, rec.name, rec.data));
@@ -174,18 +238,32 @@ impl Database {
         Ok(out)
     }
 
-    pub async fn select_versions_for_batch(&self, ctx: &QueryContext<'_>) -> io::Result<Vec<Option<(u32, u32, String, Vec<u8>)>>> {
+    pub async fn select_versions_for_batch(
+        &self,
+        ctx: &QueryContext<'_>,
+    ) -> io::Result<Vec<Option<(u32, u32, String, Vec<u8>)>>> {
         use std::time::Instant;
-        crate::metrics::METRICS.scoring_batches.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::metrics::METRICS
+            .scoring_batches
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let start = Instant::now();
 
         if self.rt.ctx_index.approx_is_empty() {
-            crate::metrics::METRICS.scoring_fallback_latest.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            crate::metrics::METRICS
+                .scoring_fallback_latest
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut out = Vec::with_capacity(ctx.keys.len());
             for &k in ctx.keys {
-                out.push(self.get_latest(k).await? .map(|f| (f.popularity, f.len_bytes, f.name, f.data)));
+                out.push(
+                    self.get_latest(k)
+                        .await?
+                        .map(|f| (f.popularity, f.len_bytes, f.name, f.data)),
+                );
             }
-            crate::metrics::METRICS.scoring_time_ns.fetch_add(start.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+            crate::metrics::METRICS.scoring_time_ns.fetch_add(
+                start.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
             return Ok(out);
         }
 
@@ -193,7 +271,9 @@ impl Database {
         let mut vote: HashMap<[u8; 16], f64> = HashMap::new();
         for &k in ctx.keys {
             let md5_list = self.rt.ctx_index.get_md5_bins_for_key(k)?;
-            if md5_list.is_empty() { continue; }
+            if md5_list.is_empty() {
+                continue;
+            }
             let df = md5_list.len() as f64;
             let w_k = 1.0f64 / (1.0 + (1.0 + df).ln());
             for e in md5_list.into_iter() {
@@ -246,7 +326,12 @@ impl Database {
             }
             if versions.len() == 1 {
                 let rec = &versions[0].0;
-                results.push(Some((rec.popularity, rec.len_bytes, rec.name.clone(), rec.data.clone())));
+                results.push(Some((
+                    rec.popularity,
+                    rec.len_bytes,
+                    rec.name.clone(),
+                    rec.data.clone(),
+                )));
                 continue;
             }
 
@@ -258,17 +343,29 @@ impl Database {
                 let mut m = 0u32;
                 for (_, vid) in &versions {
                     if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                        if vs.total_obs > m { m = vs.total_obs; }
+                        if vs.total_obs > m {
+                            m = vs.total_obs;
+                        }
                     }
                 }
-                if m == 0 { 1 } else { m }
+                if m == 0 {
+                    1
+                } else {
+                    m
+                }
             };
 
             let mut max_bins = 1u32;
             for (_, vid) in &versions {
                 if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                    let nb = if vs.num_binaries == 0 { vs.top_md5s.len() as u32 } else { vs.num_binaries };
-                    if nb > max_bins { max_bins = nb; }
+                    let nb = if vs.num_binaries == 0 {
+                        vs.top_md5s.len() as u32
+                    } else {
+                        vs.num_binaries
+                    };
+                    if nb > max_bins {
+                        max_bins = nb;
+                    }
                 }
             }
 
@@ -283,7 +380,9 @@ impl Database {
                         Some(_) => 0.0,
                         None => 0.0,
                     }
-                } else { 0.0 };
+                } else {
+                    0.0
+                };
 
                 // s_name
                 let s_name = if let Some(bq) = ctx.basename {
@@ -292,28 +391,42 @@ impl Database {
                         for e in vs.top_md5s.iter().take(self.rt.scoring.max_md5_per_version) {
                             if let Ok(Some(bm)) = self.rt.ctx_index.get_binary_meta(&e.md5) {
                                 let sim = name_suffix_similarity(&bm.basename, bq);
-                                if sim > best { best = sim; }
+                                if sim > best {
+                                    best = sim;
+                                }
                             }
                         }
                         best
-                    } else { 0.0 }
-                } else { 0.0 };
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
 
                 // s_coh
                 let s_coh = if !pmd5.is_empty() {
                     if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
                         let mut sum = 0.0f64;
                         for e in vs.top_md5s.iter().take(self.rt.scoring.max_md5_per_version) {
-                            if let Some(p) = pmd5.get(&e.md5) { sum += *p; }
+                            if let Some(p) = pmd5.get(&e.md5) {
+                                sum += *p;
+                            }
                         }
                         sum
-                    } else { 0.0 }
-                } else { 0.0 };
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
 
                 // s_stab
                 let s_stab = if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
                     (vs.total_obs as f64) / ((max_total_obs as f64) + f64::EPSILON)
-                } else { 0.5 };
+                } else {
+                    0.5
+                };
 
                 // s_rec
                 let s_rec = if ts_max == ts_min {
@@ -324,29 +437,34 @@ impl Database {
 
                 // s_pop_bin
                 let s_pop_bin = if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                    let nb = if vs.num_binaries == 0 { vs.top_md5s.len() as u32 } else { vs.num_binaries };
+                    let nb = if vs.num_binaries == 0 {
+                        vs.top_md5s.len() as u32
+                    } else {
+                        vs.num_binaries
+                    };
                     let denom = (1.0 + (max_bins as f64)).ln();
                     if denom > 0.0 {
                         ((1.0 + (nb as f64)).ln()) / denom
                     } else {
                         0.5
                     }
-                } else { 0.5 };
+                } else {
+                    0.5
+                };
 
                 // host/origin not tracked presently
                 let s_host = 0.0f64;
                 let s_origin = 0.0f64;
 
                 let w = &self.rt.scoring;
-                let score =
-                    w.w_md5 * s_md5 +
-                    w.w_name * s_name +
-                    w.w_coh * s_coh +
-                    w.w_stab * s_stab +
-                    w.w_rec * s_rec +
-                    w.w_pop_bin * s_pop_bin +
-                    w.w_host * s_host +
-                    w.w_origin * s_origin;
+                let score = w.w_md5 * s_md5
+                    + w.w_name * s_name
+                    + w.w_coh * s_coh
+                    + w.w_stab * s_stab
+                    + w.w_rec * s_rec
+                    + w.w_pop_bin * s_pop_bin
+                    + w.w_host * s_host
+                    + w.w_origin * s_origin;
 
                 if score > best_score {
                     best_score = score;
@@ -357,13 +475,17 @@ impl Database {
                     let mut cur_md5 = 0.0f64;
                     if let Some(md5q) = ctx.md5 {
                         if let Some(st) = self.rt.ctx_index.get_key_md5_stats(k, &md5q)? {
-                            if st.last_version_id == versions[idx].1 { cur_md5 = 1.0; }
+                            if st.last_version_id == versions[idx].1 {
+                                cur_md5 = 1.0;
+                            }
                         }
                     }
                     let mut best_md5_sig = 0.0f64;
                     if let Some(md5q) = ctx.md5 {
                         if let Some(st) = self.rt.ctx_index.get_key_md5_stats(k, &md5q)? {
-                            if st.last_version_id == versions[best_idx].1 { best_md5_sig = 1.0; }
+                            if st.last_version_id == versions[best_idx].1 {
+                                best_md5_sig = 1.0;
+                            }
                         }
                     }
                     if cur_md5 > best_md5_sig {
@@ -378,11 +500,24 @@ impl Database {
             }
 
             let rec = &versions[best_idx].0;
-            results.push(Some((rec.popularity, rec.len_bytes, rec.name.clone(), rec.data.clone())));
+            results.push(Some((
+                rec.popularity,
+                rec.len_bytes,
+                rec.name.clone(),
+                rec.data.clone(),
+            )));
         }
 
-        crate::metrics::METRICS.scoring_versions_considered.fetch_add(versions_considered_total, std::sync::atomic::Ordering::Relaxed);
-        crate::metrics::METRICS.scoring_time_ns.fetch_add(start.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        crate::metrics::METRICS
+            .scoring_versions_considered
+            .fetch_add(
+                versions_considered_total,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        crate::metrics::METRICS.scoring_time_ns.fetch_add(
+            start.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         Ok(results)
     }
 }
@@ -405,5 +540,9 @@ fn name_suffix_similarity(a: &str, b: &str) -> f64 {
         }
     }
     let denom = ab.len().max(bb.len()) as f64;
-    if denom <= 0.0 { 0.0 } else { (l as f64) / denom }
+    if denom <= 0.0 {
+        0.0
+    } else {
+        (l as f64) / denom
+    }
 }

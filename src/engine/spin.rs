@@ -9,9 +9,17 @@ pub struct SpinGuard<'a> {
 }
 
 impl SpinLock {
-    pub const fn new() -> Self { Self { locked: AtomicBool::new(false) } }
+    pub const fn new() -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+        }
+    }
     pub fn lock(&self) -> SpinGuard<'_> {
-        while self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+        while self
+            .locked
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
             std::hint::spin_loop();
         }
         SpinGuard { lock: self }

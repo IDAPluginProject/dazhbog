@@ -1,16 +1,23 @@
 pub fn now_ts_sec() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[inline]
 pub const fn pack_addr(seg_id: u16, offset: u64, flags: u8) -> u64 {
-    ((seg_id as u64) << 48) | ((offset & ((1u64<<40)-1)) << 8) | (flags as u64)
+    ((seg_id as u64) << 48) | ((offset & ((1u64 << 40) - 1)) << 8) | (flags as u64)
 }
 #[inline]
-pub const fn addr_seg(addr: u64) -> u16 { (addr >> 48) as u16 }
+pub const fn addr_seg(addr: u64) -> u16 {
+    (addr >> 48) as u16
+}
 #[inline]
-pub const fn addr_off(addr: u64) -> u64 { (addr >> 8) & ((1u64<<40)-1) }
+pub const fn addr_off(addr: u64) -> u64 {
+    (addr >> 8) & ((1u64 << 40) - 1)
+}
 
 #[inline]
 pub fn wyhash64(mut x: u64) -> u64 {
@@ -88,7 +95,7 @@ fn hash_bytes64(b: &[u8]) -> u64 {
     let mut i = 0usize;
     while i + 8 <= b.len() {
         let mut w = [0u8; 8];
-        w.copy_from_slice(&b[i..i+8]);
+        w.copy_from_slice(&b[i..i + 8]);
         let v = u64::from_le_bytes(w);
         h = h.wrapping_add(v);
         h = wyhash64(h);

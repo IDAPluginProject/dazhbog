@@ -1,5 +1,5 @@
-use std::{io, path::PathBuf};
 use std::collections::HashMap;
+use std::{io, path::PathBuf};
 
 const MAGIC: u32 = 0x4C4D4E31;
 
@@ -84,7 +84,11 @@ struct Record {
 
 fn scan_segment_tree(tree: &sled::Tree) -> io::Result<Vec<(u64, Record)>> {
     let mut records = Vec::new();
-    println!("Scanning tree {} ({} records)", String::from_utf8_lossy(&tree.name()), tree.len());
+    println!(
+        "Scanning tree {} ({} records)",
+        String::from_utf8_lossy(&tree.name()),
+        tree.len()
+    );
 
     for item in tree.iter() {
         let (offset_bytes, record_bytes) = match item {
@@ -182,7 +186,8 @@ fn scan_segment_tree(tree: &sled::Tree) -> io::Result<Vec<(u64, Record)>> {
 fn write_record_to_tree(tree: &sled::Tree, offset: u64, rec: &Record) -> io::Result<usize> {
     let name_len = rec.name.len() as u16;
     let data_len = rec.data.len() as u32;
-    let body_len: usize = 8+8+8+8+4+4+2+4+1+5 + (name_len as usize) + (data_len as usize);
+    let body_len: usize =
+        8 + 8 + 8 + 8 + 4 + 4 + 2 + 4 + 1 + 5 + (name_len as usize) + (data_len as usize);
     let total_len = 4 + 4 + 4 + body_len;
 
     let mut buf = Vec::with_capacity(total_len);
@@ -221,7 +226,9 @@ fn main() -> io::Result<()> {
 
     if !seg_db_dir.exists() {
         eprintln!("Error: data/segments_db directory not found. This tool requires the new sled-based storage.");
-        eprintln!("If you have old seg.*.dat files, run the main dazhbog server once to migrate them.");
+        eprintln!(
+            "If you have old seg.*.dat files, run the main dazhbog server once to migrate them."
+        );
         std::process::exit(1);
     }
 
@@ -234,7 +241,9 @@ fn main() -> io::Result<()> {
     let db = sled::open(&seg_db_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open: {}", e)))?;
 
-    let mut tree_names: Vec<_> = db.tree_names().into_iter()
+    let mut tree_names: Vec<_> = db
+        .tree_names()
+        .into_iter()
         .map(|name| String::from_utf8_lossy(&name).to_string())
         .filter(|name| name.starts_with("seg."))
         .collect();
@@ -242,14 +251,16 @@ fn main() -> io::Result<()> {
     tree_names.sort();
 
     for name in tree_names {
-        let tree = db.open_tree(&name)
+        let tree = db
+            .open_tree(&name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {}", e)))?;
 
         match scan_segment_tree(&tree) {
             Ok(records) => {
                 total_valid += records.len();
                 for (_off, rec) in records {
-                    all_records.entry(rec.key)
+                    all_records
+                        .entry(rec.key)
                         .or_insert_with(Vec::new)
                         .push(rec);
                 }
@@ -292,7 +303,8 @@ fn main() -> io::Result<()> {
     println!("\n=== Writing recovered data ===");
     let recovered_db = sled::open(&temp_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open temp db: {}", e)))?;
-    let recovered_tree = recovered_db.open_tree("seg.00001")
+    let recovered_tree = recovered_db
+        .open_tree("seg.00001")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open temp tree: {}", e)))?;
 
     let mut offset = 0u64;
@@ -306,7 +318,11 @@ fn main() -> io::Result<()> {
     }
 
     recovered_db.flush()?;
-    println!("  Written {} records to new database in {}", final_records.len(), temp_dir.display());
+    println!(
+        "  Written {} records to new database in {}",
+        final_records.len(),
+        temp_dir.display()
+    );
     drop(recovered_db);
 
     // Backup old segments
@@ -316,11 +332,17 @@ fn main() -> io::Result<()> {
     }
     std::fs::create_dir_all(&backup_dir)?;
     std::fs::rename(&seg_db_dir, backup_dir.join("segments_db"))?;
-    println!("  Old segment database backed up to {}", backup_dir.join("segments_db").display());
+    println!(
+        "  Old segment database backed up to {}",
+        backup_dir.join("segments_db").display()
+    );
 
     // Move recovered segments to data directory
     std::fs::rename(&temp_dir, &seg_db_dir)?;
-    println!("  Recovered segment database moved to {}", seg_db_dir.display());
+    println!(
+        "  Recovered segment database moved to {}",
+        seg_db_dir.display()
+    );
 
     println!("\n=== Recovery Complete ===");
     println!("✓ Recovered {} unique records", final_records.len());

@@ -143,7 +143,9 @@ impl Default for Config {
                 lumina_max_cstr_bytes: 4096,
                 lumina_max_hash_bytes: 64,
             },
-            http: Some(Http { bind_addr: "127.0.0.1:8080".into() }),
+            http: Some(Http {
+                bind_addr: "127.0.0.1:8080".into(),
+            }),
             engine: Engine {
                 data_dir: "data".into(),
                 segment_bytes: 1 << 30,
@@ -178,8 +180,12 @@ impl Config {
         let mut cfg = Self::default();
         for (lineno, line) in s.lines().enumerate() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
-            let Some((lhs, rhs)) = line.split_once('=') else { continue; };
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((lhs, rhs)) = line.split_once('=') else {
+                continue;
+            };
             let lhs = lhs.trim();
             let mut val = rhs.trim();
             if val.ends_with('#') {
@@ -187,75 +193,157 @@ impl Config {
             }
             let set = |section: &str, key: &str, val: &str, cfg: &mut Self| -> Result<(), String> {
                 macro_rules! parse {
-                    (s) => { val.trim_matches('"').to_string() };
-                    (b) => { match val { "true" => true, "false" => false, _ => return Err(format!("bad bool {val}")) } };
-                    (u) => { val.parse::<u64>().map_err(|e| e.to_string())? };
-                    (usize_) => { val.parse::<usize>().map_err(|e| e.to_string())? };
-                    (u32_) => { val.parse::<u32>().map_err(|e| e.to_string())? };
-                    (u16_) => { val.parse::<u16>().map_err(|e| e.to_string())? };
-                    (f64_) => { val.parse::<f64>().map_err(|e| e.to_string())? };
+                    (s) => {
+                        val.trim_matches('"').to_string()
+                    };
+                    (b) => {
+                        match val {
+                            "true" => true,
+                            "false" => false,
+                            _ => return Err(format!("bad bool {val}")),
+                        }
+                    };
+                    (u) => {
+                        val.parse::<u64>().map_err(|e| e.to_string())?
+                    };
+                    (usize_) => {
+                        val.parse::<usize>().map_err(|e| e.to_string())?
+                    };
+                    (u32_) => {
+                        val.parse::<u32>().map_err(|e| e.to_string())?
+                    };
+                    (u16_) => {
+                        val.parse::<u16>().map_err(|e| e.to_string())?
+                    };
+                    (f64_) => {
+                        val.parse::<f64>().map_err(|e| e.to_string())?
+                    };
                 }
                 match (section, key) {
-                    ("limits","hello_timeout_ms") => cfg.limits.hello_timeout_ms = parse!(u),
-                    ("limits","command_timeout_ms") => cfg.limits.command_timeout_ms = parse!(u),
-                    ("limits","tls_handshake_timeout_ms") => cfg.limits.tls_handshake_timeout_ms = parse!(u),
-                    ("limits","pull_timeout_ms") => cfg.limits.pull_timeout_ms = parse!(u),
-                    ("limits","push_timeout_ms") => cfg.limits.push_timeout_ms = parse!(u),
-                    ("limits","max_active_conns") => cfg.limits.max_active_conns = parse!(usize_),
-                    ("limits","max_hello_frame_bytes") => cfg.limits.max_hello_frame_bytes = parse!(usize_),
-                    ("limits","max_cmd_frame_bytes") => cfg.limits.max_cmd_frame_bytes = parse!(usize_),
-                    ("limits","max_pull_items") => cfg.limits.max_pull_items = parse!(usize_),
-                    ("limits","max_push_items") => cfg.limits.max_push_items = parse!(usize_),
-                    ("limits","max_del_items") => cfg.limits.max_del_items = parse!(usize_),
-                    ("limits","max_hist_items") => cfg.limits.max_hist_items = parse!(usize_),
-                    ("limits","max_name_bytes") => cfg.limits.max_name_bytes = parse!(usize_),
-                    ("limits","max_data_bytes") => cfg.limits.max_data_bytes = parse!(usize_),
-                    ("limits","per_connection_inflight_bytes") => cfg.limits.per_connection_inflight_bytes = parse!(usize_),
-                    ("limits","global_inflight_bytes") => cfg.limits.global_inflight_bytes = parse!(usize_),
-                    ("limits","lumina_max_cstr_bytes") => cfg.limits.lumina_max_cstr_bytes = parse!(usize_),
-                    ("limits","lumina_max_hash_bytes") => cfg.limits.lumina_max_hash_bytes = parse!(usize_),
+                    ("limits", "hello_timeout_ms") => cfg.limits.hello_timeout_ms = parse!(u),
+                    ("limits", "command_timeout_ms") => cfg.limits.command_timeout_ms = parse!(u),
+                    ("limits", "tls_handshake_timeout_ms") => {
+                        cfg.limits.tls_handshake_timeout_ms = parse!(u)
+                    }
+                    ("limits", "pull_timeout_ms") => cfg.limits.pull_timeout_ms = parse!(u),
+                    ("limits", "push_timeout_ms") => cfg.limits.push_timeout_ms = parse!(u),
+                    ("limits", "max_active_conns") => cfg.limits.max_active_conns = parse!(usize_),
+                    ("limits", "max_hello_frame_bytes") => {
+                        cfg.limits.max_hello_frame_bytes = parse!(usize_)
+                    }
+                    ("limits", "max_cmd_frame_bytes") => {
+                        cfg.limits.max_cmd_frame_bytes = parse!(usize_)
+                    }
+                    ("limits", "max_pull_items") => cfg.limits.max_pull_items = parse!(usize_),
+                    ("limits", "max_push_items") => cfg.limits.max_push_items = parse!(usize_),
+                    ("limits", "max_del_items") => cfg.limits.max_del_items = parse!(usize_),
+                    ("limits", "max_hist_items") => cfg.limits.max_hist_items = parse!(usize_),
+                    ("limits", "max_name_bytes") => cfg.limits.max_name_bytes = parse!(usize_),
+                    ("limits", "max_data_bytes") => cfg.limits.max_data_bytes = parse!(usize_),
+                    ("limits", "per_connection_inflight_bytes") => {
+                        cfg.limits.per_connection_inflight_bytes = parse!(usize_)
+                    }
+                    ("limits", "global_inflight_bytes") => {
+                        cfg.limits.global_inflight_bytes = parse!(usize_)
+                    }
+                    ("limits", "lumina_max_cstr_bytes") => {
+                        cfg.limits.lumina_max_cstr_bytes = parse!(usize_)
+                    }
+                    ("limits", "lumina_max_hash_bytes") => {
+                        cfg.limits.lumina_max_hash_bytes = parse!(usize_)
+                    }
 
-                    ("http","bind_addr") => { cfg.http.get_or_insert_with(|| super::config::Http { bind_addr: "".into() }).bind_addr = parse!(s); },
+                    ("http", "bind_addr") => {
+                        cfg.http
+                            .get_or_insert_with(|| super::config::Http {
+                                bind_addr: "".into(),
+                            })
+                            .bind_addr = parse!(s);
+                    }
 
-                    ("engine","data_dir") => cfg.engine.data_dir = parse!(s),
-                    ("engine","segment_bytes") => cfg.engine.segment_bytes = parse!(u),
-                    ("engine","shard_count") => cfg.engine.shard_count = parse!(usize_),
-                    ("engine","index_capacity") => cfg.engine.index_capacity = parse!(usize_),
-                    ("engine","sync_interval_ms") => cfg.engine.sync_interval_ms = parse!(u),
-                    ("engine","compaction_check_ms") => cfg.engine.compaction_check_ms = parse!(u),
-                    ("engine","use_mmap_reads") => cfg.engine.use_mmap_reads = parse!(b),
-                    ("engine","deduplicate_on_startup") => cfg.engine.deduplicate_on_startup = parse!(b),
+                    ("engine", "data_dir") => cfg.engine.data_dir = parse!(s),
+                    ("engine", "segment_bytes") => cfg.engine.segment_bytes = parse!(u),
+                    ("engine", "shard_count") => cfg.engine.shard_count = parse!(usize_),
+                    ("engine", "index_capacity") => cfg.engine.index_capacity = parse!(usize_),
+                    ("engine", "sync_interval_ms") => cfg.engine.sync_interval_ms = parse!(u),
+                    ("engine", "compaction_check_ms") => cfg.engine.compaction_check_ms = parse!(u),
+                    ("engine", "use_mmap_reads") => cfg.engine.use_mmap_reads = parse!(b),
+                    ("engine", "deduplicate_on_startup") => {
+                        cfg.engine.deduplicate_on_startup = parse!(b)
+                    }
 
-                    ("engine","index_dir") => {
+                    ("engine", "index_dir") => {
                         let v = parse!(s);
                         cfg.engine.index_dir = if v.is_empty() { None } else { Some(v) };
-                    },
-                    ("engine","index_memtable_max_entries") => cfg.engine.index_memtable_max_entries = parse!(usize_),
-                    ("engine","index_block_entries") => cfg.engine.index_block_entries = parse!(usize_),
-                    ("engine","index_level0_compact_trigger") => cfg.engine.index_level0_compact_trigger = parse!(usize_),
+                    }
+                    ("engine", "index_memtable_max_entries") => {
+                        cfg.engine.index_memtable_max_entries = parse!(usize_)
+                    }
+                    ("engine", "index_block_entries") => {
+                        cfg.engine.index_block_entries = parse!(usize_)
+                    }
+                    ("engine", "index_level0_compact_trigger") => {
+                        cfg.engine.index_level0_compact_trigger = parse!(usize_)
+                    }
 
-                    ("lumina","bind_addr") => cfg.lumina.bind_addr = parse!(s),
-                    ("lumina","server_name") => cfg.lumina.server_name = parse!(s),
-                    ("lumina","allow_deletes") => cfg.lumina.allow_deletes = parse!(b),
-                    ("lumina","get_history_limit") => cfg.lumina.get_history_limit = parse!(u32_),
-                    ("lumina","use_tls") => cfg.lumina.use_tls = parse!(b),
+                    ("lumina", "bind_addr") => cfg.lumina.bind_addr = parse!(s),
+                    ("lumina", "server_name") => cfg.lumina.server_name = parse!(s),
+                    ("lumina", "allow_deletes") => cfg.lumina.allow_deletes = parse!(b),
+                    ("lumina", "get_history_limit") => cfg.lumina.get_history_limit = parse!(u32_),
+                    ("lumina", "use_tls") => cfg.lumina.use_tls = parse!(b),
 
-                    ("tls","pkcs12_path") => { cfg.lumina.tls.get_or_insert_with(|| super::config::TLS { pkcs12_path: "".into(), env_password_var: "PKCSPASSWD".into(), min_protocol_sslv3: true }).pkcs12_path = parse!(s); },
-                    ("tls","env_password_var") => { cfg.lumina.tls.get_or_insert_with(|| super::config::TLS { pkcs12_path: "".into(), env_password_var: "PKCSPASSWD".into(), min_protocol_sslv3: true }).env_password_var = parse!(s); },
-                    ("tls","min_protocol_sslv3") => { cfg.lumina.tls.get_or_insert_with(|| super::config::TLS { pkcs12_path: "".into(), env_password_var: "PKCSPASSWD".into(), min_protocol_sslv3: true }).min_protocol_sslv3 = parse!(b); },
+                    ("tls", "pkcs12_path") => {
+                        cfg.lumina
+                            .tls
+                            .get_or_insert_with(|| super::config::TLS {
+                                pkcs12_path: "".into(),
+                                env_password_var: "PKCSPASSWD".into(),
+                                min_protocol_sslv3: true,
+                            })
+                            .pkcs12_path = parse!(s);
+                    }
+                    ("tls", "env_password_var") => {
+                        cfg.lumina
+                            .tls
+                            .get_or_insert_with(|| super::config::TLS {
+                                pkcs12_path: "".into(),
+                                env_password_var: "PKCSPASSWD".into(),
+                                min_protocol_sslv3: true,
+                            })
+                            .env_password_var = parse!(s);
+                    }
+                    ("tls", "min_protocol_sslv3") => {
+                        cfg.lumina
+                            .tls
+                            .get_or_insert_with(|| super::config::TLS {
+                                pkcs12_path: "".into(),
+                                env_password_var: "PKCSPASSWD".into(),
+                                min_protocol_sslv3: true,
+                            })
+                            .min_protocol_sslv3 = parse!(b);
+                    }
 
                     // ---------------- Upstream (optional) ----------------
                     ("upstream", key) if key.starts_with(|c: char| c.is_ascii_digit()) => {
                         let parts: Vec<&str> = key.splitn(2, '.').collect();
-                        if parts.len() != 2 { return Err(format!("invalid upstream key format: {}", key)); }
+                        if parts.len() != 2 {
+                            return Err(format!("invalid upstream key format: {}", key));
+                        }
                         let idx = parts[0].parse::<usize>().map_err(|e| e.to_string())?;
                         let field = parts[1];
 
                         while cfg.upstreams.len() <= idx {
                             cfg.upstreams.push(Upstream {
-                                enabled: false, priority: cfg.upstreams.len() as u32, host: String::new(), port: 0, use_tls: true,
-                                insecure_no_verify: true, hello_protocol_version: 6, license_path: None,
-                                timeout_ms: 8000, batch_max: 1024
+                                enabled: false,
+                                priority: cfg.upstreams.len() as u32,
+                                host: String::new(),
+                                port: 0,
+                                use_tls: true,
+                                insecure_no_verify: true,
+                                hello_protocol_version: 6,
+                                license_path: None,
+                                timeout_ms: 8000,
+                                batch_max: 1024,
                             });
                         }
 
@@ -265,17 +353,22 @@ impl Config {
                             "host" => cfg.upstreams[idx].host = parse!(s),
                             "port" => cfg.upstreams[idx].port = parse!(u16_),
                             "use_tls" => cfg.upstreams[idx].use_tls = parse!(b),
-                            "insecure_no_verify" => cfg.upstreams[idx].insecure_no_verify = parse!(b),
-                            "hello_protocol_version" => cfg.upstreams[idx].hello_protocol_version = parse!(u32_),
+                            "insecure_no_verify" => {
+                                cfg.upstreams[idx].insecure_no_verify = parse!(b)
+                            }
+                            "hello_protocol_version" => {
+                                cfg.upstreams[idx].hello_protocol_version = parse!(u32_)
+                            }
                             "license_path" => {
                                 let v = parse!(s);
-                                cfg.upstreams[idx].license_path = if v.is_empty() { None } else { Some(v) };
-                            },
+                                cfg.upstreams[idx].license_path =
+                                    if v.is_empty() { None } else { Some(v) };
+                            }
                             "timeout_ms" => cfg.upstreams[idx].timeout_ms = parse!(u),
                             "batch_max" => cfg.upstreams[idx].batch_max = parse!(usize_),
                             _ => return Err(format!("unknown upstream field: {}", field)),
                         }
-                    },
+                    }
 
                     // ---------------- Scoring (optional) ----------------
                     ("scoring", "w_md5") => cfg.scoring.w_md5 = parse!(f64_),
@@ -286,17 +379,32 @@ impl Config {
                     ("scoring", "w_pop_bin") => cfg.scoring.w_pop_bin = parse!(f64_),
                     ("scoring", "w_host") => cfg.scoring.w_host = parse!(f64_),
                     ("scoring", "w_origin") => cfg.scoring.w_origin = parse!(f64_),
-                    ("scoring", "max_versions_per_key") => cfg.scoring.max_versions_per_key = parse!(usize_),
+                    ("scoring", "max_versions_per_key") => {
+                        cfg.scoring.max_versions_per_key = parse!(usize_)
+                    }
                     ("scoring", "max_md5_per_key") => cfg.scoring.max_md5_per_key = parse!(usize_),
-                    ("scoring", "max_md5_per_version") => cfg.scoring.max_md5_per_version = parse!(usize_),
+                    ("scoring", "max_md5_per_version") => {
+                        cfg.scoring.max_md5_per_version = parse!(usize_)
+                    }
 
                     _ => return Err(format!("unknown key {section}.{key}")),
                 }
                 Ok(())
             };
-            let (section, key) = if let Some((a,b)) = lhs.split_once('.') {(a.trim(), b.trim())} else { ("", lhs) };
-            if section.is_empty() { continue; }
-            set(section, key, val, &mut cfg).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("line {}: {}", lineno+1, e)))?;
+            let (section, key) = if let Some((a, b)) = lhs.split_once('.') {
+                (a.trim(), b.trim())
+            } else {
+                ("", lhs)
+            };
+            if section.is_empty() {
+                continue;
+            }
+            set(section, key, val, &mut cfg).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("line {}: {}", lineno + 1, e),
+                )
+            })?;
         }
         Ok(cfg)
     }

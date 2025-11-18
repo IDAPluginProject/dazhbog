@@ -1,13 +1,13 @@
 use crate::{config::Config, db::Database, metrics::METRICS};
-use hyper::{Request, Response, Method, StatusCode, body::Incoming};
-use http_body_util::Full;
 use bytes::Bytes;
-use std::{convert::Infallible, sync::Arc};
+use http_body_util::Full;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use tokio::net::TcpListener;
+use hyper::{body::Incoming, Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use log::*;
+use std::{convert::Infallible, sync::Arc};
+use tokio::net::TcpListener;
 
 const HOME: &str = r#"<!doctype html>
 <html><head><title>dazhbog</title></head>
@@ -17,7 +17,10 @@ const HOME: &str = r#"<!doctype html>
 <p>Metrics at <a href="/metrics">/metrics</a>.</p>
 </body></html>"#;
 
-async fn router(_db: Arc<Database>, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
+async fn router(
+    _db: Arc<Database>,
+    req: Request<Incoming>,
+) -> Result<Response<Full<Bytes>>, Infallible> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/") => Ok(Response::new(Full::new(Bytes::from(HOME)))),
         (&Method::GET, "/metrics") => {
@@ -25,8 +28,11 @@ async fn router(_db: Arc<Database>, req: Request<Incoming>) -> Result<Response<F
             let mut r = Response::new(Full::new(Bytes::from(s)));
             *r.status_mut() = StatusCode::OK;
             Ok(r)
-        },
-        _ => Ok(Response::builder().status(StatusCode::NOT_FOUND).body(Full::new(Bytes::from("not found"))).unwrap()),
+        }
+        _ => Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Full::new(Bytes::from("not found")))
+            .unwrap()),
     }
 }
 

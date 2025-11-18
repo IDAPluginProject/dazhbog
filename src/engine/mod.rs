@@ -1,11 +1,11 @@
-mod crc32c;
-mod segment;
-mod index;
 mod context_index;
+mod crc32c;
+mod index;
+mod segment;
 
-pub use segment::{Record, OpenSegments};
-pub use index::{ShardedIndex, UpsertResult, IndexError, migrate_legacy_index_files};
 pub use context_index::ContextIndex;
+pub use index::{migrate_legacy_index_files, IndexError, ShardedIndex, UpsertResult};
+pub use segment::{OpenSegments, Record};
 
 use crate::config::{Engine, Scoring};
 use std::{io, path::PathBuf, sync::Arc};
@@ -27,7 +27,11 @@ impl EngineRuntime {
     pub fn open(cfg: Engine, scoring: Scoring) -> io::Result<Self> {
         std::fs::create_dir_all(&cfg.data_dir)?;
         let dir = PathBuf::from(&cfg.data_dir);
-        let segments = Arc::new(OpenSegments::open(&dir, cfg.segment_bytes, cfg.use_mmap_reads)?);
+        let segments = Arc::new(OpenSegments::open(
+            &dir,
+            cfg.segment_bytes,
+            cfg.use_mmap_reads,
+        )?);
 
         let index_dir = if let Some(ref override_dir) = cfg.index_dir {
             PathBuf::from(override_dir)
@@ -43,7 +47,9 @@ impl EngineRuntime {
             .cache_capacity(64 * 1024 * 1024)
             .flush_every_ms(Some(500))
             .open()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open index db: {e}")))?;
+            .map_err(|e| {
+                io::Error::new(io::ErrorKind::Other, format!("sled open index db: {e}"))
+            })?;
 
         let index = Arc::new(ShardedIndex::new(&index_db)?);
 
@@ -53,6 +59,13 @@ impl EngineRuntime {
 
         let ctx_index = Arc::new(ContextIndex::new(&index_db)?);
 
-        Ok(Self { dir, segments, index, ctx_index, cfg, scoring })
+        Ok(Self {
+            dir,
+            segments,
+            index,
+            ctx_index,
+            cfg,
+            scoring,
+        })
     }
 }

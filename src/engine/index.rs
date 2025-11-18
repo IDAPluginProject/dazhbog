@@ -16,7 +16,11 @@ pub struct IndexOptions {
 }
 impl IndexOptions {
     pub fn sane() -> Self {
-        Self { memtable_max_entries: 0, sst_block_entries: 0, level0_compact_trigger: 0 }
+        Self {
+            memtable_max_entries: 0,
+            sst_block_entries: 0,
+            level0_compact_trigger: 0,
+        }
     }
 }
 
@@ -32,12 +36,18 @@ pub enum IndexError {
 }
 
 impl From<io::Error> for IndexError {
-    fn from(e: io::Error) -> Self { IndexError::Io(e) }
+    fn from(e: io::Error) -> Self {
+        IndexError::Io(e)
+    }
 }
 
-fn k128(k: u128) -> [u8; 16] { k.to_le_bytes() }
+fn k128(k: u128) -> [u8; 16] {
+    k.to_le_bytes()
+}
 
-fn v64(v: u64) -> [u8; 8] { v.to_le_bytes() }
+fn v64(v: u64) -> [u8; 8] {
+    v.to_le_bytes()
+}
 
 fn dec64(b: &[u8]) -> u64 {
     let mut a = [0u8; 8];
@@ -51,7 +61,9 @@ pub struct ShardedIndex {
 
 impl ShardedIndex {
     pub fn new(db: &sled::Db) -> io::Result<Self> {
-        let tree = db.open_tree("latest").map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?;
+        let tree = db
+            .open_tree("latest")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?;
         Ok(Self { tree })
     }
 
@@ -63,12 +75,18 @@ impl ShardedIndex {
     }
 
     pub fn upsert(&self, key: u128, addr: u64) -> Result<UpsertResult, IndexError> {
-        let res = self.tree.fetch_and_update(k128(key), |prev| {
-            match prev {
+        let res = self
+            .tree
+            .fetch_and_update(k128(key), |prev| match prev {
                 None => Some(v64(addr).to_vec()),
                 Some(_) => Some(v64(addr).to_vec()),
-            }
-        }).map_err(|e| IndexError::Io(io::Error::new(io::ErrorKind::Other, format!("sled upsert: {e}"))))?;
+            })
+            .map_err(|e| {
+                IndexError::Io(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("sled upsert: {e}"),
+                ))
+            })?;
         Ok(match res {
             None => UpsertResult::Inserted,
             Some(p) if p.len() >= 8 => UpsertResult::Replaced(dec64(&p)),
@@ -110,20 +128,26 @@ pub fn migrate_legacy_index_files(dir: &Path) -> io::Result<()> {
     for ent in std::fs::read_dir(dir)? {
         let ent = ent?;
         let name = ent.file_name();
-        let Some(name) = name.to_str() else { continue; };
+        let Some(name) = name.to_str() else {
+            continue;
+        };
         if name == "wal.dat" || (name.starts_with("sst.") && name.ends_with(".ldb")) {
             found = true;
             break;
         }
     }
-    if !found { return Ok(()); }
+    if !found {
+        return Ok(());
+    }
     let stamp = chrono::Utc::now().format("%Y%m%d%H%M%S").to_string();
     let backup = dir.join(format!(".legacy_index_{}", stamp));
     std::fs::create_dir_all(&backup)?;
     for ent in std::fs::read_dir(dir)? {
         let ent = ent?;
         let name = ent.file_name();
-        let Some(name) = name.to_str() else { continue; };
+        let Some(name) = name.to_str() else {
+            continue;
+        };
         if name == "wal.dat" || (name.starts_with("sst.") && name.ends_with(".ldb")) {
             std::fs::rename(ent.path(), backup.join(name))?;
         }

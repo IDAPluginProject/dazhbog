@@ -1,5 +1,11 @@
-use std::{io, fs::OpenOptions, path::{Path, PathBuf}, os::unix::fs::FileExt};
-#[cfg(windows)] use std::os::windows::fs::FileExt as _;
+#[cfg(windows)]
+use std::os::windows::fs::FileExt as _;
+use std::{
+    fs::OpenOptions,
+    io,
+    os::unix::fs::FileExt,
+    path::{Path, PathBuf},
+};
 
 use crate::engine::crc32c::{crc32c, crc32c_legacy};
 use crate::util::pack_addr;
@@ -48,12 +54,14 @@ pub struct OpenSegments {
 impl SegmentWriter {
     fn open(db: &sled::Db, id: u16, cap: u64) -> io::Result<Self> {
         let tree_name = format!("seg.{:05}", id);
-        let tree = db.open_tree(&tree_name)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?
-;
+        let tree = db
+            .open_tree(&tree_name)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?;
 
-        let off = if let Some(last) = tree.last()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled last: {e}")))? {
+        let off = if let Some(last) = tree
+            .last()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled last: {e}")))?
+        {
             let (key_bytes, val) = last;
             let offset = u64::from_be_bytes(key_bytes.as_ref().try_into().unwrap());
             offset + val.len() as u64
@@ -66,16 +74,23 @@ impl SegmentWriter {
 
     pub fn append(&mut self, rec: &Record) -> io::Result<Addr> {
         if rec.name.len() > u16::MAX as usize {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "record.name too long (> u16::MAX)"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "record.name too long (> u16::MAX)",
+            ));
         }
         if rec.len_bytes as usize != rec.data.len() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "record.len_bytes mismatch with data length"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "record.len_bytes mismatch with data length",
+            ));
         }
 
         let name_len = rec.name.len() as u16;
         let data_len = rec.data.len() as u32;
 
-        let body_len: usize = 8+8+8+8+4+4+2+4+1+5 + (name_len as usize) + (data_len as usize);
+        let body_len: usize =
+            8 + 8 + 8 + 8 + 4 + 4 + 2 + 4 + 1 + 5 + (name_len as usize) + (data_len as usize);
         let total_len = 4 + 4 + 4 + body_len;
 
         if self.off + (total_len as u64) > self.cap {
@@ -98,18 +113,23 @@ impl SegmentWriter {
         buf.extend_from_slice(&(name_len).to_le_bytes());
         buf.extend_from_slice(&(data_len).to_le_bytes());
         buf.push(rec.flags);
-        buf.extend_from_slice(&[0u8;5]);
+        buf.extend_from_slice(&[0u8; 5]);
         buf.extend_from_slice(rec.name.as_bytes());
         buf.extend_from_slice(&rec.data);
 
         let crc = crc32c(0, &buf[12..]);
         if self.off == 0 {
-            eprintln!("DEBUG: First write - CRC computed: 0x{:08x}, body_len: {}", crc, buf[12..].len());
+            eprintln!(
+                "DEBUG: First write - CRC computed: 0x{:08x}, body_len: {}",
+                crc,
+                buf[12..].len()
+            );
         }
         buf[8..12].copy_from_slice(&crc.to_le_bytes());
 
         let offset = self.off;
-        self.tree.insert(offset_key(offset), buf.as_slice())
+        self.tree
+            .insert(offset_key(offset), buf.as_slice())
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
         self.off += buf.len() as u64;
         Ok(pack_addr(self.id, offset, rec.flags))
@@ -128,23 +148,32 @@ impl Clone for SegmentReader {
 impl SegmentReader {
     fn open(db: &sled::Db, id: u16) -> io::Result<Self> {
         let tree_name = format!("seg.{:05}", id);
-        let tree = db.open_tree(&tree_name)
+        let tree = db
+            .open_tree(&tree_name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?;
         Ok(Self { tree, id })
     }
 
     pub fn read_at(&self, offset: u64) -> io::Result<Record> {
-        let data = self.tree.get(offset_key(offset))
+        let data = self
+            .tree
+            .get(offset_key(offset))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled get: {e}")))?;
-        let data = data.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "record not found"))?;
+        let data =
+            data.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "record not found"))?;
 
         if data.len() < 12 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "record too short"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "record too short",
+            ));
         }
 
         let hdr = &data[0..12];
         let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
-        if magic != MAGIC { return Err(io::Error::new(io::ErrorKind::InvalidData, "bad magic")); }
+        if magic != MAGIC {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "bad magic"));
+        }
         let _rec_len = u32::from_le_bytes(hdr[4..8].try_into().unwrap()) as usize;
         let crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
         let body = &data[12..];
@@ -172,9 +201,11 @@ impl SegmentReader {
         let data_len = u32::from_le_bytes(body[42..46].try_into().unwrap()) as usize;
         let flags = body[46];
         let name_start = 52;
-        let name = std::str::from_utf8(&body[name_start .. name_start+name_len]).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "utf8"))?.to_string();
+        let name = std::str::from_utf8(&body[name_start..name_start + name_len])
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "utf8"))?
+            .to_string();
         let data_start = name_start + name_len;
-        let data = body[data_start .. data_start+data_len].to_vec();
+        let data = body[data_start..data_start + data_len].to_vec();
 
         let actual_len_bytes = if data_len != len_bytes as usize {
             data_len as u32
@@ -182,7 +213,16 @@ impl SegmentReader {
             len_bytes
         };
 
-        Ok(Record { key, ts_sec, prev_addr, len_bytes: actual_len_bytes, popularity, name, data, flags })
+        Ok(Record {
+            key,
+            ts_sec,
+            prev_addr,
+            len_bytes: actual_len_bytes,
+            popularity,
+            name,
+            data,
+            flags,
+        })
     }
 }
 
@@ -223,13 +263,18 @@ enum ScanAction {
 
 fn migrate_dat_files_to_sled(dat_files: &[PathBuf], db: &sled::Db, _dir: &Path) -> io::Result<()> {
     for path in dat_files {
-        let file_name = path.file_name()
+        let file_name = path
+            .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
 
         let mid = &file_name[4..9];
-        let seg_id = mid.parse::<u16>()
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("parse segment id: {e}")))?;
+        let seg_id = mid.parse::<u16>().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("parse segment id: {e}"),
+            )
+        })?;
 
         log::info!("Migrating segment {} from {}", seg_id, file_name);
 
@@ -237,7 +282,8 @@ fn migrate_dat_files_to_sled(dat_files: &[PathBuf], db: &sled::Db, _dir: &Path) 
         let file_len = file.metadata()?.len();
 
         let tree_name = format!("seg.{:05}", seg_id);
-        let tree = db.open_tree(&tree_name)
+        let tree = db
+            .open_tree(&tree_name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?;
 
         let mut offset = 0u64;
@@ -274,7 +320,11 @@ fn migrate_dat_files_to_sled(dat_files: &[PathBuf], db: &sled::Db, _dir: &Path) 
 
         let migrated_path = path.with_extension("dat.migrated");
         std::fs::rename(path, &migrated_path)?;
-        log::info!("Renamed {} to {}", file_name, migrated_path.file_name().unwrap().to_string_lossy());
+        log::info!(
+            "Renamed {} to {}",
+            file_name,
+            migrated_path.file_name().unwrap().to_string_lossy()
+        );
     }
 
     Ok(())
@@ -282,9 +332,11 @@ fn migrate_dat_files_to_sled(dat_files: &[PathBuf], db: &sled::Db, _dir: &Path) 
 
 impl OpenSegments {
     fn total_segment_size(&self, readers: &[SegmentReader]) -> u64 {
-        readers.iter()
+        readers
+            .iter()
             .map(|r| {
-                r.tree.iter()
+                r.tree
+                    .iter()
                     .filter_map(|res| res.ok())
                     .map(|(_, v)| v.len() as u64)
                     .sum::<u64>()
@@ -316,12 +368,22 @@ impl OpenSegments {
                 let hdr = &data[0..12];
                 let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
                 if magic != MAGIC {
-                    log::warn!("Skipping record with bad magic at seg={}, offset={}", r.id, offset);
+                    log::warn!(
+                        "Skipping record with bad magic at seg={}, offset={}",
+                        r.id,
+                        offset
+                    );
                     continue;
                 }
 
                 if rec_len < MIN_STRUCTURED_SIZE {
-                    log::warn!("Skipping malformed record at seg={}, offset={}: rec_len {} < minimum {}", r.id, offset, rec_len, MIN_STRUCTURED_SIZE);
+                    log::warn!(
+                        "Skipping malformed record at seg={}, offset={}: rec_len {} < minimum {}",
+                        r.id,
+                        offset,
+                        rec_len,
+                        MIN_STRUCTURED_SIZE
+                    );
                     total_processed += rec_len;
                     continue;
                 }
@@ -330,7 +392,11 @@ impl OpenSegments {
                 let body = &data[12..];
 
                 if body.len() < 16 + 8 + 8 + 8 + 4 + 4 + 2 + 4 + 1 {
-                    log::warn!("Skipping record with short body at seg={}, offset={}", r.id, offset);
+                    log::warn!(
+                        "Skipping record with short body at seg={}, offset={}",
+                        r.id,
+                        offset
+                    );
                     total_processed += rec_len;
                     continue;
                 }
@@ -356,7 +422,7 @@ impl OpenSegments {
                 }
 
                 match callback(r, offset, rec_len, key, flags)? {
-                    ScanAction::Continue => {},
+                    ScanAction::Continue => {}
                     ScanAction::Break => return Ok(total_processed),
                 }
 
@@ -394,7 +460,10 @@ impl OpenSegments {
         }
 
         if needs_migration && !dat_files.is_empty() {
-            log::info!("Migrating {} segment files to sled database...", dat_files.len());
+            log::info!(
+                "Migrating {} segment files to sled database...",
+                dat_files.len()
+            );
             migrate_dat_files_to_sled(&dat_files, &db, dir)?;
             std::fs::write(&migration_marker, b"migrated")?;
             log::info!("Migration complete");
@@ -429,7 +498,9 @@ impl OpenSegments {
 
     pub fn next_writer(&self) -> io::Result<()> {
         let mut w = self.current.lock().unwrap();
-        let new_id = w.id.checked_add(1).ok_or_else(|| io::Error::new(io::ErrorKind::Other, "segment id overflow"))?;
+        let new_id =
+            w.id.checked_add(1)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "segment id overflow"))?;
         let nw = SegmentWriter::open(&self.db, new_id, self.seg_bytes)?;
         {
             let mut r = self.readers.lock();
@@ -448,12 +519,14 @@ impl OpenSegments {
         let mut writer = self.current.lock().unwrap();
         match writer.append(rec) {
             Ok(addr) => Ok(addr),
-            Err(e) if e.kind() == io::ErrorKind::Other && e.to_string().contains("segment full") => {
+            Err(e)
+                if e.kind() == io::ErrorKind::Other && e.to_string().contains("segment full") =>
+            {
                 drop(writer);
                 self.next_writer()?;
                 let mut writer = self.current.lock().unwrap();
                 writer.append(rec)
-            },
+            }
             Err(e) => Err(e),
         }
     }
@@ -463,7 +536,10 @@ impl OpenSegments {
         let total_size = self.total_segment_size(&rs);
 
         if total_size > 0 {
-            log::info!("Loading segments: {:.2} MB total", total_size as f64 / 1_048_576.0);
+            log::info!(
+                "Loading segments: {:.2} MB total",
+                total_size as f64 / 1_048_576.0
+            );
         }
 
         let mut progress = ProgressReporter::new(total_size);
@@ -490,7 +566,10 @@ impl OpenSegments {
 
         if total_size > 0 {
             if corrupt_count > 0 {
-                log::info!("Segments loaded successfully ({} corrupt entries skipped)", corrupt_count);
+                log::info!(
+                    "Segments loaded successfully ({} corrupt entries skipped)",
+                    corrupt_count
+                );
             } else {
                 log::info!("Segments loaded successfully");
             }
@@ -499,7 +578,11 @@ impl OpenSegments {
         Ok(())
     }
 
-    fn scan_records_with_corruption<F>(&self, readers: &[SegmentReader], mut callback: F) -> io::Result<u64>
+    fn scan_records_with_corruption<F>(
+        &self,
+        readers: &[SegmentReader],
+        mut callback: F,
+    ) -> io::Result<u64>
     where
         F: FnMut(&SegmentReader, u64, u64, u128, u8, bool) -> io::Result<ScanAction>,
     {
@@ -522,12 +605,22 @@ impl OpenSegments {
                 let hdr = &data[0..12];
                 let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
                 if magic != MAGIC {
-                    log::warn!("Skipping record with bad magic at seg={}, offset={}", r.id, offset);
+                    log::warn!(
+                        "Skipping record with bad magic at seg={}, offset={}",
+                        r.id,
+                        offset
+                    );
                     continue;
                 }
 
                 if rec_len < MIN_STRUCTURED_SIZE {
-                    log::warn!("Skipping malformed record at seg={}, offset={}: rec_len {} < minimum {}", r.id, offset, rec_len, MIN_STRUCTURED_SIZE);
+                    log::warn!(
+                        "Skipping malformed record at seg={}, offset={}: rec_len {} < minimum {}",
+                        r.id,
+                        offset,
+                        rec_len,
+                        MIN_STRUCTURED_SIZE
+                    );
                     total_processed += rec_len;
                     continue;
                 }
@@ -536,7 +629,11 @@ impl OpenSegments {
                 let body = &data[12..];
 
                 if body.len() < 16 + 8 + 8 + 8 + 4 + 4 + 2 + 4 + 1 {
-                    log::warn!("Skipping record with short body at seg={}, offset={}", r.id, offset);
+                    log::warn!(
+                        "Skipping record with short body at seg={}, offset={}",
+                        r.id,
+                        offset
+                    );
                     total_processed += rec_len;
                     continue;
                 }
@@ -561,7 +658,7 @@ impl OpenSegments {
                 }
 
                 match callback(r, offset, rec_len, key, flags, is_corrupt)? {
-                    ScanAction::Continue => {},
+                    ScanAction::Continue => {}
                     ScanAction::Break => return Ok(total_processed),
                 }
 
@@ -581,7 +678,10 @@ impl OpenSegments {
         let rs = self.readers.lock();
         let total_size = self.total_segment_size(&rs);
 
-        log::info!("Scanning {:.2} MB for duplicates...", total_size as f64 / 1_048_576.0);
+        log::info!(
+            "Scanning {:.2} MB for duplicates...",
+            total_size as f64 / 1_048_576.0
+        );
 
         let mut key_records: HashMap<u128, Vec<(Addr, u64, String, Vec<u8>, u64)>> = HashMap::new();
         let mut total_records = 0u64;
@@ -592,7 +692,8 @@ impl OpenSegments {
             if flags & 0x01 == 0 {
                 if let Ok(rec) = r.read_at(off) {
                     let addr = crate::util::pack_addr(r.id, off, rec.flags);
-                    key_records.entry(rec.key)
+                    key_records
+                        .entry(rec.key)
                         .or_insert_with(Vec::new)
                         .push((addr, rec.ts_sec, rec.name, rec.data, rec_len));
                     total_records += 1;
@@ -606,7 +707,11 @@ impl OpenSegments {
 
         drop(rs);
 
-        log::info!("Found {} total records across {} unique keys", total_records, key_records.len());
+        log::info!(
+            "Found {} total records across {} unique keys",
+            total_records,
+            key_records.len()
+        );
 
         let mut keep_addrs = std::collections::HashSet::new();
         let mut duplicates = 0u64;
@@ -633,7 +738,11 @@ impl OpenSegments {
         }
 
         let records_to_keep = keep_addrs.len() as u64;
-        log::info!("Keeping {} unique records, removing {} duplicates", records_to_keep, duplicates);
+        log::info!(
+            "Keeping {} unique records, removing {} duplicates",
+            records_to_keep,
+            duplicates
+        );
 
         if duplicates == 0 {
             log::info!("No duplicates found, skipping rewrite");

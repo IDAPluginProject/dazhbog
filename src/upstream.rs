@@ -2,36 +2,47 @@ use crate::config::Upstream;
 use crate::lumina;
 use crate::metrics::METRICS;
 use log::*;
+use std::io;
 use tokio::net::TcpStream;
 use tokio_native_tls::TlsConnector;
-use std::io;
 
 /// Result element for each requested key: Some(pop,len,name,data) when found
-pub type UpItem = Option<(u32,u32,String,Vec<u8>)>;
+pub type UpItem = Option<(u32, u32, String, Vec<u8>)>;
 
 /// Connect to upstream server (plain TCP or TLS with optional insecure verification)
 async fn connect(up: &Upstream) -> io::Result<UpstreamConn> {
     let addr = format!("{}:{}", up.host, up.port);
     debug!("upstream: connecting to {}", addr);
-    let stream = tokio::time::timeout(std::time::Duration::from_millis(up.timeout_ms), TcpStream::connect(&addr))
-        .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connect timeout"))??;
+    let stream = tokio::time::timeout(
+        std::time::Duration::from_millis(up.timeout_ms),
+        TcpStream::connect(&addr),
+    )
+    .await
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connect timeout"))??;
     debug!("upstream: TCP connection established");
 
     if up.use_tls {
-        debug!("upstream: initiating TLS handshake (insecure_no_verify={})", up.insecure_no_verify);
+        debug!(
+            "upstream: initiating TLS handshake (insecure_no_verify={})",
+            up.insecure_no_verify
+        );
         let mut builder = native_tls::TlsConnector::builder();
         if up.insecure_no_verify {
             builder.danger_accept_invalid_certs(true);
             builder.danger_accept_invalid_hostnames(true);
         }
-        let connector = builder.build().map_err(|e| io::Error::new(io::ErrorKind::Other, format!("tls build: {e}")))?;
+        let connector = builder
+            .build()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("tls build: {e}")))?;
         let connector = TlsConnector::from(connector);
         let domain = up.host.as_str();
-        let tls = tokio::time::timeout(std::time::Duration::from_millis(up.timeout_ms), connector.connect(domain, stream))
-            .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "tls handshake timeout"))?
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("tls handshake: {e}")))?;
+        let tls = tokio::time::timeout(
+            std::time::Duration::from_millis(up.timeout_ms),
+            connector.connect(domain, stream),
+        )
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "tls handshake timeout"))?
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("tls handshake: {e}")))?;
         debug!("upstream: TLS handshake complete");
         Ok(UpstreamConn::Tls(tls))
     } else {
@@ -61,8 +72,12 @@ impl UpstreamConn {
 
 /// Parse license ID from JSON (format: "XX-YYYY-ZZZZ-WW" -> [0xXX, 0xYY, 0xYY, 0xZZ, 0xZZ, 0xWW])
 fn parse_license_id(json_data: &[u8]) -> io::Result<[u8; 6]> {
-    let json_str = std::str::from_utf8(json_data)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("license not UTF-8: {}", e)))?;
+    let json_str = std::str::from_utf8(json_data).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("license not UTF-8: {}", e),
+        )
+    })?;
 
     // Find "id" field in licenses array (first occurrence after "licenses")
     if let Some(licenses_pos) = json_str.find(r#""licenses""#) {
@@ -72,20 +87,28 @@ fn parse_license_id(json_data: &[u8]) -> io::Result<[u8; 6]> {
             if line.contains(r#""id""#) {
                 // Extract value after "id":
                 if let Some(colon_pos) = line.find(':') {
-                    let after_colon = &line[colon_pos+1..].trim_start();
+                    let after_colon = &line[colon_pos + 1..].trim_start();
                     if after_colon.starts_with('"') {
                         if let Some(end_quote) = after_colon[1..].find('"') {
-                            let id_str = &after_colon[1..1+end_quote];
+                            let id_str = &after_colon[1..1 + end_quote];
                             // Parse format like "96-4406-9EB7-5F"
-                            let hex_only: String = id_str.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+                            let hex_only: String =
+                                id_str.chars().filter(|c| c.is_ascii_hexdigit()).collect();
                             if hex_only.len() == 12 {
                                 let mut lic_id = [0u8; 6];
                                 for i in 0..6 {
-                                    let hex_byte = &hex_only[i*2..i*2+2];
-                                    lic_id[i] = u8::from_str_radix(hex_byte, 16)
-                                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad hex in license ID: {}", e)))?;
+                                    let hex_byte = &hex_only[i * 2..i * 2 + 2];
+                                    lic_id[i] = u8::from_str_radix(hex_byte, 16).map_err(|e| {
+                                        io::Error::new(
+                                            io::ErrorKind::InvalidData,
+                                            format!("bad hex in license ID: {}", e),
+                                        )
+                                    })?;
                                 }
-                                debug!("upstream: parsed license ID from '{}': {:02X?}", id_str, lic_id);
+                                debug!(
+                                    "upstream: parsed license ID from '{}': {:02X?}",
+                                    id_str, lic_id
+                                );
                                 return Ok(lic_id);
                             }
                         }
@@ -95,7 +118,10 @@ fn parse_license_id(json_data: &[u8]) -> io::Result<[u8; 6]> {
         }
     }
 
-    Err(io::Error::new(io::ErrorKind::InvalidData, "could not find license ID in JSON"))
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "could not find license ID in JSON",
+    ))
 }
 
 /// Perform a Lumina hello to upstream.
@@ -103,7 +129,10 @@ fn parse_license_id(json_data: &[u8]) -> io::Result<[u8; 6]> {
 async fn upstream_handshake(conn: &mut UpstreamConn, up: &Upstream) -> io::Result<()> {
     let lic_bytes: Vec<u8> = if let Some(ref path) = up.license_path {
         std::fs::read(path).map_err(|e| {
-            io::Error::new(e.kind(), format!("failed to read license file '{}': {}", path, e))
+            io::Error::new(
+                e.kind(),
+                format!("failed to read license file '{}': {}", path, e),
+            )
         })?
     } else {
         Vec::new()
@@ -121,13 +150,21 @@ async fn upstream_handshake(conn: &mut UpstreamConn, up: &Upstream) -> io::Resul
         lic_id,
         "guest",
         "",
-        0
+        0,
     );
-    debug!("upstream: sending hello (protocol_version={}, license_len={})", up.hello_protocol_version, lic_bytes.len());
+    debug!(
+        "upstream: sending hello (protocol_version={}, license_len={})",
+        up.hello_protocol_version,
+        lic_bytes.len()
+    );
     conn.write(0x0d, &payload).await?;
     debug!("upstream: waiting for hello response");
     let (typ, pl) = conn.read(1 << 20).await?; // accept up to 1 MiB hello reply
-    debug!("upstream: received hello response type=0x{:02x}, len={}", typ, pl.len());
+    debug!(
+        "upstream: received hello response type=0x{:02x}, len={}",
+        typ,
+        pl.len()
+    );
 
     // Check for failure response
     if typ == 0x0b {
@@ -135,13 +172,13 @@ async fn upstream_handshake(conn: &mut UpstreamConn, up: &Upstream) -> io::Resul
             Ok((code, msg)) => {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
-                    format!("upstream rejected hello: code={}, message={}", code, msg)
+                    format!("upstream rejected hello: code={}, message={}", code, msg),
                 ));
             }
             Err(_) => {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
-                    format!("upstream rejected hello with type 0x0b (failed to decode message)")
+                    format!("upstream rejected hello with type 0x0b (failed to decode message)"),
                 ));
             }
         }
@@ -151,7 +188,7 @@ async fn upstream_handshake(conn: &mut UpstreamConn, up: &Upstream) -> io::Resul
     if typ != 0x31 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("upstream hello: unexpected response type 0x{:02x}", typ)
+            format!("upstream hello: unexpected response type 0x{:02x}", typ),
         ));
     }
 
@@ -161,15 +198,16 @@ async fn upstream_handshake(conn: &mut UpstreamConn, up: &Upstream) -> io::Resul
 /// Fetch missing items from upstream servers. Returns vector aligned to `keys`.
 /// Tries servers in priority order (lower priority number = higher priority).
 /// Stops querying once all functions are found or all servers are exhausted.
-pub async fn fetch_from_upstreams(upstreams: &[crate::config::Upstream], keys: &[u128]) -> io::Result<Vec<UpItem>> {
+pub async fn fetch_from_upstreams(
+    upstreams: &[crate::config::Upstream],
+    keys: &[u128],
+) -> io::Result<Vec<UpItem>> {
     if keys.is_empty() {
         return Ok(Vec::new());
     }
 
     // Filter and sort enabled upstreams by priority
-    let mut sorted_upstreams: Vec<_> = upstreams.iter()
-        .filter(|up| up.enabled)
-        .collect();
+    let mut sorted_upstreams: Vec<_> = upstreams.iter().filter(|up| up.enabled).collect();
     sorted_upstreams.sort_by_key(|up| up.priority);
 
     if sorted_upstreams.is_empty() {
@@ -177,8 +215,11 @@ pub async fn fetch_from_upstreams(upstreams: &[crate::config::Upstream], keys: &
         return Ok(vec![None; keys.len()]);
     }
 
-    debug!("upstream: fetch_from_upstreams called for {} keys, trying {} servers in priority order",
-           keys.len(), sorted_upstreams.len());
+    debug!(
+        "upstream: fetch_from_upstreams called for {} keys, trying {} servers in priority order",
+        keys.len(),
+        sorted_upstreams.len()
+    );
 
     // Track results for all keys
     let mut results: Vec<UpItem> = vec![None; keys.len()];
@@ -197,14 +238,25 @@ pub async fn fetch_from_upstreams(upstreams: &[crate::config::Upstream], keys: &
         }
 
         if missing_keys.is_empty() {
-            debug!("upstream: all functions found after {} server(s)", server_idx);
+            debug!(
+                "upstream: all functions found after {} server(s)",
+                server_idx
+            );
             break;
         }
 
-        debug!("upstream: querying server {} (priority={}, host={}:{}) for {} missing keys",
-               server_idx, up.priority, up.host, up.port, missing_keys.len());
+        debug!(
+            "upstream: querying server {} (priority={}, host={}:{}) for {} missing keys",
+            server_idx,
+            up.priority,
+            up.host,
+            up.port,
+            missing_keys.len()
+        );
 
-        METRICS.upstream_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        METRICS
+            .upstream_requests
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         // Fetch from this upstream
         match fetch_from_single_upstream(up, &missing_keys).await {
@@ -217,12 +269,22 @@ pub async fn fetch_from_upstreams(upstreams: &[crate::config::Upstream], keys: &
                         found_count += 1;
                     }
                 }
-                debug!("upstream: server {} returned {} functions", server_idx, found_count);
-                METRICS.upstream_fetched.fetch_add(found_count, std::sync::atomic::Ordering::Relaxed);
+                debug!(
+                    "upstream: server {} returned {} functions",
+                    server_idx, found_count
+                );
+                METRICS
+                    .upstream_fetched
+                    .fetch_add(found_count, std::sync::atomic::Ordering::Relaxed);
             }
             Err(e) => {
-                METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                warn!("upstream: server {} ({}:{}) failed: {}", server_idx, up.host, up.port, e);
+                METRICS
+                    .upstream_errors
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                warn!(
+                    "upstream: server {} ({}:{}) failed: {}",
+                    server_idx, up.host, up.port, e
+                );
                 // Continue to next server
             }
         }
@@ -232,7 +294,10 @@ pub async fn fetch_from_upstreams(upstreams: &[crate::config::Upstream], keys: &
 }
 
 /// Fetch missing items from a single upstream server. Returns vector aligned to `keys`.
-async fn fetch_from_single_upstream(up: &crate::config::Upstream, keys: &[u128]) -> io::Result<Vec<UpItem>> {
+async fn fetch_from_single_upstream(
+    up: &crate::config::Upstream,
+    keys: &[u128],
+) -> io::Result<Vec<UpItem>> {
     if keys.is_empty() {
         return Ok(Vec::new());
     }
@@ -246,7 +311,7 @@ async fn fetch_from_single_upstream(up: &crate::config::Upstream, keys: &[u128])
         let slice = &keys[start..end];
 
         // Build hashes array (big-endian)
-        let mut arr = Vec::<[u8;16]>::with_capacity(slice.len());
+        let mut arr = Vec::<[u8; 16]>::with_capacity(slice.len());
         for &k in slice {
             arr.push(k.to_be_bytes());
         }
@@ -256,7 +321,9 @@ async fn fetch_from_single_upstream(up: &crate::config::Upstream, keys: &[u128])
         let mut conn = match connect(&up).await {
             Ok(c) => c,
             Err(e) => {
-                METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .upstream_errors
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 warn!("upstream connect failed: {}", e);
                 // keep None for these entries; try next batch
                 start = end;
@@ -264,16 +331,24 @@ async fn fetch_from_single_upstream(up: &crate::config::Upstream, keys: &[u128])
             }
         };
         if let Err(e) = upstream_handshake(&mut conn, &up).await {
-            METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            METRICS
+                .upstream_errors
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             warn!("upstream handshake failed: {}", e);
             start = end;
             continue;
         }
 
         // Send PullMetadata (0x0e)
-        debug!("upstream: sending PullMetadata for {} keys (payload {} bytes)", slice.len(), pull_payload.len());
+        debug!(
+            "upstream: sending PullMetadata for {} keys (payload {} bytes)",
+            slice.len(),
+            pull_payload.len()
+        );
         if let Err(e) = conn.write(0x0e, &pull_payload).await {
-            METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            METRICS
+                .upstream_errors
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             warn!("upstream write pull failed: {}", e);
             start = end;
             continue;
@@ -283,18 +358,26 @@ async fn fetch_from_single_upstream(up: &crate::config::Upstream, keys: &[u128])
         debug!("upstream: waiting for PullResult response");
         let (typ, payload) = match conn.read(64 * 1024 * 1024).await {
             Ok(v) => {
-                debug!("upstream: received response type=0x{:02x}, payload {} bytes", v.0, v.1.len());
+                debug!(
+                    "upstream: received response type=0x{:02x}, payload {} bytes",
+                    v.0,
+                    v.1.len()
+                );
                 v
             }
             Err(e) => {
-                METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .upstream_errors
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 warn!("upstream read pull failed: {} (io kind: {:?})", e, e.kind());
                 start = end;
                 continue;
             }
         };
         if typ != 0x0f {
-            METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            METRICS
+                .upstream_errors
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             warn!("upstream unexpected msg type: 0x{:02x}", typ);
             start = end;
             continue;
@@ -302,7 +385,11 @@ async fn fetch_from_single_upstream(up: &crate::config::Upstream, keys: &[u128])
 
         match lumina::decode_lumina_pull_result(&payload) {
             Ok((statuses, funcs)) => {
-                debug!("upstream: decoded pull result: {} statuses, {} funcs", statuses.len(), funcs.len());
+                debug!(
+                    "upstream: decoded pull result: {} statuses, {} funcs",
+                    statuses.len(),
+                    funcs.len()
+                );
                 // Map funcs back to request order: functions correspond to statuses==0 in order
                 let mut fidx = 0usize;
                 let mut found_count = 0;
@@ -316,10 +403,14 @@ async fn fetch_from_single_upstream(up: &crate::config::Upstream, keys: &[u128])
                     }
                 }
                 debug!("upstream: mapped {} functions to results", found_count);
-                METRICS.upstream_fetched.fetch_add(found_count as u64, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .upstream_fetched
+                    .fetch_add(found_count as u64, std::sync::atomic::Ordering::Relaxed);
             }
             Err(e) => {
-                METRICS.upstream_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                METRICS
+                    .upstream_errors
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 warn!("upstream decode pull result failed: {:?}", e);
             }
         }
