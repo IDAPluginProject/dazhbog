@@ -21,6 +21,7 @@ pub fn wyhash64(mut x: u64) -> u64 {
     x ^ (x >> 33)
 }
 
+#[allow(dead_code)]
 #[inline]
 pub fn key_tag(key: u128) -> u64 {
     let lo = key as u64;
@@ -67,4 +68,39 @@ pub fn hex_dump(data: &[u8], max_bytes: usize) -> String {
     }
 
     result
+}
+
+/// Stable version identifier: 16-byte key (LE) + 8-byte hash(name) + 8-byte hash(data).
+pub fn version_id(key: u128, name: &str, data: &[u8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    out[0..16].copy_from_slice(&key.to_le_bytes());
+    let name_hash = wyhash64(hash_bytes64(name.as_bytes()));
+    let data_hash = wyhash64(hash_bytes64(data));
+    out[16..24].copy_from_slice(&name_hash.to_le_bytes());
+    out[24..32].copy_from_slice(&data_hash.to_le_bytes());
+    out
+}
+
+#[inline]
+fn hash_bytes64(b: &[u8]) -> u64 {
+    // Simple streaming mix into a u64 seed
+    let mut h: u64 = 0x9e3779b185ebca87;
+    let mut i = 0usize;
+    while i + 8 <= b.len() {
+        let mut w = [0u8; 8];
+        w.copy_from_slice(&b[i..i+8]);
+        let v = u64::from_le_bytes(w);
+        h = h.wrapping_add(v);
+        h = wyhash64(h);
+        i += 8;
+    }
+    if i < b.len() {
+        let mut tail = [0u8; 8];
+        let remain = &b[i..];
+        tail[..remain.len()].copy_from_slice(remain);
+        let v = u64::from_le_bytes(tail);
+        h = h.wrapping_add(v);
+        h = wyhash64(h);
+    }
+    h ^ (b.len() as u64)
 }

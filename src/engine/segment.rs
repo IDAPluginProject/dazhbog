@@ -37,7 +37,6 @@ pub struct SegmentReader {
 }
 
 pub struct OpenSegments {
-    dir: PathBuf,
     db: sled::Db,
     pub current: std::sync::Mutex<SegmentWriter>,
     pub readers: parking_lot::Mutex<Vec<SegmentReader>>,
@@ -52,8 +51,7 @@ impl SegmentWriter {
         let tree = db.open_tree(&tree_name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?
 ;
-        
-        // Calculate current offset from existing entries
+
         let off = if let Some(last) = tree.last()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled last: {e}")))? {
             let (key_bytes, val) = last;
@@ -62,7 +60,7 @@ impl SegmentWriter {
         } else {
             0
         };
-        
+
         Ok(Self { tree, id, cap, off })
     }
 
@@ -104,7 +102,6 @@ impl SegmentWriter {
         buf.extend_from_slice(rec.name.as_bytes());
         buf.extend_from_slice(&rec.data);
 
-        // Canonical CRC-32C (Castagnoli, reflected)
         let crc = crc32c(0, &buf[12..]);
         if self.off == 0 {
             eprintln!("DEBUG: First write - CRC computed: 0x{:08x}, body_len: {}", crc, buf[12..].len());
@@ -140,11 +137,11 @@ impl SegmentReader {
         let data = self.tree.get(offset_key(offset))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled get: {e}")))?;
         let data = data.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "record not found"))?;
-        
+
         if data.len() < 12 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "record too short"));
         }
-        
+
         let hdr = &data[0..12];
         let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
         if magic != MAGIC { return Err(io::Error::new(io::ErrorKind::InvalidData, "bad magic")); }
@@ -152,8 +149,6 @@ impl SegmentReader {
         let crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
         let body = &data[12..];
 
-        // Verify with canonical CRC32C; if that fails, try legacy polynomial for
-        // backward compatibility with older corrupted-writer versions.
         let crc2 = crc32c(0, body);
         if crc != crc2 {
             let crc2_legacy = crc32c_legacy(0, body);
@@ -231,61 +226,57 @@ fn migrate_dat_files_to_sled(dat_files: &[PathBuf], db: &sled::Db, _dir: &Path) 
         let file_name = path.file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
-        
-        // Extract segment ID from filename (seg.00001.dat)
+
         let mid = &file_name[4..9];
         let seg_id = mid.parse::<u16>()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("parse segment id: {e}")))?;
-        
+
         log::info!("Migrating segment {} from {}", seg_id, file_name);
-        
+
         let file = OpenOptions::new().read(true).open(path)?;
         let file_len = file.metadata()?.len();
-        
+
         let tree_name = format!("seg.{:05}", seg_id);
         let tree = db.open_tree(&tree_name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?;
-        
+
         let mut offset = 0u64;
         let mut record_count = 0u64;
-        
+
         while offset + 12 < file_len {
             let mut hdr = [0u8; 12];
             if file.read_exact_at(&mut hdr, offset).is_err() {
                 break;
             }
-            
+
             let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
             if magic != MAGIC {
                 log::warn!("Skipping invalid record at offset {} (bad magic)", offset);
                 break;
             }
-            
+
             let rec_len = u32::from_le_bytes(hdr[4..8].try_into().unwrap()) as u64;
             if rec_len == 0 || offset + rec_len > file_len {
                 break;
             }
-            
-            // Read entire record (header + body)
+
             let mut record_data = vec![0u8; rec_len as usize];
             file.read_exact_at(&mut record_data, offset)?;
-            
-            // Store in sled with offset as key
+
             tree.insert(offset_key(offset), record_data.as_slice())
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
-            
+
             offset += rec_len;
             record_count += 1;
         }
-        
+
         log::info!("Migrated {} records from segment {}", record_count, seg_id);
-        
-        // Rename original file to .migrated
+
         let migrated_path = path.with_extension("dat.migrated");
         std::fs::rename(path, &migrated_path)?;
         log::info!("Renamed {} to {}", file_name, migrated_path.file_name().unwrap().to_string_lossy());
     }
-    
+
     Ok(())
 }
 
@@ -301,6 +292,7 @@ impl OpenSegments {
             .sum()
     }
 
+    #[allow(dead_code)]
     fn scan_records<F>(&self, readers: &[SegmentReader], mut callback: F) -> io::Result<u64>
     where
         F: FnMut(&SegmentReader, u64, u64, u128, u8) -> io::Result<ScanAction>,
@@ -312,45 +304,43 @@ impl OpenSegments {
             for item in r.tree.iter() {
                 let (key_bytes, data) = item
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
-                
+
                 let offset = u64::from_be_bytes(key_bytes.as_ref().try_into().unwrap());
                 let rec_len = data.len() as u64;
-                
+
                 if rec_len < 12 {
                     log::warn!("Skipping short record at seg={}, offset={}", r.id, offset);
                     continue;
                 }
-                
+
                 let hdr = &data[0..12];
                 let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
                 if magic != MAGIC {
                     log::warn!("Skipping record with bad magic at seg={}, offset={}", r.id, offset);
                     continue;
                 }
-                
+
                 if rec_len < MIN_STRUCTURED_SIZE {
                     log::warn!("Skipping malformed record at seg={}, offset={}: rec_len {} < minimum {}", r.id, offset, rec_len, MIN_STRUCTURED_SIZE);
                     total_processed += rec_len;
                     continue;
                 }
-                
+
                 let stored_crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
                 let body = &data[12..];
-                
-                // Extract key and flags BEFORE CRC validation
+
                 if body.len() < 16 + 8 + 8 + 8 + 4 + 4 + 2 + 4 + 1 {
                     log::warn!("Skipping record with short body at seg={}, offset={}", r.id, offset);
                     total_processed += rec_len;
                     continue;
                 }
-                
+
                 let keybuf = &body[0..16];
                 let lo = u64::from_le_bytes(keybuf[0..8].try_into().unwrap());
                 let hi = u64::from_le_bytes(keybuf[8..16].try_into().unwrap());
                 let key = ((hi as u128) << 64) | (lo as u128);
                 let flags = body[8 + 8 + 8 + 8 + 4 + 4 + 2 + 4];
-                
-                // Verify with canonical CRC32C; if that fails, try legacy polynomial
+
                 let computed_crc = crc32c(0, body);
                 let crc_valid = if computed_crc == stored_crc {
                     true
@@ -358,18 +348,18 @@ impl OpenSegments {
                     let computed_crc_legacy = crc32c_legacy(0, body);
                     computed_crc_legacy == stored_crc
                 };
-                
+
                 if !crc_valid {
                     log::warn!("Skipping corrupt record at seg={}, offset={}, key={:032x}: CRC mismatch (stored={:#x}, computed={:#x})", r.id, offset, key, stored_crc, computed_crc);
                     total_processed += rec_len;
                     continue;
                 }
-                
+
                 match callback(r, offset, rec_len, key, flags)? {
                     ScanAction::Continue => {},
                     ScanAction::Break => return Ok(total_processed),
                 }
-                
+
                 total_processed += rec_len;
             }
         }
@@ -379,23 +369,20 @@ impl OpenSegments {
 
     pub fn open(dir: &Path, seg_bytes: u64, use_mmap: bool) -> io::Result<Self> {
         std::fs::create_dir_all(dir)?;
-        
-        // Open sled database
+
         let seg_db_dir = dir.join("segments_db");
         std::fs::create_dir_all(&seg_db_dir)?;
-        
+
         let db = sled::Config::default()
             .path(&seg_db_dir)
             .cache_capacity(128 * 1024 * 1024)
             .flush_every_ms(Some(500))
             .open()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open: {e}")))?;
-        
-        // Check for migration marker
+
         let migration_marker = dir.join(".sled_migrated");
         let needs_migration = !migration_marker.exists();
-        
-        // Scan for existing segment files to migrate
+
         let mut dat_files = Vec::new();
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
@@ -405,15 +392,14 @@ impl OpenSegments {
                 }
             }
         }
-        
+
         if needs_migration && !dat_files.is_empty() {
             log::info!("Migrating {} segment files to sled database...", dat_files.len());
             migrate_dat_files_to_sled(&dat_files, &db, dir)?;
             std::fs::write(&migration_marker, b"migrated")?;
             log::info!("Migration complete");
         }
-        
-        // Find maximum segment ID from sled trees
+
         let mut max_id = None;
         for name in db.tree_names() {
             let name_str = String::from_utf8_lossy(&name);
@@ -424,16 +410,15 @@ impl OpenSegments {
                 }
             }
         }
-        
+
         let id = max_id.unwrap_or(1u16);
         let writer = SegmentWriter::open(&db, id, seg_bytes)?;
         let mut readers = Vec::new();
         for sid in 1..=id {
             readers.push(SegmentReader::open(&db, sid)?);
         }
-        
+
         Ok(Self {
-            dir: dir.to_path_buf(),
             db,
             current: std::sync::Mutex::new(writer),
             readers: parking_lot::Mutex::new(readers),
@@ -486,7 +471,6 @@ impl OpenSegments {
 
         self.scan_records_with_corruption(&rs, |r, off, rec_len, key, flags, is_corrupt| {
             if is_corrupt {
-                // Delete corrupt entries from index
                 index.delete(key);
                 corrupt_count += 1;
             } else {
@@ -526,45 +510,43 @@ impl OpenSegments {
             for item in r.tree.iter() {
                 let (key_bytes, data) = item
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
-                
+
                 let offset = u64::from_be_bytes(key_bytes.as_ref().try_into().unwrap());
                 let rec_len = data.len() as u64;
-                
+
                 if rec_len < 12 {
                     log::warn!("Skipping short record at seg={}, offset={}", r.id, offset);
                     continue;
                 }
-                
+
                 let hdr = &data[0..12];
                 let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
                 if magic != MAGIC {
                     log::warn!("Skipping record with bad magic at seg={}, offset={}", r.id, offset);
                     continue;
                 }
-                
+
                 if rec_len < MIN_STRUCTURED_SIZE {
                     log::warn!("Skipping malformed record at seg={}, offset={}: rec_len {} < minimum {}", r.id, offset, rec_len, MIN_STRUCTURED_SIZE);
                     total_processed += rec_len;
                     continue;
                 }
-                
+
                 let stored_crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
                 let body = &data[12..];
-                
-                // Extract key and flags
+
                 if body.len() < 16 + 8 + 8 + 8 + 4 + 4 + 2 + 4 + 1 {
                     log::warn!("Skipping record with short body at seg={}, offset={}", r.id, offset);
                     total_processed += rec_len;
                     continue;
                 }
-                
+
                 let keybuf = &body[0..16];
                 let lo = u64::from_le_bytes(keybuf[0..8].try_into().unwrap());
                 let hi = u64::from_le_bytes(keybuf[8..16].try_into().unwrap());
                 let key = ((hi as u128) << 64) | (lo as u128);
                 let flags = body[8 + 8 + 8 + 8 + 4 + 4 + 2 + 4];
-                
-                // Verify CRC
+
                 let computed_crc = crc32c(0, body);
                 let crc_valid = if computed_crc == stored_crc {
                     true
@@ -572,17 +554,17 @@ impl OpenSegments {
                     let computed_crc_legacy = crc32c_legacy(0, body);
                     computed_crc_legacy == stored_crc
                 };
-                
+
                 let is_corrupt = !crc_valid;
                 if is_corrupt {
                     log::warn!("Corrupt record at seg={}, offset={}, key={:032x}: CRC mismatch (stored={:#x}, computed={:#x})", r.id, offset, key, stored_crc, computed_crc);
                 }
-                
+
                 match callback(r, offset, rec_len, key, flags, is_corrupt)? {
                     ScanAction::Continue => {},
                     ScanAction::Break => return Ok(total_processed),
                 }
-                
+
                 total_processed += rec_len;
             }
         }
@@ -590,6 +572,7 @@ impl OpenSegments {
         Ok(total_processed)
     }
 
+    #[allow(dead_code)]
     pub fn deduplicate(&self) -> io::Result<(u64, u64, u64)> {
         use std::collections::HashMap;
 
@@ -659,10 +642,12 @@ impl OpenSegments {
 
         log::info!("Writing deduplicated segments...");
 
-        // Create temporary sled database
-        let temp_dir = self.dir.join(".dedup_temp");
+        let temp_dir = PathBuf::from(".dedup_temp");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir)?;
+        }
         std::fs::create_dir_all(&temp_dir)?;
-        
+
         let temp_db = sled::Config::default()
             .path(&temp_dir)
             .cache_capacity(128 * 1024 * 1024)
@@ -710,16 +695,13 @@ impl OpenSegments {
             rs.clear();
         }
 
-        // Remove old sled database
-        let seg_db_dir = self.dir.join("segments_db");
+        let seg_db_dir = PathBuf::from("data/segments_db");
         if seg_db_dir.exists() {
             std::fs::remove_dir_all(&seg_db_dir)?;
         }
 
-        // Move temporary database to main location
         std::fs::rename(&temp_dir, &seg_db_dir)?;
 
-        // Reopen database
         let new_db = sled::Config::default()
             .path(&seg_db_dir)
             .cache_capacity(128 * 1024 * 1024)
@@ -737,8 +719,6 @@ impl OpenSegments {
             *w = SegmentWriter::open(&new_db, 1, self.seg_bytes)?;
         }
 
-        // Update self.db - NOTE: This is a limitation; we can't update the db field easily
-        // For now, deduplicate is not fully supported with sled storage without significant refactoring
         log::warn!("Deduplication complete, but database reference not updated. Please restart the application.");
 
         let bytes_saved = total_bytes - written_bytes;

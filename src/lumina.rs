@@ -120,6 +120,7 @@ fn unpack_var_bytes_capped(data: &[u8], max_len: usize) -> Result<(&[u8], usize)
 }
 
 /// Helper (client): pack var-bytes as dd(len) + bytes
+#[allow(dead_code)]
 pub fn pack_var_bytes(bytes: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(5 + bytes.len());
     out.extend_from_slice(&pack_dd(bytes.len() as u32));
@@ -163,12 +164,15 @@ pub fn parse_lumina_hello(payload: &[u8]) -> Result<LuminaHello, LuminaError> {
 }
 
 pub struct LuminaPullMetadataFunc {
+    #[allow(dead_code)]
     pub unk0: u32,
     pub mb_hash: Vec<u8>,
 }
 
 pub struct LuminaPullMetadata {
+    #[allow(dead_code)]
     pub unk0: u32,
+    #[allow(dead_code)]
     pub unk1: Vec<u32>,
     pub funcs: Vec<LuminaPullMetadataFunc>,
 }
@@ -177,22 +181,27 @@ pub struct LuminaPushMetadataFunc {
     pub name: String,
     pub func_len: u32,
     pub func_data: Vec<u8>,
+    #[allow(dead_code)]
     pub unk2: u32,
     pub hash: Vec<u8>,
 }
 
 pub struct LuminaPushMetadata {
+    #[allow(dead_code)]
     pub unk0: u32,
+    #[allow(dead_code)]
     pub idb_path: String,
     pub file_path: String,
     pub md5: [u8; 16],
     pub hostname: String,
     pub funcs: Vec<LuminaPushMetadataFunc>,
+    #[allow(dead_code)]
     pub unk1: Vec<u64>,
 }
 
 pub struct LuminaGetFuncHistories {
     pub funcs: Vec<LuminaPullMetadataFunc>,
+    #[allow(dead_code)]
     pub unk0: u32,
 }
 
@@ -428,7 +437,7 @@ pub fn decode_lumina_pull_result(payload: &[u8]) -> Result<(Vec<u32>, Vec<(u32,u
     let mut funcs = Vec::with_capacity(n_funcs as usize);
     for _ in 0..n_funcs {
         // cstr name
-        let (name, c) = {
+        let (name, _c) = {
             let null_pos = payload[off..].iter().position(|&b| b == 0).ok_or(LuminaError::UnexpectedEof)?;
             let s = std::str::from_utf8(&payload[off..off+null_pos]).map_err(|_| LuminaError::InvalidData)?.to_string();
             off += null_pos + 1;

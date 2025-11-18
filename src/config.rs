@@ -78,12 +78,46 @@ pub struct Upstream {
 }
 
 #[derive(Clone, Debug)]
+pub struct Scoring {
+    pub w_md5: f64,
+    pub w_name: f64,
+    pub w_coh: f64,
+    pub w_stab: f64,
+    pub w_rec: f64,
+    pub w_pop_bin: f64,
+    pub w_host: f64,
+    pub w_origin: f64,
+    pub max_versions_per_key: usize,
+    pub max_md5_per_key: usize,
+    pub max_md5_per_version: usize,
+}
+
+impl Default for Scoring {
+    fn default() -> Self {
+        Self {
+            w_md5: 2.0,
+            w_name: 1.0,
+            w_coh: 2.0,
+            w_stab: 0.5,
+            w_rec: 0.5,
+            w_pop_bin: 0.5,
+            w_host: 0.25,
+            w_origin: 0.25,
+            max_versions_per_key: 16,
+            max_md5_per_key: 16,
+            max_md5_per_version: 16,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Config {
     pub limits: Limits,
     pub http: Option<Http>,
     pub engine: Engine,
     pub lumina: Lumina,
     pub upstreams: Vec<Upstream>,
+    pub scoring: Scoring,
 }
 
 impl Default for Config {
@@ -133,6 +167,7 @@ impl Default for Config {
                 tls: None,
             },
             upstreams: Vec::new(),
+            scoring: Scoring::default(),
         }
     }
 }
@@ -158,6 +193,7 @@ impl Config {
                     (usize_) => { val.parse::<usize>().map_err(|e| e.to_string())? };
                     (u32_) => { val.parse::<u32>().map_err(|e| e.to_string())? };
                     (u16_) => { val.parse::<u16>().map_err(|e| e.to_string())? };
+                    (f64_) => { val.parse::<f64>().map_err(|e| e.to_string())? };
                 }
                 match (section, key) {
                     ("limits","hello_timeout_ms") => cfg.limits.hello_timeout_ms = parse!(u),
@@ -210,13 +246,11 @@ impl Config {
 
                     // ---------------- Upstream (optional) ----------------
                     ("upstream", key) if key.starts_with(|c: char| c.is_ascii_digit()) => {
-                        // Parse upstream.N.field format
                         let parts: Vec<&str> = key.splitn(2, '.').collect();
                         if parts.len() != 2 { return Err(format!("invalid upstream key format: {}", key)); }
                         let idx = parts[0].parse::<usize>().map_err(|e| e.to_string())?;
                         let field = parts[1];
 
-                        // Ensure vector is large enough
                         while cfg.upstreams.len() <= idx {
                             cfg.upstreams.push(Upstream {
                                 enabled: false, priority: cfg.upstreams.len() as u32, host: String::new(), port: 0, use_tls: true,
@@ -242,6 +276,19 @@ impl Config {
                             _ => return Err(format!("unknown upstream field: {}", field)),
                         }
                     },
+
+                    // ---------------- Scoring (optional) ----------------
+                    ("scoring", "w_md5") => cfg.scoring.w_md5 = parse!(f64_),
+                    ("scoring", "w_name") => cfg.scoring.w_name = parse!(f64_),
+                    ("scoring", "w_coh") => cfg.scoring.w_coh = parse!(f64_),
+                    ("scoring", "w_stab") => cfg.scoring.w_stab = parse!(f64_),
+                    ("scoring", "w_rec") => cfg.scoring.w_rec = parse!(f64_),
+                    ("scoring", "w_pop_bin") => cfg.scoring.w_pop_bin = parse!(f64_),
+                    ("scoring", "w_host") => cfg.scoring.w_host = parse!(f64_),
+                    ("scoring", "w_origin") => cfg.scoring.w_origin = parse!(f64_),
+                    ("scoring", "max_versions_per_key") => cfg.scoring.max_versions_per_key = parse!(usize_),
+                    ("scoring", "max_md5_per_key") => cfg.scoring.max_md5_per_key = parse!(usize_),
+                    ("scoring", "max_md5_per_version") => cfg.scoring.max_md5_per_version = parse!(usize_),
 
                     _ => return Err(format!("unknown key {section}.{key}")),
                 }

@@ -262,7 +262,7 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                     let mut keys: Vec<u128> = Vec::with_capacity(pull_msg.funcs.len());
                     for func in &pull_msg.funcs {
                         if func.mb_hash.len() != 16 {
-                            keys.push(0); // placeholder; will be treated as missing/not found
+                            keys.push(0);
                         } else {
                             let key = u128::from_be_bytes([
                                 func.mb_hash[0], func.mb_hash[1], func.mb_hash[2], func.mb_hash[3],
@@ -274,22 +274,24 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                         }
                     }
 
-                    let mut maybe_funcs: Vec<Option<(u32,u32,String,Vec<u8>)>> = vec![None; keys.len()];
-                    let mut statuses: Vec<u32> = vec![1; keys.len()];
+                    let qctx = crate::db::QueryContext { keys: &keys, md5: None, basename: None, hostname: None };
+                    let selected = match db.select_versions_for_batch(&qctx).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!("scoring error: {}", e);
+                            // Fallback to legacy latest-per-key
+                            let mut v = Vec::with_capacity(keys.len());
+                            for &k in &keys {
+                                v.push(db.get_latest(k).await.ok().flatten().map(|f| (f.popularity, f.len_bytes, f.name, f.data)));
+                            }
+                            v
+                        }
+                    };
+
+                    let mut maybe_funcs: Vec<Option<(u32,u32,String,Vec<u8>)>> = selected;
+                    let mut statuses: Vec<u32> = maybe_funcs.iter().map(|o| if o.is_some() { 0 } else { 1 }).collect();
 
                     METRICS.queried_funcs.fetch_add(keys.len() as u64, std::sync::atomic::Ordering::Relaxed);
-
-                    for (i, &k) in keys.iter().enumerate() {
-                        if k == 0 { statuses[i] = 1; continue; }
-                        match db.get_latest(k).await {
-                            Ok(Some(f)) => {
-                                statuses[i] = 0;
-                                maybe_funcs[i] = Some((f.popularity, f.len_bytes, f.name, f.data));
-                            },
-                            Ok(None) => { statuses[i] = 1; },
-                            Err(e) => { error!("db pull: {}", e); statuses[i] = 1; }
-                        }
-                    }
 
                     // Upstream fetch for remaining misses
                     if !cfg.upstreams.is_empty() {
@@ -316,19 +318,19 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                                 let new_inserts: Vec<(u128, u32, u32, &str, &[u8])> = new_inserts_owned.iter()
                                     .map(|(k, p, l, n, d)| (*k, *p, *l, n.as_str(), d.as_slice()))
                                     .collect();
-                                    if !new_inserts.is_empty() {
-                                        match db.push(&new_inserts).await {
-                                            Ok(st) => {
-                                                let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
-                                                let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
-                                                METRICS.pushes.fetch_add((new_funcs + updated_funcs) as u64, std::sync::atomic::Ordering::Relaxed);
-                                                METRICS.new_funcs.fetch_add(new_funcs, std::sync::atomic::Ordering::Relaxed);
-                                            }
-                                            Err(e) => {
-                                                error!("db push after upstream: {}", e);
-                                            }
+                                if !new_inserts.is_empty() {
+                                    match db.push(&new_inserts).await {
+                                        Ok(st) => {
+                                            let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
+                                            let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
+                                            METRICS.pushes.fetch_add((new_funcs + updated_funcs) as u64, std::sync::atomic::Ordering::Relaxed);
+                                            METRICS.new_funcs.fetch_add(new_funcs, std::sync::atomic::Ordering::Relaxed);
+                                        }
+                                        Err(e) => {
+                                            error!("db push after upstream: {}", e);
                                         }
                                     }
+                                }
                                 }
                                 Err(e) => {
                                     warn!("upstream pull failed: {}", e);
@@ -366,6 +368,14 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
 
                     debug!("Lumina PUSH request: {} items", push_msg.funcs.len());
 
+                    // Print push request metadata
+                    println!("\n=== PUSH REQUEST ===");
+                    println!("IDB Path:     {}", push_msg.idb_path);
+                    println!("File Path:    {}", push_msg.file_path);
+                    println!("MD5:          {}", push_msg.md5.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+                    println!("Functions:    {}", push_msg.funcs.len());
+                    println!("===================\n");
+
                     let mut inlined: Vec<(u128, u32, u32, &str, &[u8])> = Vec::with_capacity(push_msg.funcs.len());
                     for func in &push_msg.funcs {
                         if func.hash.len() != 16 {
@@ -381,7 +391,18 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                         inlined.push((key, 0, func.func_len, &func.name, &func.func_data));
                     }
 
-                    match db.push(&inlined).await {
+                    // Extract binary context
+                    let basename = std::path::Path::new(&push_msg.file_path)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+                    let ctx = crate::db::PushContext {
+                        md5: Some(push_msg.md5),
+                        basename: Some(basename),
+                        hostname: Some(push_msg.hostname.as_str()),
+                    };
+
+                    match db.push_with_ctx(&inlined, &ctx).await {
                         Ok(status) => {
                             let new_funcs = status.iter().filter(|&&v| v == 1).count() as u64;
                             let updated_funcs = status.iter().filter(|&&v| v == 0).count() as u64;
@@ -494,20 +515,21 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 debug!("PULL request: {} keys", keys.len());
                 METRICS.queried_funcs.fetch_add(keys.len() as u64, std::sync::atomic::Ordering::Relaxed);
 
-                // Build per-index option and statuses, preserve order for 'found' packing.
-                let mut maybe_funcs: Vec<Option<(u32,u32,String,Vec<u8>)>> = vec![None; keys.len()];
-                let mut statuses: Vec<u32> = vec![1; keys.len()];
-
-                for (i, k) in keys.iter().copied().enumerate() {
-                    match db.get_latest(k).await {
-                        Ok(Some(f)) => {
-                            statuses[i] = 0;
-                            maybe_funcs[i] = Some((f.popularity, f.len_bytes, f.name, f.data));
-                        },
-                        Ok(None) => { statuses[i] = 1; },
-                        Err(e) => { error!("db pull: {}", e); statuses[i] = 1; }
+                let qctx = crate::db::QueryContext { keys: &keys, md5: None, basename: None, hostname: None };
+                let selected = match db.select_versions_for_batch(&qctx).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("scoring error: {}", e);
+                        let mut v = Vec::with_capacity(keys.len());
+                        for &k in &keys {
+                            v.push(db.get_latest(k).await.ok().flatten().map(|f| (f.popularity, f.len_bytes, f.name, f.data)));
+                        }
+                        v
                     }
-                }
+                };
+
+                let mut maybe_funcs: Vec<Option<(u32,u32,String,Vec<u8>)>> = selected;
+                let mut statuses: Vec<u32> = maybe_funcs.iter().map(|o| if o.is_some() { 0 } else { 1 }).collect();
 
                 // Upstream fetch for misses
                 if !cfg.upstreams.is_empty() {

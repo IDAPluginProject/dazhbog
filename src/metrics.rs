@@ -19,6 +19,11 @@ pub struct Metrics {
     pub upstream_requests: AtomicU64,
     pub upstream_fetched: AtomicU64,
     pub upstream_errors: AtomicU64,
+    // Scoring / selection metrics
+    pub scoring_batches: AtomicU64,
+    pub scoring_versions_considered: AtomicU64,
+    pub scoring_fallback_latest: AtomicU64,
+    pub scoring_time_ns: AtomicU64,
 }
 
 pub static METRICS: once_cell::sync::Lazy<&'static Metrics> = once_cell::sync::Lazy::new(|| {
@@ -30,7 +35,7 @@ impl Metrics {
         let g = |name: &str, help: &str, val: u64| -> String {
             format!("# HELP {0} {1}\n# TYPE {0} counter\n{0} {2}\n", name, help, val)
         };
-        let mut s = String::with_capacity(1024);
+        let mut s = String::with_capacity(2048);
         s.push_str(&g("dazhbog_pulls_total","Number of functions successfully pulled", self.pulls.load(Ordering::Relaxed)));
         s.push_str(&g("dazhbog_pushes_total","Number of functions pushed", self.pushes.load(Ordering::Relaxed)));
         s.push_str(&g("dazhbog_new_funcs_total","New unique functions inserted", self.new_funcs.load(Ordering::Relaxed)));
@@ -46,6 +51,10 @@ impl Metrics {
         s.push_str(&g("dazhbog_upstream_requests_total","Batches requested from upstream", self.upstream_requests.load(Ordering::Relaxed)));
         s.push_str(&g("dazhbog_upstream_fetched_total","Functions fetched from upstream", self.upstream_fetched.load(Ordering::Relaxed)));
         s.push_str(&g("dazhbog_upstream_errors_total","Errors contacting upstream", self.upstream_errors.load(Ordering::Relaxed)));
+        s.push_str(&g("dazhbog_scoring_batches_total","Version selection batches scored", self.scoring_batches.load(Ordering::Relaxed)));
+        s.push_str(&g("dazhbog_scoring_versions_considered_total","Versions considered across batches", self.scoring_versions_considered.load(Ordering::Relaxed)));
+        s.push_str(&g("dazhbog_scoring_fallback_latest_total","Batches falling back to latest semantics", self.scoring_fallback_latest.load(Ordering::Relaxed)));
+        s.push_str(&g("dazhbog_scoring_time_ns_total","Cumulative time spent scoring (ns)", self.scoring_time_ns.load(Ordering::Relaxed)));
         s
     }
 }

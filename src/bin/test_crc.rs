@@ -1,5 +1,4 @@
-use std::fs::File;
-use std::io::Read;
+use std::io;
 
 mod crc {
     pub fn crc32c_inline(mut crc: u32, data: &[u8]) -> u32 {
@@ -17,7 +16,7 @@ mod crc {
         }
         !crc
     }
-    
+
     pub fn crc32c_table(mut crc: u32, data: &[u8]) -> u32 {
         const POLY: u32 = 0x82F63B78;
         let mut table = [0u32; 256];
@@ -32,7 +31,7 @@ mod crc {
             }
             table[i] = c;
         }
-        
+
         crc = !crc;
         for &b in data {
             let idx = (crc ^ (b as u32)) & 0xFF;
@@ -42,21 +41,48 @@ mod crc {
     }
 }
 
-fn main() {
-    let mut f = File::open("data/seg.00001.dat").unwrap();
-    let mut hdr = [0u8; 12];
-    f.read_exact(&mut hdr).unwrap();
-    
-    let rec_len = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
-    let stored_crc = u32::from_le_bytes([hdr[8], hdr[9], hdr[10], hdr[11]]);
-    
-    let mut body = vec![0u8; (rec_len - 12) as usize];
-    f.read_exact(&mut body).unwrap();
-    
-    let computed_inline = crc::crc32c_inline(0, &body);
-    let computed_table = crc::crc32c_table(0, &body);
-    
+fn main() -> io::Result<()> {
+    let seg_db_path = "data/segments_db";
+    println!("Opening sled database at: {}", seg_db_path);
+    let db = sled::open(seg_db_path)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open: {}", e)))?;
+
+    let tree_name = "seg.00001";
+    println!("Opening tree: {}", tree_name);
+    let tree = db.open_tree(tree_name)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {}", e)))?;
+
+    let first_item = tree.iter().next();
+
+    let record_bytes = match first_item {
+        Some(Ok((_, val))) => val,
+        Some(Err(e)) => return Err(io::Error::new(io::ErrorKind::Other, format!("sled iter: {}", e))),
+        None => {
+            eprintln!("Tree {} is empty or could not read first item.", tree_name);
+            return Ok(());
+        }
+    };
+
+    if record_bytes.len() < 12 {
+        eprintln!("First record is too short.");
+        return Ok(());
+    }
+
+    let hdr = &record_bytes[0..12];
+    let rec_len = u32::from_le_bytes(hdr[4..8].try_into().unwrap());
+    let stored_crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
+
+    let body = &record_bytes[12..];
+
+    println!("Record length: {}", rec_len);
+    println!("Body length:   {}", body.len());
+
+    let computed_inline = crc::crc32c_inline(0, body);
+    let computed_table = crc::crc32c_table(0, body);
+
     println!("Stored CRC:      0x{:08x}", stored_crc);
     println!("Computed inline: 0x{:08x} {}", computed_inline, if stored_crc == computed_inline {"✓"} else {"✗"});
     println!("Computed table:  0x{:08x} {}", computed_table, if stored_crc == computed_table {"✓"} else {"✗"});
+
+    Ok(())
 }

@@ -7,6 +7,10 @@ description = "A high-performance, embedded-storage Lumina server compatible wit
 publish = false
 license = "MIT"
 
+[lib]
+name = "dazhbog"
+path = "src/lib.rs"
+
 [[bin]]
 name = "dazhbog"
 path = "src/main.rs"
@@ -30,6 +34,7 @@ log = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 sled = "0.34"
 tokio-test = "0.4.4"
+rand = "0.8"
 
 [profile.release]
 lto = "fat"

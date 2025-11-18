@@ -7,8 +7,11 @@ use std::{io, path::Path};
 
 #[derive(Clone, Debug)]
 pub struct IndexOptions {
+    #[allow(dead_code)]
     pub memtable_max_entries: usize,
+    #[allow(dead_code)]
     pub sst_block_entries: usize,
+    #[allow(dead_code)]
     pub level0_compact_trigger: usize,
 }
 impl IndexOptions {
@@ -23,6 +26,7 @@ pub enum UpsertResult {
 }
 
 pub enum IndexError {
+    #[allow(dead_code)]
     Full,
     Io(io::Error),
 }
@@ -42,23 +46,13 @@ fn dec64(b: &[u8]) -> u64 {
 }
 
 pub struct ShardedIndex {
-    db: sled::Db,
     tree: sled::Tree,
 }
 
 impl ShardedIndex {
-    pub fn open(dir: &Path, _opts: IndexOptions) -> io::Result<Self> {
-        std::fs::create_dir_all(dir)?;
-        // Proactively move legacy files (wal.dat/sst.*) aside to avoid confusion.
-        migrate_legacy_index_files(dir)?;
-        let db = sled::Config::default()
-            .path(dir)
-            .cache_capacity(64 * 1024 * 1024)
-            .flush_every_ms(Some(500))
-            .open()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open: {e}")))?;
+    pub fn new(db: &sled::Db) -> io::Result<Self> {
         let tree = db.open_tree("latest").map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {e}")))?;
-        Ok(Self { db, tree })
+        Ok(Self { tree })
     }
 
     pub fn get(&self, key: u128) -> u64 {
@@ -93,7 +87,7 @@ impl ShardedIndex {
         self.tree.len() as u64
     }
 
-    /// Iterate over all keys in the index
+    #[allow(dead_code)]
     pub fn iter_keys(&self) -> impl Iterator<Item = (u128, u64)> + '_ {
         self.tree.iter().filter_map(|res| {
             res.ok().and_then(|(k, v)| {
@@ -111,7 +105,7 @@ impl ShardedIndex {
     }
 }
 
-fn migrate_legacy_index_files(dir: &Path) -> io::Result<()> {
+pub fn migrate_legacy_index_files(dir: &Path) -> io::Result<()> {
     let mut found = false;
     for ent in std::fs::read_dir(dir)? {
         let ent = ent?;
