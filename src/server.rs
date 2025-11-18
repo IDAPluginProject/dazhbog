@@ -851,11 +851,15 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                     let mut missing_pos = Vec::new();
                     for (i, (&k, st)) in keys.iter().zip(statuses.iter()).enumerate() {
                         if *st == 1 {
-                            missing_keys.push(k);
-                            missing_pos.push(i);
+                            // Skip keys that are in the failure cache
+                            if !db.failure_cache.is_failed(k) {
+                                missing_keys.push(k);
+                                missing_pos.push(i);
+                            }
                         }
                     }
                     if !missing_keys.is_empty() {
+                        debug!("Upstream fetch: {} keys (after filtering failure cache)", missing_keys.len());
                         match crate::upstream::fetch_from_upstreams(&cfg.upstreams, &missing_keys)
                             .await
                         {
@@ -864,16 +868,20 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                                     Vec::new();
                                 for (j, item) in fetched.into_iter().enumerate() {
                                     let idx = missing_pos[j];
+                                    let key = missing_keys[j];
                                     if let Some((pop, len, name, data)) = item {
                                         statuses[idx] = 0;
                                         new_inserts_owned.push((
-                                            missing_keys[j],
+                                            key,
                                             pop,
                                             len,
                                             name.clone(),
                                             data.clone(),
                                         ));
                                         maybe_funcs[idx] = Some((pop, len, name, data));
+                                    } else {
+                                        // Not found in upstream - add to failure cache
+                                        db.failure_cache.insert(key);
                                     }
                                 }
                                 let new_inserts: Vec<(u128, u32, u32, &str, &[u8])> =
@@ -981,6 +989,12 @@ async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                         METRICS
                             .new_funcs
                             .fetch_add(new_funcs, std::sync::atomic::Ordering::Relaxed);
+                        
+                        // Remove successfully pushed keys from failure cache
+                        for it in &items {
+                            db.failure_cache.remove(it.key);
+                        }
+                        
                         debug!(
                             "PUSH response: {} new, {} updated, {} unchanged (took {:?})",
                             new_funcs,
