@@ -1,16 +1,16 @@
 <h1 align="center">dazhbog</h1>
 
-<h5 align="center">A high-performance, embedded-storage Lumina server compatible with IDA Pro 7.2+.</h5>
+<h5 align="center">A high-performance, embedded-storage Lumina server for IDA Pro 7.2+</h5>
 
 <br />
 
-`dazhbog` is a reimplementation of a Lumina protocol server designed for storing and retrieving function signatures used by IDA Pro's reverse engineering features.
+`dazhbog` is a fast, self-contained Lumina protocol server for storing and retrieving function signatures in IDA Pro. It uses embedded sled databases for both segments and indexing, requires zero external dependencies, and supports optional upstream forwarding to multiple Lumina servers with priority-based fallback.
 
 ---------------
 
 <h3 align=center>Public dazhbog server</h3>
 
-<div align=center>It supports both TLS and plaintext on the same port.<br/>It does NOT require any special configuration.</div>
+<div align=center>Supports both TLS and plaintext connections<br/>No special configuration required</div>
 
 <h3 align=center><i>host</i>: ida.int.mov<br/><i>port</i>: 1234</h3>
 <h3 align=center><i>user</i>: guest<br/><i>pass</i>: guest</h3>
@@ -19,156 +19,225 @@
 
 ### Installation
 
-```shell
+```bash
 cargo build --release
 ./target/release/dazhbog config.toml
 ```
 
-### Example Usage
+### Quick Start
 
 ```bash
-# Start the server
+# Start the server with default config
 ./dazhbog config.toml
 
-# Configure IDA Pro >= 8.1 if TLS is NOT provided by the server
+# Or use the help flag
+./dazhbog --help
+
+# Configure IDA Pro >= 8.1 if TLS is NOT enabled
 export LUMINA_TLS=false
 ./ida64
 ```
 
-For IDA Pro < 8.1, see the configuration section below.
-
 ### Features
 
-*   **Zero External Dependencies:** Uses a custom append-only log-structured storage engine with no database server required.
-*   **Full IDA Pro Protocol Compatibility:** Supports all IDA Pro Lumina protocol versions (7.2+).
-*   **High-Performance Sharded Index:** In-memory concurrent hash index with configurable sharding for lock-free reads.
-*   **Segment-Based Storage:** Append-only segment files with CRC32C integrity checking and efficient sequential writes.
-*   **Function History Tracking:** Maintains complete revision history via linked list of records with `prev_addr` pointers.
-*   **HTTP API & Metrics:** Built-in Prometheus-compatible metrics endpoint and web interface for monitoring.
-*   **TLS Support:** Optional TLS with custom certificate pinning for IDA Pro compatibility.
-*   **Graceful Degradation:** Automatic segment rotation and crash recovery through index rebuilding.
+*   **Embedded Storage:** Uses sled embedded databases for both segment storage and indexing—no external database required
+*   **Full Lumina Protocol Support:** Compatible with IDA Pro 7.2+ (protocol versions 0-6)
+*   **Sled-Backed Index:** Persistent key-value index with automatic recovery and efficient lookups
+*   **Append-Only Segments:** Immutable segment storage with CRC32C integrity validation and backward compatibility
+*   **Function History:** Complete revision history via `prev_addr` linked lists
+*   **Upstream Forwarding:** Multi-server upstream support with priority-based fallback for cache-miss scenarios
+*   **HTTP Metrics:** Prometheus-compatible metrics endpoint at `/metrics`
+*   **TLS Support:** Optional TLS with configurable certificate validation
+*   **Automatic Recovery:** Index rebuilds from segments on startup; automatic migration from legacy storage formats
+*   **Deduplication:** Optional startup deduplication to remove redundant records and reclaim space
 
-### Technical Background
-
-#### Architecture Overview
+### Architecture
 
 `dazhbog` is built around three core components:
 
-1.  **Storage Engine** - A custom append-only log-structured merge (LSM-inspired) storage system
-2.  **RPC Server** - IDA Pro Lumina protocol TCP server with TLS support
+1.  **Storage Engine** - Sled-backed append-only segments with persistent index
+2.  **RPC Server** - Lumina protocol TCP server with TLS support and multi-protocol handshake detection
 3.  **HTTP Server** - Metrics and monitoring interface
+4.  **Upstream Forwarding** - Optional proxy layer with priority-based multi-server support
 
-#### Storage Engine
+### Storage Engine
 
-The storage engine implements a log-structured design optimized for write-heavy workloads typical of collaborative reverse engineering:
+The storage engine uses **sled** (an embedded key-value database) for both segment storage and indexing.
 
-**Segments:**
-*   Fixed-size append-only files (default 512 MB) named `seg.00001.dat`, `seg.00002.dat`, etc.
-*   Each record contains:
-    *   **Header:** Magic number (`0x4C4D4E31`), record length, CRC32C checksum
-    *   **Body:** 128-bit function key, timestamp, previous address (for history chain), popularity, length, name, metadata blob, flags
-*   Records are written atomically with write-ahead CRC verification
-*   Segment rotation occurs automatically when capacity is reached
+#### Segments (sled-backed)
 
-**Sharded Index:**
-*   In-memory concurrent hash table with configurable shard count (default 256 shards)
-*   Each shard uses `DashMap` for lock-free concurrent reads
-*   Maps 128-bit function keys to 64-bit addresses encoding: `[seg_id:16 | offset:47 | flags:1]`
-*   Index is rebuilt on startup by scanning all segments sequentially
+*   Segments are stored as sled trees named `seg.00001`, `seg.00002`, etc.
+*   Keys are 8-byte big-endian offsets for lexicographic ordering
+*   Values are complete serialized records (header + body)
+*   Default segment capacity: 1 GB (configurable)
+*   Automatic segment rotation when capacity is reached
+*   Legacy `.dat` files are automatically migrated to sled on first startup
 
-**Record Format:**
+#### Record Format
+
 ```
-[MAGIC:4] [LEN:4] [CRC:4] [KEY_LO:8] [KEY_HI:8] [TIMESTAMP:8] [PREV_ADDR:8] 
+[MAGIC:4] [LEN:4] [CRC:4] [KEY_LO:8] [KEY_HI:8] [TIMESTAMP:8] [PREV_ADDR:8]
 [LEN_BYTES:4] [POPULARITY:4] [NAME_LEN:2] [DATA_LEN:4] [FLAGS:1] [PAD:5]
 [NAME:variable] [DATA:variable]
 ```
 
-**History Tracking:**
-Each record contains a `prev_addr` field pointing to the previous version of the same function. This creates a reverse-chronological linked list:
+*   **Magic:** `0x4C4D4E31` (constant identifier)
+*   **CRC:** CRC32C checksum over the body (legacy polynomial supported for backward compatibility)
+*   **Key:** 128-bit function identifier (MD5 hash of function bytes)
+*   **Prev_Addr:** 64-bit pointer to previous version (forms linked list for history)
+*   **Flags:** Bit 0 = tombstone (deleted), remaining bits reserved
+
+#### Index (sled-backed)
+
+*   Persistent sled tree mapping 128-bit keys → 64-bit addresses
+*   Address encoding: `[seg_id:16 | offset:47 | flags:1]`
+*   Atomic upsert operations with `fetch_and_update`
+*   Automatic rebuild from segments if empty (on first startup)
+*   Legacy index files (`wal.dat`, `sst.*.ldb`) automatically migrated to `.legacy_index_*` backup
+
+#### History Tracking
+
+Each record's `prev_addr` field points to the previous version:
 ```
-HEAD (index) -> Version 3 -> Version 2 -> Version 1 -> NULL
+Index → Latest (v3) → Older (v2) → Oldest (v1) → NULL
 ```
-Queries traverse this chain up to the configured history limit.
 
-**Tombstones:**
-Deletions are implemented via tombstone records (`flags & 0x01`). The index points to the tombstone, which links to previous versions, preserving history while marking the function as deleted.
+History queries traverse this chain up to `lumina.get_history_limit`.
 
-#### Protocol Support
+#### Tombstones
 
-`dazhbog` implements full compatibility with the IDA Pro Lumina protocol:
+Deletions write a tombstone record with `flags & 0x01 = 1`. The index points to the tombstone, which links to previous versions, preserving history.
 
-**Protocol Details:**
-*   Lumina hello message type: `0x0d`
-*   Variable-length integer encoding (IDA's proprietary `dd` format)
-*   Commands: `PullMetadata (0x0e)`, `PushMetadata (0x10)`, `DelHistory (0x18)`, `GetFuncHistories (0x2f)`
-*   License data validation (bypassed in guest mode)
-*   Protocol versions 0-5 supported
+### Protocol Support
+
+`dazhbog` implements full compatibility with IDA Pro's Lumina protocol:
+
+**Supported Protocol Versions:**
+*   Versions 0-6 (IDA Pro 7.2 through 9.0+)
+*   Automatic detection of protocol version from hello message
+
+**Message Types:**
+*   `0x0d` - Lumina Hello (legacy)
+*   `0x01` - New-style Hello
+*   `0x0e` - PullMetadata (query functions)
+*   `0x0f` - PullResult (query response)
+*   `0x10` - PushMetadata (store functions)
+*   `0x18` - DelHistory (delete functions, if enabled)
+*   `0x2f` - GetFuncHistories (retrieve version history)
+*   `0x0b` - Fail (error response)
+*   `0x31` - HelloResult (version 5+ handshake response)
 
 **Frame Format:**
-All messages use a 4-byte big-endian length prefix followed by the message type byte and payload:
 ```
 [LENGTH:4 BE] [TYPE:1] [PAYLOAD:variable]
 ```
 
-### Architecture & Design
+**Authentication:**
+*   Username must be `guest` (hardcoded)
+*   Password ignored
+*   License validation bypassed in guest mode
 
-**Key Technical Features:**
+### Upstream Forwarding
 
-1.  **Storage Model:**
-    *   Dazhbog uses append-only storage where updates are new records linked to old versions. No in-place updates.
+`dazhbog` can act as a caching proxy by forwarding cache misses to upstream Lumina servers:
 
-2.  **Index Strategy:**
-    *   Dazhbog maintains a purely in-memory hash index rebuilt on startup. This trades memory for speed.
+**Multi-Server Support:**
+*   Configure multiple upstream servers with priority levels
+*   Lower priority number = higher priority (queried first)
+*   Servers queried in priority order until all functions found
+*   Each server can have independent TLS, timeout, and batch size settings
 
-3.  **Concurrency:**
-    *   Dazhbog uses lock-free concurrent data structures (`DashMap`) with optimistic concurrency for the index and coarse-grained locks for segment writes.
+**Configuration Example:**
+```toml
+# Primary upstream (priority 0 = highest)
+upstream.0.enabled = true
+upstream.0.priority = 0
+upstream.0.host = "lumina.hex-rays.com"
+upstream.0.port = 443
+upstream.0.use_tls = true
+upstream.0.insecure_no_verify = true
+upstream.0.hello_protocol_version = 6
+upstream.0.license_path = "license.hexlic"
+upstream.0.timeout_ms = 8000
+upstream.0.batch_max = 131072
 
-4.  **History Implementation:**
-    *   Dazhbog embeds history in each record via `prev_addr`, forming a reverse-chronological linked list.
+# Secondary upstream (priority 1)
+upstream.1.enabled = true
+upstream.1.priority = 1
+upstream.1.host = "backup.lumina.server"
+upstream.1.port = 1235
+# ... additional settings
+```
 
-5.  **Operational Simplicity:**
-    *   Dazhbog is a single binary with file-based storage that can be copied/backed up like any directory.
+**Behavior:**
+1.  Client queries dazhbog for function metadata
+2.  If found locally, return immediately
+3.  If not found, forward to upstream(s) in priority order
+4.  Cache fetched results locally
+5.  Return merged results to client
 
-6.  **Use Case Optimization:**
-    *   Dazhbog is optimized for embedded deployment, personal use, air-gapped networks, and write-heavy workloads.
+**License Support:**
+*   Upstream connections can use license files (`.hexlic` format)
+*   License ID automatically parsed from JSON and sent in hello handshake
+*   Guest mode supported for license-free upstreams
 
 ### Configuration
 
-Example `config.toml`:
+Run `./dazhbog --help` for a complete list of configuration options.
+
+**Example `config.toml`:**
 
 ```toml
-[lumina]
-bind_addr = "0.0.0.0:1234"
-use_tls = false
-server_name = "dazhbog"
-allow_deletes = true
-get_history_limit = 10
+# Connection and resource limits
+limits.hello_timeout_ms = 3000
+limits.command_timeout_ms = 15000
+limits.max_active_conns = 2048
+limits.max_pull_items = 524288
+limits.max_push_items = 524288
+limits.per_connection_inflight_bytes = 33554432  # 32 MB
+limits.global_inflight_bytes = 536870912         # 512 MB
 
-[engine]
-data_dir = "./data"
-segment_bytes = 536870912  # 512 MB
-index_capacity = 10000000  # 10M functions
-shard_count = 256
-use_mmap_reads = false
+# Storage engine configuration
+engine.data_dir = "data"
+engine.segment_bytes = 1073741824  # 1 GB per segment
+engine.shard_count = 64
+engine.index_capacity = 1073741824
+engine.deduplicate_on_startup = false  # Set true to deduplicate on startup (slow)
+engine.index_memtable_max_entries = 200000
+engine.index_block_entries = 128
+engine.index_level0_compact_trigger = 8
 
-[limits]
-max_active_conns = 1000
-hello_timeout_ms = 5000
-tls_handshake_timeout_ms = 10000
-command_timeout_ms = 30000
+# Lumina protocol server
+lumina.bind_addr = "0.0.0.0:1234"
+lumina.server_name = "dazhbog"
+lumina.allow_deletes = false
+lumina.get_history_limit = 32  # Max history versions to return (0 = disabled)
+lumina.use_tls = false
 
-[http]
-bind_addr = "0.0.0.0:8080"
+# Upstream forwarding (optional)
+upstream.0.enabled = true
+upstream.0.priority = 0
+upstream.0.host = "lumina.hex-rays.com"
+upstream.0.port = 443
+upstream.0.use_tls = true
+upstream.0.insecure_no_verify = true
+upstream.0.hello_protocol_version = 6
+upstream.0.license_path = "license.hexlic"
+upstream.0.timeout_ms = 8000
+upstream.0.batch_max = 131072
+
+# HTTP metrics server
+http.bind_addr = "0.0.0.0:8080"
 ```
 
-### Configuring IDA Pro
+### IDA Pro Configuration
 
-You can simply configure the lumina server in the General → Lumina settings. You *do not* need this for the public dazhbog server.
+#### IDA Pro 8.1+
 
-#### IDA Pro >= 8.1 if TLS is NOT enabled in the server
+If your dazhbog server does NOT use TLS:
 
 ```bash
-# Linux
+# Linux/macOS
 export LUMINA_TLS=false
 ./ida64
 
@@ -177,87 +246,103 @@ set LUMINA_TLS=false
 ida64.exe
 ```
 
-In IDA: Go to **Options → General → Lumina**, select "Use a private server", set your host/port, and use `guest` as username and password.
+Then in IDA: **Options → General → Lumina** → "Use a private server"
+*   Host: your server IP/hostname
+*   Port: 1234 (or your configured port)
+*   Username: `guest`
+*   Password: `guest`
 
-#### IDA Pro < 8.1
+#### IDA Pro 7.2 - 8.0
 
 Edit `cfg/ida.cfg`:
 
 ```c
-LUMINA_HOST = "127.0.0.1";
+LUMINA_HOST = "your.server.ip";
 LUMINA_PORT = 1234;
-LUMINA_TLS = NO;
+LUMINA_TLS = NO;  // or YES if using TLS
 ```
 
-### Performance Characteristics
+### Performance
 
 **Write Performance:**
-*   Append-only writes: ~50,000 functions/second (single segment)
-*   Index updates: O(1) with lock-free sharded hash table
-*   Segment rotation: ~5ms overhead when full
+*   Sled-backed append: thousands of functions/second
+*   Atomic index updates via sled's `fetch_and_update`
+*   Automatic segment rotation when capacity reached
 
 **Read Performance:**
-*   Function lookup: ~10-20μs (memory index lookup + single disk seek)
-*   History traversal: ~50μs per version (follows `prev_addr` chain)
-*   Batch queries: Scales linearly with request size
+*   Function lookup: single sled tree query (microseconds)
+*   History traversal: follows `prev_addr` chain with sequential sled reads
+*   Batch queries scale linearly with request size
 
 **Memory Usage:**
-*   Base: ~10 MB
-*   Index: ~80 bytes per function (varies with key distribution)
-*    1M functions ≈ 80-100 MB total
+*   Sled cache: configurable (default 64-128 MB)
+*   Index is persistent; no full in-memory index required
+*   Memory budget enforcement via per-connection and global limits
 
 **Disk Usage:**
-*   ~200-500 bytes per function (depends on name/metadata size)
-*   History preserved in-place (no duplication)
-*   Tombstones add ~100 bytes per deletion
+*   ~200-500 bytes per function record
+*   Sled overhead: ~10-20% for tree structure
+*   History preserved via linked records
+*   Deduplication can reclaim 20-50% space in redundant databases
 
-### Recovery & Durability
+### Recovery & Data Integrity
 
 **Crash Recovery:**
-On startup, dazhbog scans all segment files sequentially and rebuilds the in-memory index. This ensures consistency even after unclean shutdown.
+*   Sled provides ACID guarantees with automatic recovery
+*   If index is empty on startup, automatically rebuilt from segments
+*   Corrupt records detected via CRC32C and skipped during rebuild
+*   Legacy storage formats (`.dat` files, old index files) automatically migrated
 
-**Index Rebuild:**
-```rust
-// Pseudo-code for recovery
-for segment in segments_on_disk {
-    for record in segment.scan() {
-        if record.crc_valid() {
-            index.upsert(record.key, record.address);
-        }
-    }
-}
-```
+**Rebuild Process:**
+1.  Scan all segment trees in sled database
+2.  For each record: validate magic, CRC32C, and structure
+3.  Upsert valid records into index (tombstones processed correctly)
+4.  Log progress and corrupt record count
 
 **Data Integrity:**
-*   CRC32C checksums on every record
-*   Atomic segment writes (no partial records)
-*   No write-ahead log (append-only guarantees durability)
+*   CRC32C checksums on every record body
+*   Backward-compatible CRC validation (supports legacy polynomial)
+*   Sled ensures atomic writes and durability
+*   No partial records possible due to sled's transaction model
 
 ### Monitoring
 
-The HTTP server exposes metrics at `http://localhost:8080/metrics`:
+The HTTP server exposes Prometheus-compatible metrics at `http://localhost:8080/metrics`:
 
+**Available Metrics:**
+*   `dazhbog_pulls_total` - Number of functions successfully pulled
+*   `dazhbog_pushes_total` - Number of functions pushed
+*   `dazhbog_new_funcs_total` - New unique functions inserted
+*   `dazhbog_queried_funcs_total` - Total function keys queried
+*   `dazhbog_active_connections` - Active RPC connections
+*   `dazhbog_lumina_v0_4` - Protocol version 0-4 handshakes
+*   `dazhbog_lumina_v5p` - Protocol version 5+ handshakes
+*   `dazhbog_errors_total` - Total errors
+*   `dazhbog_timeouts_total` - Connection timeouts
+*   `dazhbog_upstream_requests_total` - Upstream batch requests
+*   `dazhbog_upstream_fetched_total` - Functions fetched from upstream
+*   `dazhbog_upstream_errors_total` - Upstream connection errors
+*   `dazhbog_index_overflows_total` - Index insertion failures
+*   `dazhbog_append_failures_total` - Database append failures
+*   `dazhbog_decoder_rejects_total` - Protocol decoder rejections
+
+### Additional Tools
+
+**Recovery Tool:**
+```bash
+./target/release/recover config.toml
 ```
-# HELP dazhbog_active_connections Active client connections
-# TYPE dazhbog_active_connections gauge
-dazhbog_active_connections 42
-
-# HELP dazhbog_pushes_total Function metadata push operations
-# TYPE dazhbog_pushes_total counter
-dazhbog_pushes_total 1523
-
-# HELP dazhbog_pulls_total Function metadata pull operations
-# TYPE dazhbog_pulls_total counter
-dazhbog_pulls_total 8921
-```
+Manually rebuilds the index from segments. Useful for debugging or recovery scenarios.
 
 ### Notes
 
-*   The server name "dazhbog" (Дажьбог) is a Slavic sun deity.
-*   The storage engine is inspired by Bitcask and LSM trees but optimized for function signature workloads.
-*   Full compatibility with IDA Pro's Lumina protocol across all versions (7.2+).
-*   No authentication beyond username checking is implemented (designed for private networks).
-*   The index rebuild on startup means initial startup time scales with database size (typically <1 second per 1M functions).
+*   **Etymology:** "dazhbog" (Дажьбог) is a Slavic sun deity
+*   **Storage:** Uses sled embedded database (pure Rust, no C dependencies)
+*   **Compatibility:** Full support for IDA Pro 7.2+ (Lumina protocol versions 0-6)
+*   **Authentication:** Username must be `guest`; no password validation (designed for trusted networks)
+*   **Migration:** Automatically migrates legacy `.dat` segment files and old index formats
+*   **Startup Time:** Index rebuild scales with database size (~1 second per 1M functions)
+*   **Deduplication:** Optional `deduplicate_on_startup` removes duplicate records but requires full rewrite (slow on large databases)
 
 ### License
 
