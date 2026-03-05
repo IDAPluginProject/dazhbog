@@ -2,7 +2,7 @@
 
 use super::types::{SearchDocument, SearchHit};
 use std::{io, path::Path};
-use tantivy::collector::TopDocs;
+use tantivy::collector::{Count, TopDocs};
 
 /// Extract only the filename from a path, stripping directories.
 /// Handles both Unix (/) and Windows (\) path separators regardless of platform.
@@ -271,6 +271,92 @@ impl SearchIndex {
         }
 
         Ok(hits)
+    }
+
+    /// Search with pagination support. Returns (results, total_count).
+    pub fn search_paginated(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> io::Result<(Vec<SearchHit>, usize)> {
+        let query_str = query.trim();
+        if query_str.is_empty() {
+            return Ok((Vec::new(), 0));
+        }
+
+        let searcher = self.reader.searcher();
+
+        let query_parser = QueryParser::for_index(
+            &self.index,
+            vec![
+                self.fields.func_name,
+                self.fields.func_name_demangled,
+                self.fields.binary_name,
+            ],
+        );
+
+        let tantivy_query = query_parser.parse_query_lenient(query_str).0;
+
+        // Get total count of matching documents
+        let total_count = searcher
+            .search(&tantivy_query, &Count)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("count: {e}")))?;
+
+        // Get results with offset + limit, then skip offset
+        let top_docs = searcher
+            .search(&tantivy_query, &TopDocs::with_limit(offset + limit))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("search: {e}")))?;
+
+        let mut hits = Vec::with_capacity(limit.min(top_docs.len().saturating_sub(offset)));
+
+        for (score, doc_addr) in top_docs.into_iter().skip(offset) {
+            let doc = searcher
+                .doc(doc_addr)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("fetch doc: {e}")))?;
+
+            let key_hex = doc
+                .get_first(self.fields.key_hex)
+                .and_then(|v| v.as_text())
+                .unwrap_or("")
+                .to_string();
+
+            let func_name = doc
+                .get_first(self.fields.func_name)
+                .and_then(|v| v.as_text())
+                .unwrap_or("")
+                .to_string();
+
+            let func_name_demangled = doc
+                .get_first(self.fields.func_name_demangled)
+                .and_then(|v| v.as_text())
+                .unwrap_or("")
+                .to_string();
+
+            let lang = doc
+                .get_first(self.fields.lang)
+                .and_then(|v| v.as_text())
+                .unwrap_or("")
+                .to_string();
+
+            let binary_names: Vec<String> = doc
+                .get_all(self.fields.binary_name)
+                .filter_map(|v| v.as_text())
+                .map(|s| sanitize_basename(s))
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            hits.push(SearchHit::new_with_demangled(
+                key_hex,
+                func_name,
+                func_name_demangled,
+                lang,
+                binary_names,
+                score,
+            ));
+        }
+
+        Ok((hits, total_count))
     }
 
     /// Get the number of documents in the search index.

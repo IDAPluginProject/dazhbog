@@ -102,6 +102,84 @@ pub async fn send_lumina_hello_result<W: AsyncWriteExt + Unpin>(
     write_lumina_packet(w, 0x31, &payload).await
 }
 
+/// Send a Lumina Notify response (0x0c).
+pub async fn send_lumina_notify<W: AsyncWriteExt + Unpin>(
+    w: &mut W,
+    notify_type: u32,
+    message: &str,
+) -> io::Result<()> {
+    let mut payload = BytesMut::new();
+    payload.extend_from_slice(&pack_dd(notify_type));
+    payload.extend_from_slice(message.as_bytes());
+    payload.extend_from_slice(b"\0");
+    write_lumina_packet(w, 0x0c, &payload).await
+}
+
+/// Send a Lumina Info Result response (0x2c).
+pub async fn send_lumina_info_result<W: AsyncWriteExt + Unpin>(
+    w: &mut W,
+    server_mac: &str,
+    server_version: &str,
+    start_time: u64,
+    current_time: u64,
+) -> io::Result<()> {
+    let mut payload = BytesMut::new();
+
+    // peer_conn_t client
+    payload.extend_from_slice(&pack_dd(1)); // session_id
+    payload.extend_from_slice(b"dazhbog-client\0"); // peer_name
+    // lumina_user_t
+    payload.extend_from_slice(b"\0\0\0"); // license_info: id, name, email
+    payload.extend_from_slice(b"\0"); // name
+    payload.extend_from_slice(&pack_dd(0)); // karma
+    payload.extend_from_slice(&pack_dq(current_time)); // last_active
+    payload.extend_from_slice(&pack_dd(0)); // features
+    payload.extend_from_slice(&pack_dq(current_time)); // established
+
+    // lumina_server_info_t server
+    payload.extend_from_slice(server_mac.as_bytes());
+    payload.extend_from_slice(b"\0");
+    payload.extend_from_slice(server_version.as_bytes());
+    payload.extend_from_slice(b"\0");
+    payload.extend_from_slice(&pack_dq(start_time));
+    payload.extend_from_slice(&pack_dq(current_time));
+
+    write_lumina_packet(w, 0x2c, &payload).await
+}
+
+/// Send a Lumina Stats Result response (0x2e).
+pub async fn send_lumina_stats_result<W: AsyncWriteExt + Unpin>(
+    w: &mut W,
+    stats: &[super::LuminaStats],
+) -> io::Result<()> {
+    let mut payload = BytesMut::new();
+    payload.extend_from_slice(&pack_dd(stats.len() as u32));
+    
+    for stat in stats {
+        // lumina_user_t
+        payload.extend_from_slice(stat.user.license_info.id.as_bytes());
+        payload.extend_from_slice(b"\0");
+        payload.extend_from_slice(stat.user.license_info.name.as_bytes());
+        payload.extend_from_slice(b"\0");
+        payload.extend_from_slice(stat.user.license_info.email.as_bytes());
+        payload.extend_from_slice(b"\0");
+        payload.extend_from_slice(stat.user.name.as_bytes());
+        payload.extend_from_slice(b"\0");
+        payload.extend_from_slice(&pack_dd(stat.user.karma as u32));
+        payload.extend_from_slice(&pack_dq(stat.user.last_active));
+        payload.extend_from_slice(&pack_dd(stat.user.features));
+
+        // stats
+        payload.extend_from_slice(&pack_dq(stat.nfuncs));
+        payload.extend_from_slice(&pack_dq(stat.npushes));
+        payload.extend_from_slice(&pack_dq(stat.nhist_recs));
+        payload.extend_from_slice(&pack_dq(stat.nidbs));
+        payload.extend_from_slice(&pack_dq(stat.ninput_files));
+    }
+
+    write_lumina_packet(w, 0x2e, &payload).await
+}
+
 /// Send a Lumina Fail response (0x0b).
 pub async fn send_lumina_fail<W: AsyncWriteExt + Unpin>(
     w: &mut W,
@@ -113,6 +191,46 @@ pub async fn send_lumina_fail<W: AsyncWriteExt + Unpin>(
     payload.extend_from_slice(message.as_bytes());
     payload.extend_from_slice(b"\0");
     write_lumina_packet(w, 0x0b, &payload).await
+}
+
+/// Send a Lumina Pop Result response (0x13).
+pub async fn send_lumina_pop_result<W: AsyncWriteExt + Unpin>(
+    w: &mut W,
+    results: &[(String, u32, Vec<u8>, u32, Vec<u8>, u32, String, String, [u8; 16], u64)],
+) -> io::Result<()> {
+    // (name, size, metadata, pattern_type, pattern_data, freq, hostname, file_path, md5, ea64)
+    let mut payload = BytesMut::new();
+    payload.extend_from_slice(&pack_dd(results.len() as u32));
+    for (name, size, metadata, pat_type, pat_data, freq, host, path, md5, ea) in results {
+        // func_info_t
+        payload.extend_from_slice(name.as_bytes());
+        payload.extend_from_slice(b"\0");
+        payload.extend_from_slice(&pack_dd(*size));
+        payload.extend_from_slice(&pack_dd(metadata.len() as u32));
+        payload.extend_from_slice(metadata);
+        
+        // pattern_id_t
+        payload.extend_from_slice(&pack_dd(*pat_type));
+        payload.extend_from_slice(&pack_dd(pat_data.len() as u32));
+        payload.extend_from_slice(pat_data);
+        
+        // frequency
+        payload.extend_from_slice(&pack_dd(*freq));
+        
+        // pop_fun_t specific
+        payload.extend_from_slice(host.as_bytes());
+        payload.extend_from_slice(b"\0");
+        
+        // input_file_t
+        payload.extend_from_slice(path.as_bytes());
+        payload.extend_from_slice(b"\0");
+        payload.extend_from_slice(md5);
+        
+        // ea64
+        payload.extend_from_slice(&pack_ea64(*ea));
+    }
+    
+    write_lumina_packet(w, 0x13, &payload).await
 }
 
 /// Send a Lumina PullResult response (0x0f).

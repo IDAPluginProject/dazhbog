@@ -1,7 +1,57 @@
 use chrono::{DateTime, Utc};
-use std::{io, path::PathBuf};
+use std::{fs, io, path::PathBuf};
 
 const MAGIC: u32 = 0x4C4D4E31;
+
+struct Args {
+    limit: usize,
+    dump_dir: Option<PathBuf>,
+}
+
+fn parse_args() -> Args {
+    let args: Vec<String> = std::env::args().collect();
+    let mut limit = 10usize;
+    let mut dump_dir = None;
+    let mut i = 1;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--dump" => {
+                // --dump <count> [dir]
+                i += 1;
+                if i < args.len() {
+                    limit = args[i].parse().unwrap_or(2000);
+                }
+                i += 1;
+                if i < args.len() && !args[i].starts_with("--") {
+                    dump_dir = Some(PathBuf::from(&args[i]));
+                } else {
+                    dump_dir = Some(PathBuf::from("analysis/data"));
+                    i -= 1; // didn't consume this arg
+                }
+            }
+            "--help" | "-h" => {
+                println!("Usage: dump_functions [OPTIONS]");
+                println!();
+                println!("Options:");
+                println!("  <count>              Display this many function records (default: 10)");
+                println!("  --dump <count> [dir] Dump <count> metadata payloads to <dir>");
+                println!("                       Default: --dump 2000 analysis/data");
+                println!("  --help, -h           Show this help message");
+                std::process::exit(0);
+            }
+            arg => {
+                // Legacy: first positional arg is limit
+                if let Ok(n) = arg.parse::<usize>() {
+                    limit = n;
+                }
+            }
+        }
+        i += 1;
+    }
+
+    Args { limit, dump_dir }
+}
 
 mod crc32c_impl {
     use std::sync::Once;
@@ -239,13 +289,98 @@ fn truncate_string(s: &str, max_len: usize) -> String {
     }
 }
 
+fn dump_metadata_to_disk(
+    records: &[(u64, Record)],
+    dump_dir: &PathBuf,
+) -> io::Result<(usize, usize)> {
+    fs::create_dir_all(dump_dir)?;
+
+    let mut dumped = 0;
+    let mut skipped = 0;
+
+    for (idx, (offset, rec)) in records.iter().enumerate() {
+        if rec.data.is_empty() {
+            skipped += 1;
+            continue;
+        }
+
+        // Create a meaningful filename: index_key_name.bin
+        let safe_name: String = rec
+            .name
+            .chars()
+            .take(40)
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+
+        let filename = format!(
+            "{:05}_{:032x}_{}.bin",
+            idx,
+            rec.key,
+            if safe_name.is_empty() {
+                "unknown"
+            } else {
+                &safe_name
+            }
+        );
+
+        let filepath = dump_dir.join(&filename);
+        fs::write(&filepath, &rec.data)?;
+
+        // Also write a companion .json file with metadata
+        let json = format!(
+            r#"{{
+  "index": {},
+  "key": "{:032x}",
+  "name": {:?},
+  "offset": {},
+  "timestamp": {},
+  "popularity": {},
+  "flags": {},
+  "data_len": {},
+  "len_bytes": {}
+}}"#,
+            idx,
+            rec.key,
+            rec.name,
+            offset,
+            rec.ts_sec,
+            rec.popularity,
+            rec.flags,
+            rec.data.len(),
+            rec.len_bytes
+        );
+
+        let json_filename = format!(
+            "{:05}_{:032x}_{}.json",
+            idx,
+            rec.key,
+            if safe_name.is_empty() {
+                "unknown"
+            } else {
+                &safe_name
+            }
+        );
+        let json_filepath = dump_dir.join(&json_filename);
+        fs::write(&json_filepath, json)?;
+
+        dumped += 1;
+
+        if dumped % 500 == 0 {
+            println!("  Dumped {} records...", dumped);
+        }
+    }
+
+    Ok((dumped, skipped))
+}
+
 fn main() -> io::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    let limit = if args.len() > 1 {
-        args[1].parse::<usize>().unwrap_or(10)
-    } else {
-        10
-    };
+    let args = parse_args();
 
     let data_dir = PathBuf::from("data");
     let seg_db_dir = data_dir.join("segments_db");
@@ -256,10 +391,14 @@ fn main() -> io::Result<()> {
         std::process::exit(1);
     }
 
-    println!("╔═════════════════════════════════════════════════════════════════════════════╗");
-    println!("║           DAZHBOG FUNCTION METADATA VIEWER                                  ║");
-    println!("╚═════════════════════════════════════════════════════════════════════════════╝");
-    println!();
+    let is_dump_mode = args.dump_dir.is_some();
+
+    if !is_dump_mode {
+        println!("╔═════════════════════════════════════════════════════════════════════════════╗");
+        println!("║           DAZHBOG FUNCTION METADATA VIEWER                                  ║");
+        println!("╚═════════════════════════════════════════════════════════════════════════════╝");
+        println!();
+    }
 
     let db = sled::open(&seg_db_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open: {}", e)))?;
@@ -286,7 +425,7 @@ fn main() -> io::Result<()> {
             .open_tree(&name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {}", e)))?;
 
-        let remaining = limit.saturating_sub(records_to_display.len());
+        let remaining = args.limit.saturating_sub(records_to_display.len());
         if remaining == 0 {
             break;
         }
@@ -295,7 +434,7 @@ fn main() -> io::Result<()> {
             Ok(records) => {
                 for record in records {
                     records_to_display.push(record);
-                    if records_to_display.len() >= limit {
+                    if records_to_display.len() >= args.limit {
                         break;
                     }
                 }
@@ -307,18 +446,41 @@ fn main() -> io::Result<()> {
         }
     }
 
-    println!("Database Statistics:");
-    println!("  Total records in database: {}", total_records);
-    println!("  Displaying: {} function(s)", records_to_display.len());
-    println!();
+    if let Some(ref dump_dir) = args.dump_dir {
+        // Dump mode
+        println!(
+            "Dumping {} function metadata payloads to {:?}...",
+            records_to_display.len(),
+            dump_dir
+        );
 
-    for (idx, (offset, record)) in records_to_display.iter().enumerate() {
-        print_record(idx, *offset, record);
+        let (dumped, skipped) = dump_metadata_to_disk(&records_to_display, dump_dir)?;
+
+        println!();
+        println!("Dump complete:");
+        println!("  Directory: {:?}", dump_dir);
+        println!("  Total records in database: {}", total_records);
+        println!("  Records dumped: {}", dumped);
+        println!("  Records skipped (empty data): {}", skipped);
+        println!();
+        println!("Each record generates two files:");
+        println!("  - *.bin: Raw metadata payload");
+        println!("  - *.json: Associated metadata (key, name, timestamp, etc.)");
+    } else {
+        // Display mode
+        println!("Database Statistics:");
+        println!("  Total records in database: {}", total_records);
+        println!("  Displaying: {} function(s)", records_to_display.len());
+        println!();
+
+        for (idx, (offset, record)) in records_to_display.iter().enumerate() {
+            print_record(idx, *offset, record);
+        }
+
+        println!("╔═════════════════════════════════════════════════════════════════════════════╗");
+        println!("║                               END OF DUMP                                   ║");
+        println!("╚═════════════════════════════════════════════════════════════════════════════╝");
     }
-
-    println!("╔═════════════════════════════════════════════════════════════════════════════╗");
-    println!("║                               END OF DUMP                                   ║");
-    println!("╚═════════════════════════════════════════════════════════════════════════════╝");
 
     Ok(())
 }

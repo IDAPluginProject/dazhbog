@@ -10,8 +10,8 @@ pub struct LuminaHello {
 /// Raw hello data for debug dumps.
 pub struct LuminaHelloRaw {
     pub protocol_version: u32,
-    pub license_data: Vec<u8>,
-    pub id_bytes: [u8; 6],
+    pub key: Vec<u8>,
+    pub license_id: [u8; 6],
     pub username: String,
     pub password: String,
 }
@@ -41,16 +41,16 @@ impl Default for LuminaCaps {
 /// Function entry in PullMetadata request.
 pub struct LuminaPullMetadataFunc {
     #[allow(dead_code)]
-    pub unk0: u32,
+    pub flags: u32,
     pub mb_hash: Vec<u8>,
 }
 
 /// PullMetadata request.
 pub struct LuminaPullMetadata {
     #[allow(dead_code)]
-    pub unk0: u32,
+    pub flags: u32,
     #[allow(dead_code)]
-    pub unk1: Vec<u32>,
+    pub keys: Vec<u32>,
     pub funcs: Vec<LuminaPullMetadataFunc>,
 }
 
@@ -60,14 +60,14 @@ pub struct LuminaPushMetadataFunc {
     pub func_len: u32,
     pub func_data: Vec<u8>,
     #[allow(dead_code)]
-    pub unk2: u32,
+    pub record_conv: u32,
     pub hash: Vec<u8>,
 }
 
 /// PushMetadata request.
 pub struct LuminaPushMetadata {
     #[allow(dead_code)]
-    pub unk0: u32,
+    pub flags: u32,
     #[allow(dead_code)]
     pub idb_path: String,
     pub file_path: String,
@@ -75,12 +75,93 @@ pub struct LuminaPushMetadata {
     pub hostname: String,
     pub funcs: Vec<LuminaPushMetadataFunc>,
     #[allow(dead_code)]
-    pub unk1: Vec<u64>,
+    pub keys: Vec<u64>,
 }
 
 /// GetFuncHistories request.
 pub struct LuminaGetFuncHistories {
     pub funcs: Vec<LuminaPullMetadataFunc>,
     #[allow(dead_code)]
-    pub unk0: u32,
+    pub flags: u32,
+}
+
+/// User License Info struct.
+pub struct UserLicenseInfo {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+}
+
+impl Default for UserLicenseInfo {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            email: String::new(),
+        }
+    }
+}
+
+/// Lumina User struct.
+pub struct LuminaUser {
+    pub license_info: UserLicenseInfo,
+    pub name: String,
+    pub karma: i32,
+    pub last_active: u64,
+    pub features: u32,
+}
+
+impl Default for LuminaUser {
+    fn default() -> Self {
+        Self {
+            license_info: UserLicenseInfo::default(),
+            name: String::new(),
+            karma: 0,
+            last_active: 0,
+            features: 0,
+        }
+    }
+}
+
+/// Lumina Server Info struct.
+pub struct LuminaServerInfo {
+    pub macaddr: String,
+    pub verstr: String,
+    pub start_time: u64,
+    pub current_time: u64,
+}
+
+/// Peer connection info struct.
+pub struct PeerConn {
+    pub session_id: u32,
+    pub peer_name: String,
+    pub user: LuminaUser,
+    pub established: u64,
+}
+
+/// Lumina overall stats structure.
+pub struct LuminaStats {
+    pub user: LuminaUser,
+    pub nfuncs: u64,
+    pub npushes: u64,
+    pub nhist_recs: u64,
+    pub nidbs: u64,
+    pub ninput_files: u64,
+}
+
+/// Helper enum for response codes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum LuminaOpRes {
+    BadPtn = -3,
+    NotFound = -2,
+    Error = -1,
+    Ok = 0,
+    Added = 1,
+}
+
+impl LuminaOpRes {
+    pub fn as_u32(self) -> u32 {
+        (self as i32) as u32
+    }
 }

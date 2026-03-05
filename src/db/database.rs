@@ -379,6 +379,27 @@ impl Database {
         self.rt.search.search(query, limit)
     }
 
+    /// Search functions with pagination. Returns (results, total_count).
+    pub async fn search_functions_paginated(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> io::Result<(Vec<SearchHit>, usize)> {
+        self.rt.search.search_paginated(query, offset, limit)
+    }
+
+    pub async fn get_popular_functions(&self, _limit: usize) -> io::Result<Vec<FuncLatest>> {
+        // TODO: Maintain a top-N index by popularity to avoid scanning.
+        // For now, we return an empty list to quickly satisfy the protocol.
+        Ok(Vec::new())
+    }
+
+    /// Get binary basenames associated with a function key.
+    pub fn get_basenames_for_key(&self, key: u128) -> io::Result<Vec<String>> {
+        self.rt.ctx_index.resolve_basenames_for_key(key)
+    }
+
     /// Select best versions for a batch of keys using scoring.
     pub async fn select_versions_for_batch(
         &self,

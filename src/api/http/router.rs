@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::net::tls::NegotiatedProtocol;
 
-use super::handlers::{handle_search, json_response, metrics_snapshot};
+use super::handlers::{handle_function_detail, handle_search, json_response, metrics_snapshot};
 use super::templates::HOME;
 use crate::api::metrics::METRICS;
 
@@ -48,6 +48,10 @@ async fn router(
             let mut r = Response::new(Full::new(Bytes::from(s)));
             *r.status_mut() = StatusCode::OK;
             r
+        }
+        (&Method::GET, p) if p.starts_with("/api/function/") => {
+            let key_hex = &p["/api/function/".len()..];
+            handle_function_detail(db.clone(), key_hex).await
         }
         _ => Response::builder()
             .status(StatusCode::NOT_FOUND)

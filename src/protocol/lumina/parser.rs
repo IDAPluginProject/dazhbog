@@ -14,18 +14,18 @@ pub fn parse_lumina_hello_raw(payload: &[u8]) -> Result<LuminaHelloRaw, LuminaEr
     }
     offset += consumed;
 
-    let (license_data, consumed) = unpack_var_bytes_capped(&payload[offset..], 16384)?;
-    let license_data = license_data.to_vec();
+    let (key, consumed) = unpack_var_bytes_capped(&payload[offset..], 16384)?;
+    let key = key.to_vec();
     offset += consumed;
 
     if payload.len() < offset + 6 {
         return Err(LuminaError::UnexpectedEof);
     }
-    let mut id_bytes = [0u8; 6];
-    id_bytes.copy_from_slice(&payload[offset..offset + 6]);
+    let mut license_id = [0u8; 6];
+    license_id.copy_from_slice(&payload[offset..offset + 6]);
     offset += 6;
 
-    let (_unk2, consumed) = unpack_dd(&payload[offset..]);
+    let (_record_conv, consumed) = unpack_dd(&payload[offset..]);
     if consumed == 0 {
         return Err(LuminaError::UnexpectedEof);
     }
@@ -48,8 +48,8 @@ pub fn parse_lumina_hello_raw(payload: &[u8]) -> Result<LuminaHelloRaw, LuminaEr
 
     Ok(LuminaHelloRaw {
         protocol_version,
-        license_data,
-        id_bytes,
+        key,
+        license_id,
         username,
         password,
     })
@@ -74,7 +74,7 @@ pub fn parse_lumina_pull_metadata(
     let mut offset = 0;
     debug!("parse_lumina_pull_metadata: payload len={}", payload.len());
 
-    let (unk0, consumed) = unpack_dd(&payload[offset..]);
+    let (flags, consumed) = unpack_dd(&payload[offset..]);
     if consumed == 0 {
         return Err(LuminaError::UnexpectedEof);
     }
@@ -86,14 +86,14 @@ pub fn parse_lumina_pull_metadata(
     }
     offset += consumed;
 
-    let mut unk1 = Vec::with_capacity((count1 as usize).min(1024));
+    let mut keys = Vec::with_capacity((count1 as usize).min(1024));
     for _ in 0..count1 {
         let (v, c) = unpack_dd(&payload[offset..]);
         if c == 0 {
             return Err(LuminaError::UnexpectedEof);
         }
         offset += c;
-        unk1.push(v);
+        keys.push(v);
     }
 
     let (count_funcs, consumed) = unpack_dd(&payload[offset..]);
@@ -106,7 +106,7 @@ pub fn parse_lumina_pull_metadata(
     let mut funcs = Vec::with_capacity(n);
 
     for i in 0..count_funcs {
-        let (func_unk0, c) = unpack_dd(&payload[offset..]);
+        let (pattern_type, c) = unpack_dd(&payload[offset..]);
         if c == 0 {
             return Err(LuminaError::UnexpectedEof);
         }
@@ -117,13 +117,13 @@ pub fn parse_lumina_pull_metadata(
 
         if (i as usize) < n {
             funcs.push(LuminaPullMetadataFunc {
-                unk0: func_unk0,
+                flags: pattern_type,
                 mb_hash: hash.to_vec(),
             });
         }
     }
 
-    Ok(LuminaPullMetadata { unk0, unk1, funcs })
+    Ok(LuminaPullMetadata { flags, keys, funcs })
 }
 
 /// Parse a Lumina PushMetadata message.
@@ -134,7 +134,7 @@ pub fn parse_lumina_push_metadata(
     let mut offset = 0;
     debug!("parse_lumina_push_metadata: payload len={}", payload.len());
 
-    let (unk0, consumed) = unpack_dd(&payload[offset..]);
+    let (flags, consumed) = unpack_dd(&payload[offset..]);
     if consumed == 0 {
         return Err(LuminaError::UnexpectedEof);
     }
@@ -187,7 +187,7 @@ pub fn parse_lumina_push_metadata(
         let (func_data, c) = unpack_var_bytes_capped(&payload[offset..], caps.max_data_bytes)?;
         offset += c;
 
-        let (unk2, c) = unpack_dd(&payload[offset..]);
+        let (record_conv, c) = unpack_dd(&payload[offset..]);
         if c == 0 {
             return Err(LuminaError::UnexpectedEof);
         }
@@ -200,7 +200,7 @@ pub fn parse_lumina_push_metadata(
             name,
             func_len,
             func_data: func_data.to_vec(),
-            unk2,
+            record_conv,
             hash: hash.to_vec(),
         });
     }
@@ -212,7 +212,7 @@ pub fn parse_lumina_push_metadata(
     offset += c;
 
     let cap_u64s = 4096usize.min(count_u64 as usize);
-    let mut unk1 = Vec::with_capacity(cap_u64s);
+    let mut keys = Vec::with_capacity(cap_u64s);
 
     for i in 0..count_u64 {
         let (low, c) = unpack_dd(&payload[offset..]);
@@ -228,18 +228,18 @@ pub fn parse_lumina_push_metadata(
         offset += c;
 
         if (i as usize) < cap_u64s {
-            unk1.push(((high as u64) << 32) | (low as u64));
+            keys.push(((high as u64) << 32) | (low as u64));
         }
     }
 
     Ok(LuminaPushMetadata {
-        unk0,
+        flags,
         idb_path,
         file_path,
         md5,
         hostname,
         funcs,
-        unk1,
+        keys,
     })
 }
 
@@ -260,7 +260,7 @@ pub fn parse_lumina_get_func_histories(
     let mut funcs = Vec::with_capacity(n);
 
     for i in 0..count {
-        let (func_unk0, c) = unpack_dd(&payload[offset..]);
+        let (pattern_type, c) = unpack_dd(&payload[offset..]);
         if c == 0 {
             return Err(LuminaError::UnexpectedEof);
         }
@@ -271,15 +271,15 @@ pub fn parse_lumina_get_func_histories(
 
         if (i as usize) < n {
             funcs.push(LuminaPullMetadataFunc {
-                unk0: func_unk0,
+                flags: pattern_type,
                 mb_hash: hash.to_vec(),
             });
         }
     }
 
-    let (unk0, _c) = unpack_dd(&payload[offset..]);
+    let (flags, _c) = unpack_dd(&payload[offset..]);
 
-    Ok(LuminaGetFuncHistories { funcs, unk0 })
+    Ok(LuminaGetFuncHistories { funcs, flags })
 }
 
 /// Decode a Lumina Fail message payload (0x0b): returns (code, message).

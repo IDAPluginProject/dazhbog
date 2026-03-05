@@ -4,6 +4,33 @@
 
 use crate::common::error::LuminaError;
 
+/// Unpack a variable-length 16-bit integer (IDA format).
+pub fn unpack_dw(data: &[u8]) -> (u16, usize) {
+    if data.is_empty() {
+        return (0, 0);
+    }
+    let mut x = data[0] as u16;
+    let mut consumed = 1;
+    if (x & 0x80) != 0 {
+        if (x & 0xC0) == 0xC0 {
+            if data.len() < 3 {
+                return (0, 0); // Need 2 more bytes
+            }
+            let xh = data[1] as u16;
+            let xl = data[2] as u16;
+            x = (xh << 8) | xl;
+            consumed += 2;
+        } else {
+            if data.len() < 2 {
+                return (0, 0); // Need 1 more byte
+            }
+            x = ((x << 8) | (data[1] as u16)) & !0x8000;
+            consumed += 1;
+        }
+    }
+    (x, consumed)
+}
+
 /// Unpack a variable-length 32-bit integer (IDA format).
 pub fn unpack_dd(data: &[u8]) -> (u32, usize) {
     if data.is_empty() {
@@ -128,6 +155,34 @@ pub fn pack_dq(v: u64) -> Vec<u8> {
     let mut result = pack_dd(low);
     result.extend_from_slice(&pack_dd(high));
     result
+}
+
+/// Unpack a variable-length 64-bit integer as dd(low) + dd(high).
+pub fn unpack_dq(data: &[u8]) -> (u64, usize) {
+    let (low, c1) = unpack_dd(data);
+    if c1 == 0 {
+        return (0, 0);
+    }
+    let (high, c2) = unpack_dd(&data[c1..]);
+    if c2 == 0 {
+        return (0, 0);
+    }
+    let val = ((high as u64) << 32) | (low as u64);
+    (val, c1 + c2)
+}
+
+/// Pack an ea64 address as unpack_dq() + 1.
+pub fn pack_ea64(v: u64) -> Vec<u8> {
+    pack_dq(v.wrapping_add(1))
+}
+
+/// Unpack an ea64 address, which is unpack_dq() - 1.
+pub fn unpack_ea64(data: &[u8]) -> (u64, usize) {
+    let (val, c) = unpack_dq(data);
+    if c == 0 {
+        return (0, 0);
+    }
+    (val.wrapping_sub(1), c)
 }
 
 /// Unpack a null-terminated C-string with maximum length check.

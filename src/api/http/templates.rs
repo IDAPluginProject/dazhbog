@@ -700,7 +700,13 @@ pub const HOME: &str = r#"<!doctype html>
             font-size: 10px;
             font-weight: 700;
         }
-        
+
+        .results-total {
+            font-size: 10px;
+            color: var(--text-dim);
+            letter-spacing: 0.1em;
+        }
+
         .results-meta {
             font-size: 10px;
             color: var(--text-dim);
@@ -883,6 +889,241 @@ pub const HOME: &str = r#"<!doctype html>
         .pagination-info .accent {
             color: var(--accent);
             font-weight: 600;
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           FUNCTION DETAIL MODAL
+           ───────────────────────────────────────────────────────────── */
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-lg);
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-container {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            max-width: 900px;
+            width: 100%;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--space-md) var(--space-lg);
+            background: var(--bg-element);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .modal-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.2em;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+        }
+
+        .modal-close {
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            width: 32px;
+            height: 32px;
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+
+        .modal-close:hover {
+            border-color: var(--state-critical);
+            color: var(--state-critical);
+            background: rgba(255, 34, 68, 0.1);
+        }
+
+        .modal-body {
+            padding: var(--space-lg);
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .detail-section {
+            margin-bottom: var(--space-lg);
+        }
+
+        .detail-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .detail-label {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.15em;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            margin-bottom: var(--space-sm);
+        }
+
+        .detail-value {
+            font-size: 13px;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .detail-value.accent {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .detail-value.mono {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            background: var(--bg-base);
+            padding: var(--space-sm) var(--space-md);
+            border: 1px solid var(--border-dim);
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1px;
+            background: var(--border-dim);
+            border: 1px solid var(--border-subtle);
+            margin-bottom: var(--space-lg);
+        }
+
+        .detail-stat {
+            background: var(--bg-panel);
+            padding: var(--space-md);
+            text-align: center;
+        }
+
+        .detail-stat .label {
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.15em;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            margin-bottom: var(--space-xs);
+        }
+
+        .detail-stat .value {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .detail-stat.nominal .value {
+            color: var(--state-nominal);
+        }
+
+        .metadata-section {
+            background: var(--bg-base);
+            border: 1px solid var(--border-dim);
+            margin-top: var(--space-md);
+        }
+
+        .metadata-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--space-sm) var(--space-md);
+            background: var(--bg-element);
+            border-bottom: 1px solid var(--border-dim);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.15em;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+        }
+
+        .metadata-header .badge {
+            background: var(--accent);
+            color: var(--bg-void);
+            padding: 2px 8px;
+            font-size: 9px;
+            font-weight: 700;
+        }
+
+        .metadata-content {
+            padding: var(--space-md);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .metadata-list {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+        }
+
+        .metadata-item {
+            display: flex;
+            gap: var(--space-md);
+            padding: var(--space-xs) var(--space-sm);
+            font-size: 11px;
+            border-left: 2px solid var(--border-dim);
+        }
+
+        .metadata-item:hover {
+            background: rgba(0, 255, 136, 0.05);
+            border-left-color: var(--accent);
+        }
+
+        .metadata-item .name {
+            color: var(--accent);
+            font-weight: 600;
+            min-width: 150px;
+            word-break: break-all;
+        }
+
+        .metadata-item .info {
+            color: var(--text-dim);
+        }
+
+        .metadata-empty {
+            color: var(--text-dim);
+            font-size: 11px;
+            font-style: italic;
+        }
+
+        .detail-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-2xl);
+            color: var(--text-dim);
+        }
+
+        .result-item.clickable {
+            cursor: pointer;
+        }
+
+        .result-item.clickable:hover {
+            background: var(--bg-elevated);
+            border-left: 3px solid var(--accent);
         }
 
         /* ─────────────────────────────────────────────────────────────
@@ -1117,7 +1358,7 @@ pub const HOME: &str = r#"<!doctype html>
             <div class="search-meta">
                 <span>MODE: <span class="accent">FULL-TEXT</span></span>
                 <span>INDEX: <span class="accent" id="index-status">READY</span></span>
-                <span>MAX: <span class="accent">25</span></span>
+                <span>PER PAGE: <span class="accent">25</span></span>
                 <span>PRESS <span class="accent">/</span> TO FOCUS</span>
             </div>
         </section>
@@ -1392,6 +1633,7 @@ pub const HOME: &str = r#"<!doctype html>
                     <div class="results-title">
                         <span>QUERY RESULTS</span>
                         <span class="results-count" id="results-count">0</span>
+                        <span class="results-total" id="results-total-label"></span>
                     </div>
                     <div class="results-meta">
                         <span>LATENCY: <span id="results-latency">0ms</span></span>
@@ -1399,9 +1641,23 @@ pub const HOME: &str = r#"<!doctype html>
                     </div>
                 </div>
                 <div class="results-list" id="results-list"></div>
+                <div class="pagination" id="pagination"></div>
             </div>
         </main>
         
+        <!-- Function Detail Modal -->
+        <div class="modal-overlay" id="detail-modal">
+            <div class="modal-container">
+                <div class="modal-header">
+                    <span class="modal-title">FUNCTION DETAIL // <span id="modal-key"></span></span>
+                    <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="modal-body">
+                    <div class="detail-loading">&gt;&gt;&gt; LOADING...</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Telemetry Footer -->
         <footer class="telemetry-bar">
             <div class="telemetry-left">
@@ -1446,8 +1702,10 @@ pub const HOME: &str = r#"<!doctype html>
             results: document.getElementById('results'),
             resultsList: document.getElementById('results-list'),
             resultsCount: document.getElementById('results-count'),
+            resultsTotalLabel: document.getElementById('results-total-label'),
             resultsLatency: document.getElementById('results-latency'),
             resultsQuery: document.getElementById('results-query'),
+            pagination: document.getElementById('pagination'),
             statusRing: document.getElementById('status-ring'),
             statusLabel: document.getElementById('status-label'),
             timestamp: document.getElementById('timestamp'),
@@ -1477,10 +1735,15 @@ pub const HOME: &str = r#"<!doctype html>
             telUpstream: document.getElementById('tel-upstream'),
             protoV5: document.getElementById('proto-v5'),
             protoV0: document.getElementById('proto-v0'),
+            detailModal: document.getElementById('detail-modal'),
+            modalKey: document.getElementById('modal-key'),
+            modalBody: document.getElementById('modal-body'),
         };
 
         let searchDebounceTimer = null;
         const DEBOUNCE_MS = 300;
+        let currentPage = 1;
+        let currentQuery = '';
 
         const fmt = n => Number(n).toLocaleString();
         const fmtBytes = b => {
@@ -1497,12 +1760,17 @@ pub const HOME: &str = r#"<!doctype html>
 
         function parseHash() {
             const params = new URLSearchParams(window.location.hash.slice(1));
-            return params.get('q') || '';
+            return {
+                q: params.get('q') || '',
+                page: parseInt(params.get('page') || '1', 10) || 1
+            };
         }
 
-        function updateHash(query) {
+        function updateHash(query, page = 1) {
             if (query) {
-                window.location.hash = 'q=' + encodeURIComponent(query);
+                let hash = 'q=' + encodeURIComponent(query);
+                if (page > 1) hash += '&page=' + page;
+                window.location.hash = hash;
             } else {
                 history.replaceState(null, '', window.location.pathname);
             }
@@ -1560,69 +1828,107 @@ pub const HOME: &str = r#"<!doctype html>
             el.dashboard.classList.remove('hidden');
             el.secondary.classList.remove('hidden');
             el.results.classList.remove('active');
+            el.pagination.innerHTML = '';
+            currentPage = 1;
+            currentQuery = '';
             updateHash('');
         }
 
-        async function runSearch(query, updateUrl = true) {
+        async function runSearch(query, page = 1, updateUrl = true) {
             query = query.trim();
             if (!query) { showDashboard(); return; }
+
+            currentQuery = query;
+            currentPage = page;
 
             el.dashboard.classList.add('hidden');
             el.secondary.classList.add('hidden');
             el.results.classList.add('active');
             el.resultsQuery.textContent = query;
             el.resultsList.innerHTML = '<div class="state-message"><div class="icon">&gt;&gt;&gt;</div><h3>QUERYING INDEX</h3><p>Processing request...</p></div>';
+            el.pagination.innerHTML = '';
 
-            if (updateUrl) updateHash(query);
+            if (updateUrl) updateHash(query, page);
 
             const t0 = performance.now();
             try {
-                const r = await fetch('/api/search?q=' + encodeURIComponent(query));
+                const r = await fetch('/api/search?q=' + encodeURIComponent(query) + '&page=' + page);
                 if (!r.ok) throw new Error('Query failed: ' + r.status);
                 const d = await r.json();
-                renderResults(d.results, query, performance.now() - t0);
+                renderResults(d, query, performance.now() - t0);
             } catch (e) {
                 el.resultsList.innerHTML = '<div class="state-message"><div class="icon">!</div><h3>QUERY ERROR</h3><p>' + esc(e.message) + '</p></div>';
                 el.resultsCount.textContent = '0';
+                el.resultsTotalLabel.textContent = '';
+                el.pagination.innerHTML = '';
             }
         }
 
-        function renderResults(hits, query, latency) {
+        function renderResults(data, query, latency) {
+            const { results: hits, total, page, per_page, total_pages } = data;
             el.resultsLatency.textContent = latency.toFixed(1) + 'ms';
+
             if (!hits || hits.length === 0) {
                 el.resultsCount.textContent = '0';
+                el.resultsTotalLabel.textContent = '';
                 el.resultsList.innerHTML = '<div class="state-message"><div class="icon">[ ]</div><h3>NO MATCHES FOUND</h3><p>Query "' + esc(query) + '" returned no results.</p></div>';
+                el.pagination.innerHTML = '';
                 return;
             }
+
+            const startIdx = (page - 1) * per_page;
             el.resultsCount.textContent = hits.length;
+            el.resultsTotalLabel.textContent = 'of ' + fmt(total) + ' total';
+
             el.resultsList.innerHTML = hits.map((h, i) => {
                 const bins = (h.binary_names || []).map(b => '<span class="bin-tag">' + esc(b) + '</span>').join('');
                 const displayName = h.func_name_demangled || h.func_name;
                 const langBadge = h.lang ? '<span class="lang-badge">' + esc(h.lang.toUpperCase()) + '</span>' : '';
                 const mangledHint = h.func_name_demangled ? '<div class="result-mangled" title="Mangled name">' + esc(h.func_name) + '</div>' : '';
-                return '<div class="result-item"><div class="result-index">' + String(i + 1).padStart(2, '0') + '</div><div class="result-main"><div class="result-func">' + esc(displayName) + '</div>' + mangledHint + '<div class="result-key">KEY ' + esc(h.key_hex) + '</div><div class="result-bins">' + bins + '</div></div><div class="result-meta">' + langBadge + '<span class="version-badge">V' + (h.version || 0) + '</span><span class="score-badge">SCORE ' + Number(h.score).toFixed(2) + '</span></div></div>';
+                return '<div class="result-item clickable" onclick="showFunctionDetail(\'' + esc(h.key_hex) + '\')"><div class="result-index">' + String(startIdx + i + 1).padStart(2, '0') + '</div><div class="result-main"><div class="result-func">' + esc(displayName) + '</div>' + mangledHint + '<div class="result-key">KEY ' + esc(h.key_hex) + '</div><div class="result-bins">' + bins + '</div></div><div class="result-meta">' + langBadge + '<span class="version-badge">V' + (h.version || 0) + '</span><span class="score-badge">SCORE ' + Number(h.score).toFixed(2) + '</span></div></div>';
             }).join('');
+
+            renderPagination(page, total_pages, total);
+        }
+
+        function renderPagination(page, totalPages, total) {
+            if (totalPages <= 1) {
+                el.pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '<button class="pagination-btn" onclick="goToPage(' + (page - 1) + ')"' + (page <= 1 ? ' disabled' : '') + '>&lt;&lt; PREV</button>';
+            html += '<span class="pagination-info">PAGE <span class="accent">' + page + '</span> OF <span class="accent">' + totalPages + '</span></span>';
+            html += '<button class="pagination-btn" onclick="goToPage(' + (page + 1) + ')"' + (page >= totalPages ? ' disabled' : '') + '>NEXT &gt;&gt;</button>';
+
+            el.pagination.innerHTML = html;
+        }
+
+        function goToPage(page) {
+            if (page < 1 || !currentQuery) return;
+            runSearch(currentQuery, page, true);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         function handleSearchInput() {
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-            searchDebounceTimer = setTimeout(() => runSearch(el.q.value), DEBOUNCE_MS);
+            searchDebounceTimer = setTimeout(() => runSearch(el.q.value, 1), DEBOUNCE_MS);
         }
 
         el.q.addEventListener('input', handleSearchInput);
         el.q.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
                 if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
-                runSearch(el.q.value);
+                runSearch(el.q.value, 1);
             }
         });
         document.addEventListener('keydown', e => {
             if (e.key === '/' && document.activeElement !== el.q) { e.preventDefault(); el.q.focus(); }
         });
         window.addEventListener('hashchange', () => {
-            const q = parseHash();
+            const { q, page } = parseHash();
             el.q.value = q;
-            if (q) runSearch(q, false); else showDashboard();
+            if (q) runSearch(q, page, false); else showDashboard();
         });
 
         updateTime();
@@ -1630,8 +1936,204 @@ pub const HOME: &str = r#"<!doctype html>
         fetchMetrics();
         setInterval(fetchMetrics, 5000);
 
-        const initQ = parseHash();
-        if (initQ) { el.q.value = initQ; runSearch(initQ, false); }
+        const init = parseHash();
+        if (init.q) { el.q.value = init.q; runSearch(init.q, init.page, false); }
+
+        // ═══════════════════════════════════════════════════════════════
+        // FUNCTION DETAIL MODAL
+        // ═══════════════════════════════════════════════════════════════
+
+        function showFunctionDetail(keyHex) {
+            el.modalKey.textContent = keyHex;
+            el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
+            el.detailModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            fetch('/api/function/' + encodeURIComponent(keyHex))
+                .then(r => {
+                    if (!r.ok) throw new Error('Failed to fetch: ' + r.status);
+                    return r.json();
+                })
+                .then(data => renderFunctionDetail(data))
+                .catch(err => {
+                    el.modalBody.innerHTML = '<div class="state-message"><div class="icon">!</div><h3>FETCH ERROR</h3><p>' + esc(err.message) + '</p></div>';
+                });
+        }
+
+        function closeDetailModal() {
+            el.detailModal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        el.detailModal.addEventListener('click', e => {
+            if (e.target === el.detailModal) closeDetailModal();
+        });
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && el.detailModal.classList.contains('active')) {
+                closeDetailModal();
+            }
+        });
+
+        function renderFunctionDetail(data) {
+            if (data.error) {
+                el.modalBody.innerHTML = '<div class="state-message"><div class="icon">!</div><h3>ERROR</h3><p>' + esc(data.error) + '</p></div>';
+                return;
+            }
+
+            const m = data.metadata || {};
+            const formatBadge = m.format_type || 'UNKNOWN';
+
+            let html = '';
+
+            // Function name
+            html += '<div class="detail-section"><div class="detail-label">Function Name</div><div class="detail-value accent">' + esc(data.name) + '</div></div>';
+
+            // Key
+            html += '<div class="detail-section"><div class="detail-label">Function Key</div><div class="detail-value mono">' + esc(data.key_hex) + '</div></div>';
+
+            // Stats grid
+            html += '<div class="detail-grid">';
+            html += '<div class="detail-stat nominal"><div class="label">Popularity</div><div class="value">' + fmt(data.popularity || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Data Size</div><div class="value">' + fmtBytes(data.data_size || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Format</div><div class="value">' + esc(formatBadge) + '</div></div>';
+            html += '</div>';
+
+            // Binary names
+            if (data.binary_names && data.binary_names.length > 0) {
+                html += '<div class="detail-section"><div class="detail-label">Associated Binaries</div><div class="result-bins">';
+                data.binary_names.forEach(b => { html += '<span class="bin-tag">' + esc(b) + '</span>'; });
+                html += '</div></div>';
+            }
+
+            // Metadata sections
+            if (m) {
+                // Function Comments (MDK_FCMT / MDK_FRPTCMT)
+                if (m.fcmt || m.frptcmt || m.vd_elapsed !== null) {
+                    html += '<div class="metadata-section"><div class="metadata-header"><span>Function Attributes</span></div><div class="metadata-content" style="display: flex; flex-direction: column; gap: var(--space-md);">';
+                    
+                    if (m.vd_elapsed !== null && m.vd_elapsed !== undefined) {
+                        html += '<div class="detail-stat" style="width: max-content;"><div class="label">Decompilation Time</div><div class="value">' + m.vd_elapsed + ' seconds</div></div>';
+                    }
+
+                    if (m.fcmt) {
+                        html += '<div class="detail-section"><div class="detail-label">Regular Comment</div><div class="detail-value mono" style="white-space: pre-wrap;">' + esc(m.fcmt) + '</div></div>';
+                    }
+
+                    if (m.frptcmt) {
+                        html += '<div class="detail-section"><div class="detail-label">Repeatable Comment</div><div class="detail-value mono" style="white-space: pre-wrap;">' + esc(m.frptcmt) + '</div></div>';
+                    }
+                    
+                    html += '</div></div>';
+                }
+
+                // Type Parts (MDK_TYPE)
+                if (m.type_parts) {
+                    html += '<div class="metadata-section"><div class="metadata-header"><span>MDK_TYPE Data</span><span class="badge nominal">PRESENT</span></div><div class="metadata-content">';
+                    html += '<div class="detail-grid" style="margin-bottom: var(--space-md);">';
+                    html += '<div class="detail-stat"><div class="label">User Type</div><div class="value">' + (m.type_parts.userti ? 'YES' : 'NO') + '</div></div>';
+                    html += '</div>';
+                    html += '<div class="detail-section"><div class="detail-label">Type String</div><div class="detail-value mono">' + esc(m.type_parts.type_str || '') + '</div></div>';
+                    if (m.type_parts.fields_str) {
+                        html += '<div class="detail-section"><div class="detail-label">Fields String</div><div class="detail-value mono">' + esc(m.type_parts.fields_str) + '</div></div>';
+                    }
+                    html += '</div></div>';
+                }
+
+                // Frame Desc (MDK_FRAME_DESC)
+                if (m.frame_desc) {
+                    const fd = m.frame_desc;
+                    html += '<div class="metadata-section"><div class="metadata-header"><span>Frame Descriptor</span><span class="badge">' + (fd.members ? fd.members.length : 0) + ' MEMBERS</span></div><div class="metadata-content">';
+                    
+                    html += '<div class="detail-grid" style="margin-bottom: var(--space-md);">';
+                    html += '<div class="detail-stat"><div class="label">Frame Size</div><div class="value">0x' + (fd.frsize || 0).toString(16) + '</div></div>';
+                    html += '<div class="detail-stat"><div class="label">Arg Size</div><div class="value">0x' + (fd.argsize || 0).toString(16) + '</div></div>';
+                    html += '<div class="detail-stat"><div class="label">Saved Regs</div><div class="value">0x' + (fd.frregs || 0).toString(16) + '</div></div>';
+                    html += '</div>';
+
+                    if (fd.members && fd.members.length > 0) {
+                        html += '<div class="metadata-list">';
+                        fd.members.forEach((mem, i) => {
+                            let memHtml = '<div class="metadata-item" style="flex-direction: column; align-items: flex-start; gap: var(--space-xs);">';
+                            
+                            // Header row
+                            memHtml += '<div style="display: flex; justify-content: space-between; width: 100%;">';
+                            memHtml += '<span class="name">Member ' + i + (mem.name ? ' (' + esc(mem.name) + ')' : '') + '</span>';
+                            
+                            let tags = [];
+                            if (mem.offset !== null && mem.offset !== undefined) tags.push('off: 0x' + mem.offset.toString(16));
+                            if (mem.nbytes !== null && mem.nbytes !== undefined) tags.push('size: 0x' + mem.nbytes.toString(16));
+                            if (mem.has_info) tags.push('opinfo');
+                            
+                            memHtml += '<span class="info">' + tags.join(' | ') + '</span>';
+                            memHtml += '</div>';
+
+                            // Extra fields
+                            if (mem.tinfo) {
+                                memHtml += '<div class="info" style="color: var(--text-secondary);">Type: ' + esc(mem.tinfo.type_str) + '</div>';
+                                if (mem.tinfo.fields_str) {
+                                    memHtml += '<div class="info" style="color: var(--text-tertiary);">Fields: ' + esc(mem.tinfo.fields_str) + '</div>';
+                                }
+                            }
+                            if (mem.cmt) memHtml += '<div class="info" style="color: var(--text-secondary);">Cmt: ' + esc(mem.cmt) + '</div>';
+                            if (mem.rptcmt) memHtml += '<div class="info" style="color: var(--text-secondary);">RptCmt: ' + esc(mem.rptcmt) + '</div>';
+
+                            memHtml += '</div>';
+                            html += memHtml;
+                        });
+                        html += '</div>';
+                    } else {
+                        html += '<div class="metadata-empty">No frame members</div>';
+                    }
+                    html += '</div></div>';
+                }
+
+                // Instruction Comments
+                if (m.insn_cmts && m.insn_cmts.length > 0) {
+                    html += '<div class="metadata-section"><div class="metadata-header"><span>Instruction Comments</span><span class="badge">' + m.insn_cmts.length + '</span></div><div class="metadata-content">';
+                    html += '<div class="metadata-list">';
+                    m.insn_cmts.forEach(c => {
+                        html += '<div class="metadata-item" style="flex-direction: column; align-items: flex-start; gap: var(--space-xs);">';
+                        html += '<div style="display: flex; justify-content: space-between; width: 100%;">';
+                        html += '<span class="name">Chunk ' + c.fchunk_nr + ' Offset 0x' + c.fchunk_off.toString(16) + '</span>';
+                        html += '</div>';
+                        html += '<div class="info" style="color: var(--text-secondary); white-space: pre-wrap;">' + esc(c.cmt) + '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div></div></div>';
+                }
+
+                if (m.rpt_insn_cmts && m.rpt_insn_cmts.length > 0) {
+                    html += '<div class="metadata-section"><div class="metadata-header"><span>Repeatable Instruction Comments</span><span class="badge">' + m.rpt_insn_cmts.length + '</span></div><div class="metadata-content">';
+                    html += '<div class="metadata-list">';
+                    m.rpt_insn_cmts.forEach(c => {
+                        html += '<div class="metadata-item" style="flex-direction: column; align-items: flex-start; gap: var(--space-xs);">';
+                        html += '<div style="display: flex; justify-content: space-between; width: 100%;">';
+                        html += '<span class="name">Chunk ' + c.fchunk_nr + ' Offset 0x' + c.fchunk_off.toString(16) + '</span>';
+                        html += '</div>';
+                        html += '<div class="info" style="color: var(--text-secondary); white-space: pre-wrap;">' + esc(c.cmt) + '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div></div></div>';
+                }
+
+                // Raw stats
+                html += '<div class="detail-grid" style="margin-top: var(--space-lg);">';
+                html += '<div class="detail-stat"><div class="label">Raw Size</div><div class="value">' + fmtBytes(m.raw_size || 0) + '</div></div>';
+                html += '<div class="detail-stat"><div class="label">Bytes Parsed</div><div class="value">' + (m.bytes_parsed || 0) + '</div></div>';
+                html += '</div>';
+                
+                if (m.errors && m.errors.length > 0) {
+                    html += '<div class="state-message" style="margin-top: var(--space-md); border-color: var(--state-warning); background: rgba(255, 102, 0, 0.1);"><div class="icon" style="color: var(--state-warning);">!</div><h3 style="color: var(--state-warning);">PARSE ERRORS</h3><ul style="text-align: left; margin-top: var(--space-sm);">';
+                    m.errors.forEach(err => {
+                        html += '<li>' + esc(err) + '</li>';
+                    });
+                    html += '</ul></div>';
+                }
+            }
+
+            el.modalBody.innerHTML = html;
+        }
     </script>
 </body>
 </html>

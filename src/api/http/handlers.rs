@@ -11,12 +11,82 @@ use std::sync::Arc;
 use crate::api::metrics::METRICS;
 use crate::db::Database;
 use crate::engine::SearchHit;
+use crate::protocol::lumina::metadata::parse_metadata;
 
-/// Search response structure.
+/// Search response structure with pagination.
 #[derive(Serialize)]
 pub struct SearchResponse {
     query: String,
     results: Vec<SearchHit>,
+    total: usize,
+    page: usize,
+    per_page: usize,
+    total_pages: usize,
+}
+
+#[derive(Serialize)]
+pub struct TypePartsJson {
+    pub userti: bool,
+    pub type_str: String,
+    pub fields_str: String,
+}
+
+#[derive(Serialize)]
+pub struct SerializedTinfoJson {
+    pub type_str: String,
+    pub fields_str: String,
+}
+
+#[derive(Serialize)]
+pub struct FrameMemJson {
+    pub name: Option<String>,
+    pub tinfo: Option<SerializedTinfoJson>,
+    pub cmt: Option<String>,
+    pub rptcmt: Option<String>,
+    pub offset: Option<u64>,
+    pub nbytes: Option<u64>,
+    pub has_info: bool,
+}
+
+#[derive(Serialize)]
+pub struct FrameDescJson {
+    pub frsize: u64,
+    pub argsize: u64,
+    pub frregs: u16,
+    pub members: Vec<FrameMemJson>,
+}
+
+#[derive(Serialize)]
+pub struct InsnCmtJson {
+    pub fchunk_nr: u32,
+    pub fchunk_off: u32,
+    pub cmt: String,
+}
+
+/// Parsed metadata for JSON response.
+#[derive(Serialize)]
+pub struct ParsedMetadataJson {
+    pub raw_size: usize,
+    pub bytes_parsed: usize,
+    pub errors: Vec<String>,
+    pub type_parts: Option<TypePartsJson>,
+    pub frame_desc: Option<FrameDescJson>,
+    pub vd_elapsed: Option<u64>,
+    pub fcmt: Option<String>,
+    pub frptcmt: Option<String>,
+    pub insn_cmts: Vec<InsnCmtJson>,
+    pub rpt_insn_cmts: Vec<InsnCmtJson>,
+}
+
+/// Function detail response with full metadata.
+#[derive(Serialize)]
+pub struct FunctionDetailResponse {
+    pub key_hex: String,
+    pub name: String,
+    pub popularity: u32,
+    pub data_size: usize,
+    pub metadata: Option<ParsedMetadataJson>,
+    pub binary_names: Vec<String>,
 }
 
 /// Metrics snapshot for JSON API.
@@ -144,6 +214,98 @@ pub fn json_response<T: Serialize>(value: &T, status: StatusCode) -> Response<Fu
     }
 }
 
+/// Handle function detail API request.
+pub async fn handle_function_detail(
+    db: Arc<Database>,
+    key_hex: &str,
+) -> Response<Full<Bytes>> {
+    // Parse the key from hex
+    let key = match u128::from_str_radix(key_hex, 16) {
+        Ok(k) => k,
+        Err(_) => {
+            return json_response(
+                &serde_json::json!({"error": "invalid key format"}),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+
+    // Fetch the function from database
+    match db.get_latest(key).await {
+        Ok(Some(func)) => {
+            // Parse the metadata
+            let parsed = parse_metadata(&func.data);
+            
+            let metadata = Some(ParsedMetadataJson {
+                raw_size: parsed.raw_size,
+                bytes_parsed: parsed.bytes_parsed,
+                errors: parsed.errors,
+                vd_elapsed: parsed.vd_elapsed,
+                fcmt: parsed.fcmt,
+                frptcmt: parsed.frptcmt,
+                insn_cmts: parsed.insn_cmts.into_iter().map(|c| InsnCmtJson {
+                    fchunk_nr: c.fchunk_nr,
+                    fchunk_off: c.fchunk_off,
+                    cmt: c.cmt,
+                }).collect(),
+                rpt_insn_cmts: parsed.rpt_insn_cmts.into_iter().map(|c| InsnCmtJson {
+                    fchunk_nr: c.fchunk_nr,
+                    fchunk_off: c.fchunk_off,
+                    cmt: c.cmt,
+                }).collect(),
+                type_parts: parsed.type_parts.map(|tp| TypePartsJson {
+                    userti: tp.userti,
+                    type_str: tp.type_str,
+                    fields_str: tp.fields_str,
+                }),
+                frame_desc: parsed.frame_desc.map(|fd| FrameDescJson {
+                    frsize: fd.frsize,
+                    argsize: fd.argsize,
+                    frregs: fd.frregs,
+                    members: fd.members.into_iter().map(|m| FrameMemJson {
+                        name: m.name,
+                        tinfo: m.tinfo.map(|t| SerializedTinfoJson {
+                            type_str: t.type_str,
+                            fields_str: t.fields_str,
+                        }),
+                        cmt: m.cmt,
+                        rptcmt: m.rptcmt,
+                        offset: m.offset,
+                        nbytes: m.nbytes,
+                        has_info: m.info.is_some(),
+                    }).collect(),
+                }),
+            });
+
+            // Get binary names from context index
+            let binary_names = db.get_basenames_for_key(key).unwrap_or_default();
+
+            json_response(
+                &FunctionDetailResponse {
+                    key_hex: format!("{:032x}", key),
+                    name: func.name,
+                    popularity: func.popularity,
+                    data_size: func.data.len(),
+                    metadata,
+                    binary_names,
+                },
+                StatusCode::OK,
+            )
+        }
+        Ok(None) => json_response(
+            &serde_json::json!({"error": "function not found"}),
+            StatusCode::NOT_FOUND,
+        ),
+        Err(e) => {
+            error!("get_latest failed for key {}: {}", key_hex, e);
+            json_response(
+                &serde_json::json!({"error": "database error"}),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    }
+}
+
 /// Handle search API request.
 pub async fn handle_search(db: Arc<Database>, req: Request<Incoming>) -> Response<Full<Bytes>> {
     let Some(q) = parse_query_param(&req, "q") else {
@@ -153,11 +315,37 @@ pub async fn handle_search(db: Arc<Database>, req: Request<Incoming>) -> Respons
         );
     };
 
-    // Max 25 results
-    const MAX_RESULTS: usize = 25;
+    // Parse pagination parameters
+    const DEFAULT_PER_PAGE: usize = 25;
+    const MAX_PER_PAGE: usize = 100;
 
-    match db.search_functions(&q, MAX_RESULTS).await {
-        Ok(results) => json_response(&SearchResponse { query: q, results }, StatusCode::OK),
+    let page: usize = parse_query_param(&req, "page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+
+    let per_page: usize = parse_query_param(&req, "per_page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PER_PAGE)
+        .clamp(1, MAX_PER_PAGE);
+
+    let offset = (page - 1) * per_page;
+
+    match db.search_functions_paginated(&q, offset, per_page).await {
+        Ok((results, total)) => {
+            let total_pages = (total + per_page - 1) / per_page;
+            json_response(
+                &SearchResponse {
+                    query: q,
+                    results,
+                    total,
+                    page,
+                    per_page,
+                    total_pages,
+                },
+                StatusCode::OK,
+            )
+        }
         Err(e) => {
             error!("search failed: {}", e);
             json_response(

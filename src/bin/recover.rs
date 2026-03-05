@@ -1,8 +1,137 @@
 use std::collections::HashMap;
 use std::env;
+use std::io::Write;
+use std::time::Instant;
 use std::{io, path::PathBuf};
 
 const MAGIC: u32 = 0x4C4D4E31;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Progress Reporting
+// ═══════════════════════════════════════════════════════════════════════════
+
+struct Progress {
+    name: String,
+    total: u64,
+    current: u64,
+    start: Instant,
+    last_print: Instant,
+    print_interval_ms: u128,
+}
+
+impl Progress {
+    fn new(name: &str, total: u64) -> Self {
+        let now = Instant::now();
+        Self {
+            name: name.to_string(),
+            total,
+            current: 0,
+            start: now,
+            last_print: now,
+            print_interval_ms: 100,
+        }
+    }
+
+    fn inc(&mut self, n: u64) {
+        self.current += n;
+        let now = Instant::now();
+        if now.duration_since(self.last_print).as_millis() >= self.print_interval_ms {
+            self.print();
+            self.last_print = now;
+        }
+    }
+
+    #[allow(dead_code)]
+    fn set(&mut self, n: u64) {
+        self.current = n;
+        let now = Instant::now();
+        if now.duration_since(self.last_print).as_millis() >= self.print_interval_ms {
+            self.print();
+            self.last_print = now;
+        }
+    }
+
+    fn print(&self) {
+        let pct = if self.total > 0 {
+            (self.current as f64 / self.total as f64 * 100.0).min(100.0)
+        } else {
+            0.0
+        };
+        let elapsed = self.start.elapsed().as_secs_f64();
+        let rate = if elapsed > 0.0 {
+            self.current as f64 / elapsed
+        } else {
+            0.0
+        };
+        let eta = if rate > 0.0 && self.current < self.total {
+            let remaining = self.total - self.current;
+            remaining as f64 / rate
+        } else {
+            0.0
+        };
+
+        print!(
+            "\r  {} [{:>6.2}%] {:>12} / {:>12} | {:>10.0}/s | ETA: {:>6.1}s",
+            self.name,
+            pct,
+            fmt_num(self.current),
+            fmt_num(self.total),
+            rate,
+            eta
+        );
+        let _ = std::io::stdout().flush();
+    }
+
+    fn finish(&self) {
+        let elapsed = self.start.elapsed().as_secs_f64();
+        let rate = if elapsed > 0.0 {
+            self.current as f64 / elapsed
+        } else {
+            0.0
+        };
+        println!(
+            "\r  {} [100.00%] {:>12} / {:>12} | {:>10.0}/s | Done in {:.2}s",
+            self.name,
+            fmt_num(self.current),
+            fmt_num(self.total),
+            rate,
+            elapsed
+        );
+    }
+
+    #[allow(dead_code)]
+    fn finish_with(&self, msg: &str) {
+        let elapsed = self.start.elapsed().as_secs_f64();
+        println!(
+            "\r  {} {:>12} {} in {:.2}s                              ",
+            self.name,
+            fmt_num(self.current),
+            msg,
+            elapsed
+        );
+    }
+}
+
+fn fmt_num(n: u64) -> String {
+    if n >= 1_000_000_000 {
+        format!("{:.2}B", n as f64 / 1_000_000_000.0)
+    } else if n >= 1_000_000 {
+        format!("{:.2}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.2}K", n as f64 / 1_000.0)
+    } else {
+        format!("{}", n)
+    }
+}
+
+fn log_info(msg: &str) {
+    println!("[INFO]  {}", msg);
+}
+
+fn log_step(step: u32, total: u32, msg: &str) {
+    println!("\n[{}/{}] {}", step, total, msg);
+    println!("{}", "─".repeat(60));
+}
 
 /// Decode basenames from context index format.
 /// Format: count:u8, then for each: len:u16_le, bytes
@@ -114,6 +243,7 @@ struct Record {
     flags: u8,
 }
 
+#[allow(dead_code)]
 fn scan_segment_tree(tree: &sled::Tree) -> io::Result<Vec<(u64, Record)>> {
     let mut records = Vec::new();
     println!(
@@ -356,23 +486,31 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
     let index_dir = data_dir.join("index");
     let ctx_db_dir = data_dir.join("context_db");
 
-    println!("=== Dazhbog Context Migration Tool ===\n");
-    println!("Data directory: {}", data_dir.display());
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║            DAZHBOG CONTEXT MIGRATION                         ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    log_info(&format!("Data directory: {}", data_dir.display()));
 
     // Check if context_db already exists
     if ctx_db_dir.exists() {
-        println!("\ncontext_db already exists at {}", ctx_db_dir.display());
-        println!("If you want to re-migrate, delete it first: rm -rf {}", ctx_db_dir.display());
+        log_info(&format!("context_db already exists at {}", ctx_db_dir.display()));
+        log_info("If you want to re-migrate, delete it first");
+        log_info(&format!("  rm -rf {}", ctx_db_dir.display()));
         return Ok(());
     }
 
     // Check if source index exists
     if !index_dir.exists() {
-        eprintln!("Error: {}/index directory not found.", data_dir.display());
+        eprintln!("[ERROR] {}/index directory not found.", data_dir.display());
         std::process::exit(1);
     }
 
-    // Open source index db
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(1, 4, "Opening source database");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Opening index database...");
     let src_db = sled::open(&index_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open index: {}", e)))?;
 
@@ -385,30 +523,44 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
         .collect();
 
     if ctx_tree_names.is_empty() {
-        println!("\nNo ctx.* trees found in index.");
-        println!("Creating empty context_db...");
+        log_info("No ctx.* trees found in index");
+        log_info("Creating empty context_db...");
         std::fs::create_dir_all(&ctx_db_dir)?;
         let dst_db = sled::open(&ctx_db_dir)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e)))?;
-        // Create empty trees
         for name in &["key_md5", "key_bins", "version_stats", "binary_meta", "key_basenames"] {
             dst_db.open_tree(name)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
         }
         dst_db.flush()?;
-        println!("\n=== Migration Complete ===");
-        println!("Created empty context_db at {}", ctx_db_dir.display());
+
+        println!("\n╔══════════════════════════════════════════════════════════════╗");
+        println!("║  CONTEXT MIGRATION COMPLETE                                  ║");
+        println!("╠══════════════════════════════════════════════════════════════╣");
+        println!("║  Created empty context_db (no ctx.* trees to migrate)        ║");
+        println!("╚══════════════════════════════════════════════════════════════╝");
         return Ok(());
     }
 
-    println!("\nFound {} context trees to migrate:", ctx_tree_names.len());
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(2, 4, "Analyzing source trees");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info(&format!("Found {} context trees to migrate", ctx_tree_names.len()));
+    let mut total_entries: u64 = 0;
     for name in &ctx_tree_names {
         let tree = src_db.open_tree(name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
-        println!("  {} ({} entries)", name, tree.len());
+        let count = tree.len() as u64;
+        total_entries += count;
+        log_info(&format!("  {} ({} entries)", name, fmt_num(count)));
     }
+    log_info(&format!("Total entries to migrate: {}", fmt_num(total_entries)));
 
-    // Create destination context_db
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(3, 4, "Migrating trees");
+    // ─────────────────────────────────────────────────────────────────────────
+
     std::fs::create_dir_all(&ctx_db_dir)?;
     let dst_db = sled::Config::default()
         .path(&ctx_db_dir)
@@ -416,17 +568,28 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
         .open()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e)))?;
 
-    // Migrate each tree (stripping "ctx." prefix)
-    println!("\nMigrating...");
-    for src_name in &ctx_tree_names {
+    let mut overall_progress = Progress::new("Migration", total_entries);
+    let mut total_migrated = 0u64;
+
+    for (tree_idx, src_name) in ctx_tree_names.iter().enumerate() {
         let dst_name = src_name.strip_prefix("ctx.").unwrap_or(src_name);
         let src_tree = src_db.open_tree(src_name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
         let dst_tree = dst_db.open_tree(dst_name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
 
-        let count = src_tree.len();
-        let mut migrated = 0u64;
+        let tree_len = src_tree.len() as u64;
+        println!(
+            "\n  [{}/{}] {} -> {} ({} entries)",
+            tree_idx + 1,
+            ctx_tree_names.len(),
+            src_name,
+            dst_name,
+            fmt_num(tree_len)
+        );
+
+        let mut tree_progress = Progress::new("  Copying", tree_len);
+        let mut tree_migrated = 0u64;
 
         for item in src_tree.iter() {
             let (k, v) = match item {
@@ -435,53 +598,66 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
             };
             dst_tree.insert(&k, &v)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("insert: {}", e)))?;
-            migrated += 1;
-            if migrated % 100000 == 0 {
-                print!("\r  {} -> {}: {}/{} entries...", src_name, dst_name, migrated, count);
-            }
+            tree_migrated += 1;
+            tree_progress.inc(1);
+            overall_progress.inc(1);
         }
-        println!("\r  {} -> {}: {} entries migrated    ", src_name, dst_name, migrated);
+        tree_progress.finish();
+        total_migrated += tree_migrated;
     }
 
+    println!();
+    log_info("Flushing destination database...");
+    let flush_start = Instant::now();
     dst_db.flush()?;
+    log_info(&format!("Flushed in {:.2}s", flush_start.elapsed().as_secs_f64()));
 
-    // Remove ctx.* trees from source index
-    println!("\nRemoving ctx.* trees from index...");
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(4, 4, "Cleaning up source database");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Removing ctx.* trees from index...");
     for name in &ctx_tree_names {
         src_db.drop_tree(name.as_bytes())
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("drop_tree: {}", e)))?;
-        println!("  Dropped {}", name);
+        log_info(&format!("  Dropped {}", name));
     }
     src_db.flush()?;
 
-    println!("\n=== Migration Complete ===");
-    println!("Context data moved to {}", ctx_db_dir.display());
-    println!("The server will now use context_db for all context operations.");
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║  CONTEXT MIGRATION COMPLETE                                  ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║  Entries migrated:  {:>12}                           ║", fmt_num(total_migrated));
+    println!("║  Trees processed:   {:>12}                           ║", ctx_tree_names.len());
+    println!("╚══════════════════════════════════════════════════════════════╝");
 
     Ok(())
 }
 
 fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
     let seg_db_dir = data_dir.join("segments_db");
-    // Use "index" - same as the server
     let index_dir = data_dir.join("index");
 
     if !seg_db_dir.exists() {
-        eprintln!(
-            "Error: {}/segments_db directory not found.",
-            data_dir.display()
-        );
+        eprintln!("[ERROR] {}/segments_db directory not found.", data_dir.display());
         std::process::exit(1);
     }
 
-    println!("=== Dazhbog Index Rebuild Tool ===\n");
-    println!("Data directory: {}", data_dir.display());
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║            DAZHBOG INDEX REBUILD                             ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
 
-    // Open the segments database (read-only scan)
+    log_info(&format!("Data directory: {}", data_dir.display()));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(1, 4, "Opening databases");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Opening segments database...");
     let seg_db = sled::open(&seg_db_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open segments: {}", e)))?;
 
-    // Open/create the index database (same path as server: data/index)
+    log_info("Opening index database...");
     std::fs::create_dir_all(&index_dir)?;
     let index_db = sled::Config::default()
         .path(&index_dir)
@@ -489,20 +665,25 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
         .open()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open index: {}", e)))?;
 
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(2, 4, "Clearing existing index");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Dropping old 'latest' tree (this is fast)...");
+    let drop_start = Instant::now();
+    index_db
+        .drop_tree("latest")
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("drop latest tree: {}", e)))?;
+    log_info(&format!("Dropped in {:.2}s", drop_start.elapsed().as_secs_f64()));
+
     let index_tree = index_db.open_tree("latest").map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("sled open latest tree: {}", e),
-        )
+        io::Error::new(io::ErrorKind::Other, format!("sled open latest tree: {}", e))
     })?;
 
-    // Clear the existing index
-    println!("Clearing existing index...");
-    index_tree
-        .clear()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("clear index: {}", e)))?;
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(3, 4, "Scanning segment records");
+    // ─────────────────────────────────────────────────────────────────────────
 
-    // Get segment tree names
     let mut tree_names: Vec<_> = seg_db
         .tree_names()
         .into_iter()
@@ -511,22 +692,43 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
         .collect();
     tree_names.sort();
 
-    println!("Found {} segment trees", tree_names.len());
+    log_info(&format!("Found {} segment trees", tree_names.len()));
 
-    // Track latest record for each key (by timestamp)
-    let mut latest_by_key: HashMap<u128, (u64, u64, u8)> = HashMap::new(); // key -> (ts, addr, flags)
+    // Count total records first
+    let total_expected: u64 = tree_names
+        .iter()
+        .filter_map(|name| seg_db.open_tree(name).ok())
+        .map(|t| t.len() as u64)
+        .sum();
+    log_info(&format!("Total records to scan: {}", fmt_num(total_expected)));
+
+    let mut latest_by_key: HashMap<u128, (u64, u64, u8)> = HashMap::new();
     let mut total_records = 0u64;
     let mut corrupt_records = 0u64;
 
-    for name in &tree_names {
+    let mut progress = Progress::new("Scanning", total_expected);
+
+    for (tree_idx, name) in tree_names.iter().enumerate() {
         let seg_id: u16 = name[4..9].parse().unwrap_or(0);
         let tree = seg_db.open_tree(name).map_err(|e| {
             io::Error::new(io::ErrorKind::Other, format!("open tree {}: {}", name, e))
         })?;
 
-        println!("Scanning {} ({} records)...", name, tree.len());
+        let tree_len = tree.len() as u64;
+        println!(
+            "\n  [{}/{}] {} ({} records)",
+            tree_idx + 1,
+            tree_names.len(),
+            name,
+            fmt_num(tree_len)
+        );
+
+        let mut tree_progress = Progress::new("  Records", tree_len);
 
         for item in tree.iter() {
+            tree_progress.inc(1);
+            progress.inc(1);
+
             let (offset_bytes, record_bytes) = match item {
                 Ok(i) => i,
                 Err(_) => continue,
@@ -549,7 +751,6 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
             let stored_crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
             let body = &record_bytes[12..];
 
-            // Verify CRC
             let computed_crc = crc32c_impl::crc32c(0, body);
             let crc_valid = if computed_crc == stored_crc {
                 true
@@ -568,7 +769,6 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
                 continue;
             }
 
-            // Parse key, timestamp, and flags
             let lo = u64::from_le_bytes(body[0..8].try_into().unwrap());
             let hi = u64::from_le_bytes(body[8..16].try_into().unwrap());
             let key = ((hi as u128) << 64) | (lo as u128);
@@ -577,7 +777,6 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
 
             let addr = pack_addr(seg_id, offset, flags);
 
-            // Keep the latest version
             match latest_by_key.get(&key) {
                 Some(&(existing_ts, _, _)) if existing_ts >= ts_sec => {}
                 _ => {
@@ -587,21 +786,27 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
 
             total_records += 1;
         }
+        tree_progress.finish();
     }
 
-    println!("\n=== Scan Results ===");
-    println!("Total valid records: {}", total_records);
-    println!("Corrupt records skipped: {}", corrupt_records);
-    println!("Unique keys: {}", latest_by_key.len());
+    println!();
+    log_info(&format!("Valid records scanned: {}", fmt_num(total_records)));
+    log_info(&format!("Corrupt records skipped: {}", fmt_num(corrupt_records)));
+    log_info(&format!("Unique keys found: {}", fmt_num(latest_by_key.len() as u64)));
 
-    // Write index entries (skip deleted records)
-    println!("\nWriting index entries...");
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(4, 4, "Writing index entries");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let total_keys = latest_by_key.len() as u64;
+    let mut progress = Progress::new("Indexing", total_keys);
     let mut indexed = 0u64;
     let mut deleted = 0u64;
 
     for (key, (_ts, addr, flags)) in &latest_by_key {
+        progress.inc(1);
+
         if flags & 0x01 == 0x01 {
-            // Deleted record, don't index
             deleted += 1;
             continue;
         }
@@ -610,18 +815,20 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
             .insert(key.to_le_bytes(), addr.to_le_bytes().as_slice())
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("index insert: {}", e)))?;
         indexed += 1;
-
-        if indexed % 10000 == 0 {
-            print!("\r  Indexed {} entries...", indexed);
-        }
     }
+    progress.finish();
 
+    log_info("Flushing to disk...");
+    let flush_start = Instant::now();
     index_db.flush()?;
+    log_info(&format!("Flushed in {:.2}s", flush_start.elapsed().as_secs_f64()));
 
-    println!("\n\n=== Index Rebuild Complete ===");
-    println!("Indexed {} keys", indexed);
-    println!("Skipped {} deleted keys", deleted);
-    println!("\nYou can now restart the dazhbog server.");
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║  INDEX REBUILD COMPLETE                                      ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║  Indexed keys:    {:>12}                              ║", fmt_num(indexed));
+    println!("║  Deleted keys:    {:>12}                              ║", fmt_num(deleted));
+    println!("╚══════════════════════════════════════════════════════════════╝");
 
     Ok(())
 }
@@ -677,22 +884,28 @@ fn encode_basenames_for_key(names: &[String]) -> Vec<u8> {
 }
 
 fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
-    // Use context_db (isolated context database)
     let ctx_db_dir = data_dir.join("context_db");
 
     if !ctx_db_dir.exists() {
-        eprintln!("Error: {}/context_db directory not found.", data_dir.display());
-        eprintln!("Run --migrate-context first to create it.");
+        eprintln!("[ERROR] {}/context_db directory not found.", data_dir.display());
+        eprintln!("        Run --migrate-context first to create it.");
         std::process::exit(1);
     }
 
-    println!("=== Dazhbog Basenames Rebuild Tool ===\n");
-    println!("Data directory: {}", data_dir.display());
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║            DAZHBOG BASENAMES REBUILD                         ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
 
+    log_info(&format!("Data directory: {}", data_dir.display()));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(1, 4, "Opening database");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Opening context_db...");
     let db = sled::open(&ctx_db_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open: {}", e)))?;
 
-    // Open required trees (no "ctx." prefix in context_db)
     let key_bins = db
         .open_tree("key_bins")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open key_bins: {}", e)))?;
@@ -706,17 +919,23 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
         )
     })?;
 
-    println!("key_bins:      {} entries", key_bins.len());
-    println!("binary_meta:   {} entries", binary_meta.len());
-    println!(
-        "key_basenames: {} entries (before)",
-        key_basenames.len()
-    );
+    let key_bins_count = key_bins.len() as u64;
+    let binary_meta_count = binary_meta.len() as u64;
+    let basenames_before = key_basenames.len() as u64;
 
-    // Build md5 -> basename lookup from binary_meta
-    println!("\nBuilding MD5 -> basename lookup...");
+    log_info(&format!("key_bins:        {} entries", fmt_num(key_bins_count)));
+    log_info(&format!("binary_meta:     {} entries", fmt_num(binary_meta_count)));
+    log_info(&format!("key_basenames:   {} entries (before)", fmt_num(basenames_before)));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(2, 4, "Building MD5 -> basename lookup");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let mut progress = Progress::new("Scanning", binary_meta_count);
     let mut md5_to_basename: HashMap<[u8; 16], String> = HashMap::new();
+
     for item in binary_meta.iter() {
+        progress.inc(1);
         let (md5_key, meta_val) = match item {
             Ok(i) => i,
             Err(_) => continue,
@@ -732,23 +951,25 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
             }
         }
     }
-    println!("  Found {} binaries with basenames", md5_to_basename.len());
+    progress.finish();
+    log_info(&format!("Found {} binaries with basenames", fmt_num(md5_to_basename.len() as u64)));
 
-    // Iterate key_bins and populate key_basenames
-    println!("\nPopulating key_basenames...");
-    let mut processed = 0u64;
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(3, 4, "Populating key_basenames");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let mut progress = Progress::new("Processing", key_bins_count);
     let mut populated = 0u64;
 
     for item in key_bins.iter() {
+        progress.inc(1);
         let (key_bytes, bins_val) = match item {
             Ok(i) => i,
             Err(_) => continue,
         };
 
-        // Decode the MD5 list for this key
         let md5s = decode_key_bins_md5s(&bins_val);
 
-        // Look up basenames for each MD5
         let mut basenames: Vec<String> = Vec::new();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -768,28 +989,28 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("insert: {}", e)))?;
             populated += 1;
         }
-
-        processed += 1;
-        if processed % 100000 == 0 {
-            print!(
-                "\r  Processed {} keys, {} populated...",
-                processed, populated
-            );
-        }
     }
+    progress.finish();
 
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(4, 4, "Flushing database");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Flushing to disk...");
+    let flush_start = Instant::now();
     db.flush()?;
+    log_info(&format!("Flushed in {:.2}s", flush_start.elapsed().as_secs_f64()));
 
-    println!(
-        "\r  Processed {} keys, {} populated    ",
-        processed, populated
-    );
-    println!(
-        "\nkey_basenames: {} entries (after)",
-        key_basenames.len()
-    );
-    println!("\n=== Basenames Rebuild Complete ===");
-    println!("You can now run --rebuild-search to update the search index.");
+    let basenames_after = key_basenames.len() as u64;
+
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║  BASENAMES REBUILD COMPLETE                                  ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║  Keys processed:     {:>12}                          ║", fmt_num(key_bins_count));
+    println!("║  Keys populated:     {:>12}                          ║", fmt_num(populated));
+    println!("║  key_basenames now:  {:>12}                          ║", fmt_num(basenames_after));
+    println!("╚══════════════════════════════════════════════════════════════╝");
+    println!("\nRun --rebuild-search to update the search index with basenames.");
 
     Ok(())
 }
@@ -890,53 +1111,57 @@ fn demangle_symbol(name: &str) -> (String, &'static str) {
 fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
     let seg_db_dir = data_dir.join("segments_db");
     let search_dir = data_dir.join("search_index");
-    // Use context_db for basenames (isolated context database)
     let ctx_db_dir = data_dir.join("context_db");
 
     if !seg_db_dir.exists() {
-        eprintln!(
-            "Error: {}/segments_db directory not found.",
-            data_dir.display()
-        );
+        eprintln!("[ERROR] {}/segments_db directory not found.", data_dir.display());
         std::process::exit(1);
     }
 
-    println!("=== Dazhbog Search Index Rebuild Tool ===\n");
-    println!("Data directory: {}", data_dir.display());
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║            DAZHBOG SEARCH INDEX REBUILD                      ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
 
-    // Open context database for basenames (key_basenames tree)
+    log_info(&format!("Data directory: {}", data_dir.display()));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(1, 5, "Opening databases");
+    // ─────────────────────────────────────────────────────────────────────────
+
     let ctx_basenames_tree: Option<sled::Tree> = if ctx_db_dir.exists() {
-        println!("Found context_db at {}", ctx_db_dir.display());
+        log_info(&format!("Opening context_db at {}", ctx_db_dir.display()));
         let ctx_db = sled::open(&ctx_db_dir)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e)))?;
         match ctx_db.open_tree("key_basenames") {
             Ok(tree) => {
-                println!("  Opened key_basenames tree ({} entries)", tree.len());
-                if tree.is_empty() {
-                    println!(
-                        "  Warning: key_basenames is empty, run --rebuild-basenames first"
-                    );
+                let count = tree.len();
+                if count == 0 {
+                    log_info("[WARN] key_basenames is empty, run --rebuild-basenames first");
                     None
                 } else {
+                    log_info(&format!("Opened key_basenames tree ({} entries)", fmt_num(count as u64)));
                     Some(tree)
                 }
             }
             Err(e) => {
-                eprintln!("  Warning: could not open key_basenames: {}", e);
+                log_info(&format!("[WARN] Could not open key_basenames: {}", e));
                 None
             }
         }
     } else {
-        println!("No context_db found, binary names will be empty");
-        println!("  Run --migrate-context first to create context_db");
+        log_info("[WARN] No context_db found, binary names will be empty");
+        log_info("       Run --migrate-context first to create context_db");
         None
     };
 
-    // Open the segments database
+    log_info("Opening segments database...");
     let seg_db = sled::open(&seg_db_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open segments: {}", e)))?;
 
-    // Get segment tree names
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(2, 5, "Scanning segment records");
+    // ─────────────────────────────────────────────────────────────────────────
+
     let mut tree_names: Vec<_> = seg_db
         .tree_names()
         .into_iter()
@@ -945,20 +1170,39 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
         .collect();
     tree_names.sort();
 
-    println!("Found {} segment trees", tree_names.len());
+    log_info(&format!("Found {} segment trees", tree_names.len()));
 
-    // Collect latest record for each key
-    let mut latest_by_key: HashMap<u128, (u64, String)> = HashMap::new(); // key -> (ts, name)
+    let total_expected: u64 = tree_names
+        .iter()
+        .filter_map(|name| seg_db.open_tree(name).ok())
+        .map(|t| t.len() as u64)
+        .sum();
+    log_info(&format!("Total records to scan: {}", fmt_num(total_expected)));
+
+    let mut latest_by_key: HashMap<u128, (u64, String)> = HashMap::new();
     let mut total_records = 0u64;
+    let mut progress = Progress::new("Scanning", total_expected);
 
-    for name in &tree_names {
+    for (tree_idx, name) in tree_names.iter().enumerate() {
         let tree = seg_db.open_tree(name).map_err(|e| {
             io::Error::new(io::ErrorKind::Other, format!("open tree {}: {}", name, e))
         })?;
 
-        println!("Scanning {} ({} records)...", name, tree.len());
+        let tree_len = tree.len() as u64;
+        println!(
+            "\n  [{}/{}] {} ({} records)",
+            tree_idx + 1,
+            tree_names.len(),
+            name,
+            fmt_num(tree_len)
+        );
+
+        let mut tree_progress = Progress::new("  Records", tree_len);
 
         for item in tree.iter() {
+            tree_progress.inc(1);
+            progress.inc(1);
+
             let (_, record_bytes) = match item {
                 Ok(i) => i,
                 Err(_) => continue,
@@ -977,7 +1221,6 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
             let stored_crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
             let body = &record_bytes[12..];
 
-            // Verify CRC
             let computed_crc = crc32c_impl::crc32c(0, body);
             let crc_valid = if computed_crc == stored_crc {
                 true
@@ -990,14 +1233,12 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
                 continue;
             }
 
-            // Parse key, timestamp, flags, and name
             let lo = u64::from_le_bytes(body[0..8].try_into().unwrap());
             let hi = u64::from_le_bytes(body[8..16].try_into().unwrap());
             let key = ((hi as u128) << 64) | (lo as u128);
             let ts_sec = u64::from_le_bytes(body[16..24].try_into().unwrap());
             let flags = body[46];
 
-            // Skip deleted records
             if flags & 0x01 == 0x01 {
                 continue;
             }
@@ -1012,7 +1253,6 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
                 Err(_) => continue,
             };
 
-            // Keep the latest version
             match latest_by_key.get(&key) {
                 Some(&(existing_ts, _)) if existing_ts >= ts_sec => {}
                 _ => {
@@ -1022,29 +1262,30 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
 
             total_records += 1;
         }
+        tree_progress.finish();
     }
 
-    println!("\n=== Scan Results ===");
-    println!("Total valid records: {}", total_records);
-    println!("Unique keys to index: {}", latest_by_key.len());
+    println!();
+    log_info(&format!("Valid records scanned: {}", fmt_num(total_records)));
+    log_info(&format!("Unique keys to index: {}", fmt_num(latest_by_key.len() as u64)));
 
-    // Delete and recreate search index
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(3, 5, "Creating search index");
+    // ─────────────────────────────────────────────────────────────────────────
+
     if search_dir.exists() {
-        println!("\nRemoving old search index...");
+        log_info("Removing old search index...");
         std::fs::remove_dir_all(&search_dir)?;
     }
     std::fs::create_dir_all(&search_dir)?;
+    log_info(&format!("Created new index at {}", search_dir.display()));
 
-    // Use tantivy directly for indexing
-    // IMPORTANT: Schema must match src/engine/search/index.rs exactly!
     use tantivy::schema::{IndexRecordOption, Schema, TextFieldIndexing, TextOptions, STORED};
     use tantivy::tokenizer::{LowerCaser, RawTokenizer, SimpleTokenizer, TextAnalyzer};
     use tantivy::{Index, IndexWriter};
 
-    // Build schema - must match SearchIndex::build_schema in src/engine/search/index.rs
     let mut builder = Schema::builder();
 
-    // Symbol tokenizer options (splits on non-alphanumeric, lowercases)
     let symbol_indexing = TextFieldIndexing::default()
         .set_tokenizer("symbol")
         .set_index_option(IndexRecordOption::WithFreqs);
@@ -1052,10 +1293,8 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
         .set_indexing_options(symbol_indexing)
         .set_stored();
 
-    // Stored-only (no indexing)
     let stored_only = TextOptions::default().set_stored();
 
-    // Raw tokenizer for exact key matching
     let key_options = TextOptions::default().set_stored().set_indexing_options(
         TextFieldIndexing::default()
             .set_tokenizer("raw")
@@ -1071,11 +1310,9 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
 
     let schema = builder.build();
 
-    // Create index
     let index = Index::create_in_dir(&search_dir, schema)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("create index: {}", e)))?;
 
-    // Register tokenizers - must match src/engine/search/index.rs
     let symbol = TextAnalyzer::builder(SimpleTokenizer::default())
         .filter(LowerCaser)
         .build();
@@ -1083,20 +1320,29 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
     index.tokenizers().register("symbol", symbol);
     index.tokenizers().register("raw", raw);
 
-    // Create writer with 50MB heap
     let mut writer: IndexWriter = index
         .writer(50_000_000)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("writer: {}", e)))?;
 
-    println!("\nIndexing {} functions...", latest_by_key.len());
+    log_info("Index created, tokenizers registered");
+
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(4, 5, "Indexing functions");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let total_funcs = latest_by_key.len() as u64;
+    log_info(&format!("Functions to index: {}", fmt_num(total_funcs)));
+
+    let mut progress = Progress::new("Indexing", total_funcs);
     let mut indexed = 0u64;
     let mut with_basenames = 0u64;
     let mut demangled_count = 0u64;
 
     for (k, (ts_val, name)) in latest_by_key.iter() {
+        progress.inc(1);
+
         let key_hex_str = format!("{:032x}", k);
 
-        // Demangle the function name
         let (demangled_name, lang_str) = demangle_symbol(name);
         let is_demangled = !lang_str.is_empty() && demangled_name != *name;
 
@@ -1115,7 +1361,6 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
 
         doc.add_u64(ts, *ts_val);
 
-        // Look up binary names from context database
         if let Some(ref tree) = ctx_basenames_tree {
             let key_bytes = k.to_le_bytes();
             if let Ok(Some(val)) = tree.get(&key_bytes) {
@@ -1133,62 +1378,71 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("add doc: {}", e)))?;
 
         indexed += 1;
-        if indexed % 10000 == 0 {
-            print!(
-                "\r  Indexed {} functions ({} demangled, {} with binaries)...",
-                indexed, demangled_count, with_basenames
-            );
-        }
     }
+    progress.finish();
 
-    println!(
-        "\r  Indexed {} functions ({} demangled, {} with binaries)",
-        indexed, demangled_count, with_basenames
-    );
-    println!("\nCommitting...");
+    log_info(&format!("Demangled: {} ({:.1}%)", fmt_num(demangled_count), demangled_count as f64 / indexed as f64 * 100.0));
+    log_info(&format!("With binary names: {} ({:.1}%)", fmt_num(with_basenames), with_basenames as f64 / indexed as f64 * 100.0));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(5, 5, "Committing index");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Committing to disk (this may take a moment)...");
+    let commit_start = Instant::now();
     writer
         .commit()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("commit: {}", e)))?;
+    log_info(&format!("Committed in {:.2}s", commit_start.elapsed().as_secs_f64()));
 
-    println!("\n=== Search Index Rebuild Complete ===");
-    println!("  Indexed {} functions", indexed);
-    println!("  {} functions demangled", demangled_count);
-    println!("  {} functions have binary names", with_basenames);
-    println!("\nYou can now restart the dazhbog server.");
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║  SEARCH INDEX REBUILD COMPLETE                               ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║  Functions indexed:   {:>12}                         ║", fmt_num(indexed));
+    println!("║  Demangled:           {:>12}                         ║", fmt_num(demangled_count));
+    println!("║  With binary names:   {:>12}                         ║", fmt_num(with_basenames));
+    println!("╚══════════════════════════════════════════════════════════════╝");
 
     Ok(())
 }
 
 /// Combined command: migrate context + rebuild index + rebuild search
 fn rebuild_all(data_dir: &PathBuf) -> io::Result<()> {
-    println!("=== Dazhbog Full Rebuild ===\n");
-    println!("This will run the following steps:");
-    println!("  1. Migrate context trees from index to context_db");
-    println!("  2. Rebuild key->addr index from segments");
-    println!("  3. Rebuild full-text search index");
-    println!();
+    let start = Instant::now();
 
-    // Step 1: Migrate context
-    println!("========================================");
-    println!("STEP 1: Migrate Context");
-    println!("========================================\n");
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║            DAZHBOG FULL REBUILD                              ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
+
+    log_info(&format!("Data directory: {}", data_dir.display()));
+    println!();
+    log_info("This will run the following operations:");
+    log_info("  1. Migrate context trees from index to context_db");
+    log_info("  2. Rebuild key->addr index from segments");
+    log_info("  3. Rebuild full-text search index");
+
+    println!("\n\n══════════════════════════════════════════════════════════════");
+    println!("  PHASE 1 OF 3: CONTEXT MIGRATION");
+    println!("══════════════════════════════════════════════════════════════");
     migrate_context(data_dir)?;
 
-    // Step 2: Rebuild index
-    println!("\n========================================");
-    println!("STEP 2: Rebuild Index");
-    println!("========================================\n");
+    println!("\n\n══════════════════════════════════════════════════════════════");
+    println!("  PHASE 2 OF 3: INDEX REBUILD");
+    println!("══════════════════════════════════════════════════════════════");
     rebuild_index(data_dir)?;
 
-    // Step 3: Rebuild search
-    println!("\n========================================");
-    println!("STEP 3: Rebuild Search Index");
-    println!("========================================\n");
+    println!("\n\n══════════════════════════════════════════════════════════════");
+    println!("  PHASE 3 OF 3: SEARCH INDEX REBUILD");
+    println!("══════════════════════════════════════════════════════════════");
     rebuild_search(data_dir)?;
 
-    println!("\n========================================");
-    println!("=== Full Rebuild Complete ===");
-    println!("========================================");
+    let elapsed = start.elapsed();
+
+    println!("\n\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║  FULL REBUILD COMPLETE                                       ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║  Total time: {:>10.2}s                                    ║", elapsed.as_secs_f64());
+    println!("╚══════════════════════════════════════════════════════════════╝");
     println!("\nAll databases have been rebuilt. You can now start the server.");
 
     Ok(())
@@ -1238,25 +1492,30 @@ fn main() -> io::Result<()> {
     }
 
     // Full recovery mode
+    let start = Instant::now();
     let data_dir = data_path;
     let seg_db_dir = data_dir.join("segments_db");
     let backup_dir = PathBuf::from("data.backup");
     let temp_dir = PathBuf::from("data.recovered");
 
     if !seg_db_dir.exists() {
-        eprintln!("Error: {}/segments_db directory not found. This tool requires the new sled-based storage.", data_dir.display());
-        eprintln!(
-            "If you have old seg.*.dat files, run the main dazhbog server once to migrate them."
-        );
+        eprintln!("[ERROR] {}/segments_db directory not found.", data_dir.display());
+        eprintln!("        This tool requires the new sled-based storage.");
+        eprintln!("        If you have old seg.*.dat files, run the main dazhbog server once to migrate them.");
         std::process::exit(1);
     }
 
-    println!("=== Dazhbog Segment Recovery Tool (sled-based) ===\n");
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║            DAZHBOG FULL RECOVERY                             ║");
+    println!("╚══════════════════════════════════════════════════════════════╝\n");
 
-    // Scan all segment trees in the sled database
-    let mut all_records: HashMap<u128, Vec<Record>> = HashMap::new();
-    let mut total_valid = 0;
+    log_info(&format!("Data directory: {}", data_dir.display()));
 
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(1, 5, "Opening segment database");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Opening segments_db...");
     let db = sled::open(&seg_db_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open: {}", e)))?;
 
@@ -1266,108 +1525,230 @@ fn main() -> io::Result<()> {
         .map(|name| String::from_utf8_lossy(&name).to_string())
         .filter(|name| name.starts_with("seg."))
         .collect();
-
     tree_names.sort();
 
-    for name in tree_names {
+    let total_expected: u64 = tree_names
+        .iter()
+        .filter_map(|name| db.open_tree(name).ok())
+        .map(|t| t.len() as u64)
+        .sum();
+
+    log_info(&format!("Found {} segment trees", tree_names.len()));
+    log_info(&format!("Total records to scan: {}", fmt_num(total_expected)));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(2, 5, "Scanning segment records");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let mut all_records: HashMap<u128, Vec<Record>> = HashMap::new();
+    let mut total_valid = 0u64;
+    let mut corrupt_records = 0u64;
+    let mut progress = Progress::new("Scanning", total_expected);
+
+    for (tree_idx, name) in tree_names.iter().enumerate() {
         let tree = db
-            .open_tree(&name)
+            .open_tree(name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open_tree: {}", e)))?;
 
-        match scan_segment_tree(&tree) {
-            Ok(records) => {
-                total_valid += records.len();
-                for (_off, rec) in records {
-                    all_records
-                        .entry(rec.key)
-                        .or_insert_with(Vec::new)
-                        .push(rec);
+        let tree_len = tree.len() as u64;
+        println!(
+            "\n  [{}/{}] {} ({} records)",
+            tree_idx + 1,
+            tree_names.len(),
+            name,
+            fmt_num(tree_len)
+        );
+
+        let mut tree_progress = Progress::new("  Records", tree_len);
+
+        for item in tree.iter() {
+            tree_progress.inc(1);
+            progress.inc(1);
+
+            let (offset_bytes, record_bytes) = match item {
+                Ok(i) => i,
+                Err(_) => continue,
+            };
+
+            let _off = u64::from_be_bytes(offset_bytes.as_ref().try_into().unwrap());
+
+            if record_bytes.len() < 12 {
+                corrupt_records += 1;
+                continue;
+            }
+
+            let hdr: &[u8] = &record_bytes[0..12];
+            let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
+            if magic != MAGIC {
+                corrupt_records += 1;
+                continue;
+            }
+
+            let stored_crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
+            let body = &record_bytes[12..];
+
+            let computed_crc = crc32c_impl::crc32c(0, body);
+            let crc_valid = if computed_crc == stored_crc {
+                true
+            } else {
+                let computed_crc_legacy = crc32c_impl::crc32c_legacy(0, body);
+                computed_crc_legacy == stored_crc
+            };
+
+            if !crc_valid || body.len() < 52 {
+                corrupt_records += 1;
+                continue;
+            }
+
+            // Parse record
+            let lo = u64::from_le_bytes(body[0..8].try_into().unwrap());
+            let hi = u64::from_le_bytes(body[8..16].try_into().unwrap());
+            let key = ((hi as u128) << 64) | (lo as u128);
+            let ts_sec = u64::from_le_bytes(body[16..24].try_into().unwrap());
+            let prev_addr = u64::from_le_bytes(body[24..32].try_into().unwrap());
+            let len_bytes = u32::from_le_bytes(body[32..36].try_into().unwrap());
+            let popularity = u32::from_le_bytes(body[36..40].try_into().unwrap());
+            let name_len = u16::from_le_bytes(body[40..42].try_into().unwrap()) as usize;
+            let data_len = u32::from_le_bytes(body[42..46].try_into().unwrap()) as usize;
+            let flags = body[46];
+
+            let name_start = 52;
+            if name_start + name_len + data_len > body.len() {
+                corrupt_records += 1;
+                continue;
+            }
+
+            let name = match std::str::from_utf8(&body[name_start..name_start + name_len]) {
+                Ok(s) => s.to_string(),
+                Err(_) => {
+                    corrupt_records += 1;
+                    continue;
                 }
-            }
-            Err(e) => {
-                eprintln!("Error scanning tree {}: {}", name, e);
-            }
+            };
+
+            let data_start = name_start + name_len;
+            let data = body[data_start..data_start + data_len].to_vec();
+
+            let rec = Record {
+                key,
+                ts_sec,
+                prev_addr,
+                len_bytes,
+                popularity,
+                name,
+                data,
+                flags,
+            };
+
+            all_records
+                .entry(rec.key)
+                .or_insert_with(Vec::new)
+                .push(rec);
+            total_valid += 1;
         }
+        tree_progress.finish();
     }
 
-    println!("\n=== Scan Results ===");
-    println!("Total valid records: {}", total_valid);
-    println!("Unique keys: {}", all_records.len());
+    println!();
+    log_info(&format!("Valid records scanned: {}", fmt_num(total_valid)));
+    log_info(&format!("Corrupt records skipped: {}", fmt_num(corrupt_records)));
+    log_info(&format!("Unique keys found: {}", fmt_num(all_records.len() as u64)));
 
-    // Keep only the latest version of each key
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(3, 5, "Deduplicating records");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let total_keys = all_records.len() as u64;
+    let mut progress = Progress::new("Deduplicating", total_keys);
     let mut final_records: Vec<Record> = Vec::new();
+    let mut deleted_count = 0u64;
+
     for (_key, mut versions) in all_records {
+        progress.inc(1);
         versions.sort_by(|a, b| b.ts_sec.cmp(&a.ts_sec));
         if let Some(latest) = versions.into_iter().next() {
             if latest.flags & 0x01 == 0 {
                 final_records.push(latest);
+            } else {
+                deleted_count += 1;
             }
         }
     }
+    progress.finish();
 
-    println!("Records to recover (after dedup): {}", final_records.len());
+    log_info(&format!("Records to recover: {}", fmt_num(final_records.len() as u64)));
+    log_info(&format!("Deleted records skipped: {}", fmt_num(deleted_count)));
 
     if final_records.is_empty() {
-        println!("\nNo records to recover!");
+        println!("\n[WARN] No records to recover!");
         return Ok(());
     }
 
-    // Create temp directory for new sled db
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(4, 5, "Writing recovered data");
+    // ─────────────────────────────────────────────────────────────────────────
+
     if temp_dir.exists() {
+        log_info("Removing old temp directory...");
         std::fs::remove_dir_all(&temp_dir)?;
     }
     std::fs::create_dir_all(&temp_dir)?;
 
-    // Write recovered records to new segment db
-    println!("\n=== Writing recovered data ===");
+    log_info("Opening new segment database...");
     let recovered_db = sled::open(&temp_dir)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open temp db: {}", e)))?;
     let recovered_tree = recovered_db
         .open_tree("seg.00001")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open temp tree: {}", e)))?;
 
+    let total_to_write = final_records.len() as u64;
+    let mut progress = Progress::new("Writing", total_to_write);
     let mut offset = 0u64;
-    for (i, rec) in final_records.iter().enumerate() {
+    let mut bytes_written = 0u64;
+
+    for rec in final_records.iter() {
         let len = write_record_to_tree(&recovered_tree, offset, rec)?;
         offset += len as u64;
-
-        if (i + 1) % 1000 == 0 {
-            println!("  Written {} records...", i + 1);
-        }
+        bytes_written += len as u64;
+        progress.inc(1);
     }
+    progress.finish();
 
+    log_info("Flushing to disk...");
+    let flush_start = Instant::now();
     recovered_db.flush()?;
-    println!(
-        "  Written {} records to new database in {}",
-        final_records.len(),
-        temp_dir.display()
-    );
+    log_info(&format!("Flushed in {:.2}s", flush_start.elapsed().as_secs_f64()));
     drop(recovered_db);
 
-    // Backup old segments
-    println!("\n=== Creating backup ===");
+    log_info(&format!("Written {} bytes", fmt_num(bytes_written)));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    log_step(5, 5, "Finalizing recovery");
+    // ─────────────────────────────────────────────────────────────────────────
+
+    log_info("Creating backup of old segments...");
     if backup_dir.exists() {
         std::fs::remove_dir_all(&backup_dir)?;
     }
     std::fs::create_dir_all(&backup_dir)?;
     std::fs::rename(&seg_db_dir, backup_dir.join("segments_db"))?;
-    println!(
-        "  Old segment database backed up to {}",
-        backup_dir.join("segments_db").display()
-    );
+    log_info(&format!("Old data backed up to {}", backup_dir.join("segments_db").display()));
 
-    // Move recovered segments to data directory
+    log_info("Moving recovered data into place...");
     std::fs::rename(&temp_dir, &seg_db_dir)?;
-    println!(
-        "  Recovered segment database moved to {}",
-        seg_db_dir.display()
-    );
+    log_info(&format!("Recovered data moved to {}", seg_db_dir.display()));
 
-    println!("\n=== Recovery Complete ===");
-    println!("Recovered {} unique records", final_records.len());
-    println!("Old segments backed up to: {}", backup_dir.display());
-    println!("New segments ready at: {}", data_dir.display());
-    println!("\nYou can now restart the dazhbog server.");
+    let elapsed = start.elapsed();
+
+    println!("\n╔══════════════════════════════════════════════════════════════╗");
+    println!("║  FULL RECOVERY COMPLETE                                      ║");
+    println!("╠══════════════════════════════════════════════════════════════╣");
+    println!("║  Records recovered:   {:>12}                         ║", fmt_num(final_records.len() as u64));
+    println!("║  Data written:        {:>12}                         ║", fmt_num(bytes_written));
+    println!("║  Total time:          {:>10.2}s                           ║", elapsed.as_secs_f64());
+    println!("╚══════════════════════════════════════════════════════════════╝");
+    println!("\nBackup location: {}", backup_dir.display());
+    println!("You can now restart the dazhbog server.");
 
     Ok(())
 }

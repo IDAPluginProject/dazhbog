@@ -119,13 +119,13 @@ pub async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unp
     if cfg.debug.dump_hello && is_lumina {
         if let Ok(raw) = lumina::parse_lumina_hello_raw(payload) {
             // Only dump if license is at least 128 bytes
-            if raw.license_data.len() >= 128 {
+            if raw.key.len() >= 128 {
                 use std::io::Write;
                 let hash = {
                     use std::collections::hash_map::DefaultHasher;
                     use std::hash::{Hash, Hasher};
                     let mut hasher = DefaultHasher::new();
-                    raw.license_data.hash(&mut hasher);
+                    raw.key.hash(&mut hasher);
                     hasher.finish()
                 };
                 let filename = format!("{:016x}.txt", hash);
@@ -134,14 +134,14 @@ pub async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unp
                     warn!("Failed to create dump directory: {}", e);
                 } else if let Ok(mut f) = std::fs::File::create(&path) {
                     let id_hex = raw
-                        .id_bytes
+                        .license_id
                         .iter()
                         .map(|b| format!("{:02x}", b))
                         .collect::<String>();
                     let content = format!(
                         "ID: {}\n\nLicense:\n\n{}\n\nCredentials: {} / {}\n",
                         id_hex,
-                        String::from_utf8_lossy(&raw.license_data),
+                        String::from_utf8_lossy(&raw.key),
                         raw.username,
                         raw.password
                     );
@@ -352,7 +352,10 @@ async fn handle_lumina_command<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
     match typ {
         0x0e => handle_lumina_pull(stream, cfg, db, pld).await,
         0x10 => handle_lumina_push(stream, cfg, db, pld).await,
+        0x12 => handle_lumina_get_pop(stream, cfg, db, pld).await,
         0x18 => handle_lumina_del(stream, cfg).await,
+        0x2b => handle_lumina_info(stream, cfg).await,
+        0x2d => handle_lumina_stats(stream, cfg, db).await,
         0x2f => handle_lumina_hist(stream, cfg, db, pld).await,
         _ => {
             warn!("Unknown Lumina command: 0x{:02x}", typ);
@@ -445,7 +448,7 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
     let mut maybe_funcs: Vec<Option<(u32, u32, String, Vec<u8>)>> = selected;
     let mut statuses: Vec<u32> = maybe_funcs
         .iter()
-        .map(|o| if o.is_some() { 0 } else { 1 })
+        .map(|o| if o.is_some() { 0 } else { 0xFFFFFFFE })
         .collect();
 
     METRICS.inc_queried_funcs(keys.len() as u64);
@@ -628,6 +631,98 @@ async fn handle_lumina_push<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
             .await
         }
     }
+}
+
+/// Handle Lumina GetPop (0x12) command.
+async fn handle_lumina_get_pop<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    _cfg: &Config,
+    db: &Database,
+    pld: &[u8],
+) -> io::Result<()> {
+    // pkt_get_pop_t parses exactly one varint `nresults`
+    let (nresults, _) = lumina::unpack_dd(pld);
+    let limit = (nresults as usize).clamp(1, 1000);
+    debug!("Lumina GET_POP request: {} results", limit);
+
+    match db.get_popular_functions(limit).await {
+        Ok(results) => {
+            // Map db results to (name, size, metadata, type, pattern, freq, host, path, md5, ea)
+            // But we don't store ea64, md5, or host per popular function currently easily in index,
+            // so we might need to send empty/dummy values for the pop-specific fields, or fetch them.
+            // For now, we'll send dummy context info if needed, or query it.
+            let mapped: Vec<_> = results.into_iter().map(|f| {
+                (
+                    f.name,
+                    f.len_bytes,
+                    f.data,
+                    0, // pattern_type unknown
+                    Vec::new(), // pattern data
+                    f.popularity,
+                    String::new(), // hostname
+                    String::new(), // path
+                    [0u8; 16], // md5
+                    0u64, // ea64
+                )
+            }).collect();
+            lumina::send_lumina_pop_result(stream, &mapped).await
+        }
+        Err(e) => {
+            error!("get_popular failed: {}", e);
+            lumina::send_lumina_fail(stream, 0, "db error").await
+        }
+    }
+}
+
+/// Handle Lumina GetInfo (0x2b) command.
+async fn handle_lumina_info<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    cfg: &Config,
+) -> io::Result<()> {
+    debug!("Lumina GET_INFO request");
+    
+    // Hardcode a default MAC and version if needed
+    let start_time = METRICS.start_time.load(std::sync::atomic::Ordering::Relaxed);
+    let current_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+
+    lumina::send_lumina_info_result(
+        stream,
+        "00:00:00:00:00:00",
+        &format!("dazhbog-{}", env!("CARGO_PKG_VERSION")),
+        start_time,
+        current_time,
+    ).await
+}
+
+/// Handle Lumina GetStats (0x2d) command.
+async fn handle_lumina_stats<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    cfg: &Config,
+    db: &Database,
+) -> io::Result<()> {
+    debug!("Lumina GET_STATS request");
+
+    // Gather stats
+    let nfuncs = METRICS.total_records.load(std::sync::atomic::Ordering::Relaxed);
+    let npushes = METRICS.pushes.load(std::sync::atomic::Ordering::Relaxed);
+    let nidbs = METRICS.unique_binaries.load(std::sync::atomic::Ordering::Relaxed);
+
+    let mut user = lumina::LuminaUser::default();
+    user.name = "global".to_string();
+    if cfg.lumina.allow_deletes {
+        user.features = 0x2; // UF_CAN_DEL_HISTORY
+    }
+
+    let stats = vec![lumina::LuminaStats {
+        user,
+        nfuncs,
+        npushes,
+        nhist_recs: nfuncs, // Rough estimate
+        nidbs,
+        ninput_files: nidbs,
+    }];
+
+    lumina::send_lumina_stats_result(stream, &stats).await
 }
 
 /// Handle Lumina DelHistory (0x18) command.
@@ -827,7 +922,7 @@ async fn handle_rpc_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
     let mut maybe_funcs: Vec<Option<(u32, u32, String, Vec<u8>)>> = selected;
     let mut statuses: Vec<u32> = maybe_funcs
         .iter()
-        .map(|o| if o.is_some() { 0 } else { 1 })
+        .map(|o| if o.is_some() { 0 } else { 0xFFFFFFFE })
         .collect();
 
     // Upstream fetch for misses
