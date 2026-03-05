@@ -84,10 +84,7 @@ impl ContextIndex {
             .flush_every_ms(Some(500))
             .open()
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("sled open context_db: {e}"),
-                )
+                io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {e}"))
             })?;
 
         let t_key_md5 = db
@@ -644,16 +641,27 @@ fn decode_basenames(mut b: &[u8]) -> Option<Vec<String>> {
 }
 
 fn sanitize_basename(input: &str) -> String {
-    let p = Path::new(input);
-    let base = p
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(input)
-        .trim()
-        .to_string();
+    let input = input.trim();
+    if input.is_empty() {
+        return String::new();
+    }
+
+    // Find the last occurrence of either path separator
+    let last_sep = input.rfind('/').into_iter().chain(input.rfind('\\')).max();
+
+    let base = match last_sep {
+        Some(idx) => &input[idx + 1..],
+        None => input,
+    };
+
+    let base = base.trim();
+    if base.is_empty() {
+        return String::new();
+    }
+
     if base.len() > 255 {
         base[..255].to_string()
     } else {
-        base
+        base.to_string()
     }
 }
