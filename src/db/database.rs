@@ -389,10 +389,19 @@ impl Database {
         self.rt.search.search_paginated(query, offset, limit)
     }
 
-    pub async fn get_popular_functions(&self, _limit: usize) -> io::Result<Vec<FuncLatest>> {
-        // TODO: Maintain a top-N index by popularity to avoid scanning.
-        // For now, we return an empty list to quickly satisfy the protocol.
-        Ok(Vec::new())
+    pub async fn get_popular_functions(&self, limit: usize) -> io::Result<Vec<FuncLatest>> {
+        let top_keys = self.rt.ctx_index.get_top_popular_keys(limit)?;
+        let mut results = Vec::with_capacity(top_keys.len());
+        
+        for (key, pop) in top_keys {
+            if let Ok(Some(mut func)) = self.get_latest(key).await {
+                // Overwrite the segment popularity with the live context popularity
+                func.popularity = pop;
+                results.push(func);
+            }
+        }
+        
+        Ok(results)
     }
 
     /// Get binary basenames associated with a function key.

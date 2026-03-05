@@ -41,6 +41,8 @@ pub struct ContextIndex {
     t_version_stats: sled::Tree, // version_id -> VersionStats
     t_binary_meta: sled::Tree,   // md5 -> BinaryMeta
     t_key_basenames: sled::Tree, // key -> Vec<String>
+    t_pop_val: sled::Tree,       // key -> u32 (popularity)
+    t_pop_rank: sled::Tree,      // [u32::MAX - pop][key] -> []
 }
 
 const MAX_MD5_PER_KEY: usize = 16;
@@ -101,7 +103,13 @@ impl ContextIndex {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")));
         let t_key_basenames = db
             .open_tree("key_basenames")
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")));
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")))?;
+        let t_pop_val = db
+            .open_tree("pop_val")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")))?;
+        let t_pop_rank = db
+            .open_tree("pop_rank")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")))?;
         info!("context index initialized successfully");
         Ok(Self {
             db,
@@ -109,12 +117,30 @@ impl ContextIndex {
             t_key_bins: t_key_bins?,
             t_version_stats: t_version_stats?,
             t_binary_meta: t_binary_meta?,
-            t_key_basenames: t_key_basenames?,
+            t_key_basenames,
+            t_pop_val,
+            t_pop_rank,
         })
     }
 
     pub fn approx_is_empty(&self) -> bool {
         self.t_key_md5.is_empty() && self.t_version_stats.is_empty()
+    }
+
+    /// Retrieve the top N most popular keys and their scores
+    pub fn get_top_popular_keys(&self, limit: usize) -> io::Result<Vec<(u128, u32)>> {
+        let mut results = Vec::with_capacity(limit);
+        for item in self.t_pop_rank.iter().take(limit) {
+            let (k, _) =
+                item.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+            if k.len() == 20 {
+                let pop_inv = u32::from_be_bytes(k[0..4].try_into().unwrap());
+                let pop = u32::MAX - pop_inv;
+                let key = u128::from_le_bytes(k[4..20].try_into().unwrap());
+                results.push((key, pop));
+            }
+        }
+        Ok(results)
     }
 
     pub fn record_binary_meta(
@@ -234,6 +260,28 @@ impl ContextIndex {
         self.t_key_bins
             .insert(&key_only, enc_bins)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+
+        // update popularity ranking
+        let new_pop: u32 = bins.iter().map(|e| e.obs_count).sum();
+        let old_pop_raw = self.t_pop_val.get(&key_only).unwrap_or(None);
+        let old_pop = if let Some(p) = old_pop_raw {
+            u32::from_le_bytes(p[0..4].try_into().unwrap_or([0; 4]))
+        } else {
+            0
+        };
+        if new_pop > old_pop {
+            if old_pop > 0 {
+                let mut old_rank_key = [0u8; 20];
+                old_rank_key[0..4].copy_from_slice(&(u32::MAX - old_pop).to_be_bytes());
+                old_rank_key[4..20].copy_from_slice(&key_only);
+                let _ = self.t_pop_rank.remove(&old_rank_key);
+            }
+            let mut new_rank_key = [0u8; 20];
+            new_rank_key[0..4].copy_from_slice(&(u32::MAX - new_pop).to_be_bytes());
+            new_rank_key[4..20].copy_from_slice(&key_only);
+            let _ = self.t_pop_rank.insert(&new_rank_key, &[]);
+            let _ = self.t_pop_val.insert(&key_only, &new_pop.to_le_bytes());
+        }
 
         if let Some(bn) = basename {
             self.record_basename_for_key(key, bn)?;
