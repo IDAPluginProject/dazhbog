@@ -14,11 +14,7 @@ fn sanitize_basename(input: &str) -> String {
     }
 
     // Find the last occurrence of either path separator
-    let last_sep = input
-        .rfind('/')
-        .into_iter()
-        .chain(input.rfind('\\'))
-        .max();
+    let last_sep = input.rfind('/').into_iter().chain(input.rfind('\\')).max();
 
     let base = match last_sep {
         Some(idx) => &input[idx + 1..],
@@ -213,9 +209,7 @@ impl SearchIndex {
         );
 
         // Parse query - escape special chars and use lenient mode
-        let tantivy_query = query_parser
-            .parse_query_lenient(query_str)
-            .0;
+        let tantivy_query = query_parser.parse_query_lenient(query_str).0;
 
         // Execute search using the index
         let top_docs = searcher

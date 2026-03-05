@@ -61,8 +61,13 @@ impl EngineRuntime {
             segments.rebuild_index(&index)?;
         }
 
-        // context_db is separate - crashes if not found (run `recover --migrate-context` first)
-        let ctx_index = Arc::new(ContextIndex::open(&dir)?);
+        // If index is empty AND context db is missing, this is likely a fresh instance.
+        // Create it automatically to avoid crashing on fresh starts.
+        let ctx_index = if index.entry_count() == 0 && !dir.join("context_db").exists() {
+            Arc::new(ContextIndex::open_or_create(&dir)?)
+        } else {
+            Arc::new(ContextIndex::open(&dir)?)
+        };
 
         let search_dir = dir.join("search_index");
         let search = Arc::new(SearchIndex::open(&search_dir)?);
