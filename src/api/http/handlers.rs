@@ -11,7 +11,226 @@ use std::sync::Arc;
 use crate::api::metrics::METRICS;
 use crate::db::Database;
 use crate::engine::SearchHit;
-use crate::protocol::lumina::metadata::parse_metadata;
+use crate::protocol::lumina::metadata::{parse_metadata, InsnCmt};
+
+fn parse_jumptable_addr(cmt: &str) -> Option<(&str, &str)> {
+    let rest = cmt.strip_prefix("jumptable ")?;
+    let mut parts = rest.splitn(2, ' ');
+    let addr = parts.next()?.trim();
+    let relation = parts.next().unwrap_or("").trim();
+    if addr.is_empty() {
+        return None;
+    }
+    Some((addr, relation))
+}
+
+fn estimate_case_count(relation: &str) -> usize {
+    let mut count = 0usize;
+    for token in relation.split(|c: char| c == ',' || c.is_whitespace()) {
+        let tok = token.trim();
+        if tok.is_empty() || tok == "case" || tok == "cases" || tok == "default" {
+            continue;
+        }
+        if let Some((a, b)) = tok.split_once('-') {
+            if let (Ok(a), Ok(b)) = (a.parse::<i64>(), b.parse::<i64>()) {
+                if b >= a {
+                    count += (b - a + 1) as usize;
+                    continue;
+                }
+            }
+        }
+        if tok.chars().all(|c| c.is_ascii_digit()) {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn extract_case_labels(relation: &str) -> Vec<String> {
+    let mut labels = Vec::new();
+    if relation.contains("default case") {
+        labels.push("default".to_string());
+    }
+
+    let mut capture = false;
+    for token in relation.split(|c: char| c == ',' || c.is_whitespace()) {
+        let tok = token.trim();
+        if tok.is_empty() {
+            continue;
+        }
+        if tok == "case" || tok == "cases" {
+            capture = true;
+            continue;
+        }
+        if !capture {
+            continue;
+        }
+        if tok.chars().all(|c| c.is_ascii_digit() || c == '-') {
+            labels.push(tok.to_string());
+        }
+    }
+
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
+fn sort_case_label_key(label: &str) -> (i64, i64, &str) {
+    if label == "default" {
+        return (i64::MAX, i64::MAX, label);
+    }
+    if let Some((a, b)) = label.split_once('-') {
+        if let (Ok(a), Ok(b)) = (a.parse::<i64>(), b.parse::<i64>()) {
+            return (a, b, label);
+        }
+    }
+    if let Ok(v) = label.parse::<i64>() {
+        return (v, v, label);
+    }
+    (i64::MAX - 1, i64::MAX - 1, label)
+}
+
+fn normalize_case_labels(labels: &[String]) -> Vec<String> {
+    let mut nums = Vec::<i64>::new();
+    let mut ranges = Vec::<(i64, i64)>::new();
+    let mut has_default = false;
+
+    for label in labels {
+        if label == "default" {
+            has_default = true;
+            continue;
+        }
+        if let Some((a, b)) = label.split_once('-') {
+            if let (Ok(a), Ok(b)) = (a.parse::<i64>(), b.parse::<i64>()) {
+                if b >= a {
+                    ranges.push((a, b));
+                    continue;
+                }
+            }
+        }
+        if let Ok(v) = label.parse::<i64>() {
+            nums.push(v);
+        }
+    }
+
+    for n in nums {
+        ranges.push((n, n));
+    }
+    if ranges.is_empty() {
+        let mut out = Vec::new();
+        if has_default {
+            out.push("default".to_string());
+        }
+        return out;
+    }
+
+    ranges.sort_unstable();
+    let mut merged = Vec::<(i64, i64)>::new();
+    for (a, b) in ranges {
+        if let Some((_, last_b)) = merged.last_mut() {
+            if a <= *last_b + 1 {
+                *last_b = (*last_b).max(b);
+                continue;
+            }
+        }
+        merged.push((a, b));
+    }
+
+    let mut out = merged
+        .into_iter()
+        .map(|(a, b)| if a == b { a.to_string() } else { format!("{a}-{b}") })
+        .collect::<Vec<_>>();
+    if has_default {
+        out.push("default".to_string());
+    }
+    out
+}
+
+fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Option<ControlFlowJson> {
+    let mut switches = Vec::new();
+    let mut tables: std::collections::BTreeMap<String, JumpTableJson> = std::collections::BTreeMap::new();
+
+    for (kind, items) in [("REG", insn_cmts), ("RPT", rpt_insn_cmts)] {
+        for c in items {
+            let text = c.cmt.trim();
+            if text.starts_with("switch ") {
+                switches.push(SwitchSiteJson {
+                    kind: kind.to_string(),
+                    fchunk_nr: c.fchunk_nr,
+                    fchunk_off: c.fchunk_off,
+                    description: text.to_string(),
+                });
+            }
+            if let Some((addr, relation)) = parse_jumptable_addr(text) {
+                let entry = tables.entry(addr.to_string()).or_insert_with(|| JumpTableJson {
+                    addr: addr.to_string(),
+                    refs: Vec::new(),
+                    case_count: 0,
+                    has_default: false,
+                    all_case_labels: Vec::new(),
+                });
+                let case_labels = normalize_case_labels(&extract_case_labels(relation));
+                entry.refs.push(JumpTableRefJson {
+                    kind: kind.to_string(),
+                    fchunk_nr: c.fchunk_nr,
+                    fchunk_off: c.fchunk_off,
+                    relation: relation.to_string(),
+                    case_labels: case_labels.clone(),
+                    is_default: relation.contains("default case"),
+                    lane_size: 1,
+                });
+                entry.case_count = entry.case_count.max(estimate_case_count(relation));
+                if relation.contains("default case") {
+                    entry.has_default = true;
+                }
+                entry.all_case_labels.extend(case_labels);
+            }
+        }
+    }
+
+    for table in tables.values_mut() {
+        table.all_case_labels = normalize_case_labels(&table.all_case_labels);
+        let mut grouped: std::collections::BTreeMap<(String, String), JumpTableRefJson> =
+            std::collections::BTreeMap::new();
+        for mut r in std::mem::take(&mut table.refs) {
+            r.case_labels = normalize_case_labels(&r.case_labels);
+            let key = (r.kind.clone(), r.relation.clone());
+            if let Some(existing) = grouped.get_mut(&key) {
+                existing.lane_size += 1;
+            } else {
+                grouped.insert(key, r);
+            }
+        }
+        table.refs = grouped.into_values().collect();
+        table.refs.sort_by(|a, b| {
+            a.fchunk_nr
+                .cmp(&b.fchunk_nr)
+                .then(a.fchunk_off.cmp(&b.fchunk_off))
+                .then(sort_case_label_key(a.case_labels.first().map(String::as_str).unwrap_or(""))
+                    .cmp(&sort_case_label_key(b.case_labels.first().map(String::as_str).unwrap_or(""))))
+        });
+    }
+
+    let dominant = tables
+        .values()
+        .max_by_key(|jt| (jt.refs.len(), jt.case_count))
+        .map(|jt| DominantSwitchJson {
+            addr: jt.addr.clone(),
+            ref_count: jt.refs.len(),
+            case_count: jt.case_count,
+            labels: jt.all_case_labels.iter().take(12).cloned().collect(),
+        });
+
+    if switches.is_empty() && tables.is_empty() {
+        None
+    } else {
+        Some(ControlFlowJson {
+            switches,
+            jumptables: tables.into_values().collect(),
+            dominant,
+        })
+    }
+}
 
 /// Search response structure with pagination.
 #[derive(Serialize)]
@@ -63,6 +282,49 @@ pub struct InsnCmtJson {
     pub cmt: String,
 }
 
+#[derive(Serialize)]
+pub struct SwitchSiteJson {
+    pub kind: String,
+    pub fchunk_nr: u32,
+    pub fchunk_off: u32,
+    pub description: String,
+}
+
+#[derive(Serialize)]
+pub struct JumpTableRefJson {
+    pub kind: String,
+    pub fchunk_nr: u32,
+    pub fchunk_off: u32,
+    pub relation: String,
+    pub case_labels: Vec<String>,
+    pub is_default: bool,
+    pub lane_size: usize,
+}
+
+#[derive(Serialize)]
+pub struct JumpTableJson {
+    pub addr: String,
+    pub refs: Vec<JumpTableRefJson>,
+    pub case_count: usize,
+    pub has_default: bool,
+    pub all_case_labels: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct DominantSwitchJson {
+    pub addr: String,
+    pub ref_count: usize,
+    pub case_count: usize,
+    pub labels: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ControlFlowJson {
+    pub switches: Vec<SwitchSiteJson>,
+    pub jumptables: Vec<JumpTableJson>,
+    pub dominant: Option<DominantSwitchJson>,
+}
+
 /// Parsed metadata for JSON response.
 #[derive(Serialize)]
 pub struct ParsedMetadataJson {
@@ -74,6 +336,7 @@ pub struct ParsedMetadataJson {
     pub vd_elapsed: Option<u64>,
     pub fcmt: Option<String>,
     pub frptcmt: Option<String>,
+    pub control_flow: Option<ControlFlowJson>,
     pub insn_cmts: Vec<InsnCmtJson>,
     pub rpt_insn_cmts: Vec<InsnCmtJson>,
 }
@@ -233,6 +496,7 @@ pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Respons
         Ok(Some(func)) => {
             // Parse the metadata
             let parsed = parse_metadata(&func.data);
+            let control_flow = derive_control_flow(&parsed.insn_cmts, &parsed.rpt_insn_cmts);
 
             let metadata = Some(ParsedMetadataJson {
                 raw_size: parsed.raw_size,
@@ -241,6 +505,7 @@ pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Respons
                 vd_elapsed: parsed.vd_elapsed,
                 fcmt: parsed.fcmt,
                 frptcmt: parsed.frptcmt,
+                control_flow,
                 insn_cmts: parsed
                     .insn_cmts
                     .into_iter()

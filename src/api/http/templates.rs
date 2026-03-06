@@ -859,6 +859,11 @@ pub const HOME: &str = r#"<!doctype html>
             max-width: 100%;
         }
 
+        .compare-pill.loading {
+            border-style: dashed;
+            opacity: 0.78;
+        }
+
         .compare-pill.baseline {
             border-color: rgba(255, 170, 0, 0.45);
             background: rgba(255, 170, 0, 0.08);
@@ -913,6 +918,13 @@ pub const HOME: &str = r#"<!doctype html>
             text-overflow: ellipsis;
             white-space: nowrap;
             max-width: 320px;
+        }
+
+        .compare-pill-status {
+            color: var(--text-dim);
+            font-size: 9px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
 
         .compare-pill-remove {
@@ -2186,6 +2198,233 @@ pub const HOME: &str = r#"<!doctype html>
             overflow-wrap: anywhere;
         }
 
+        .controlflow-grid {
+            display: grid;
+            grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.6fr);
+            gap: var(--space-md);
+        }
+
+        .controlflow-panel {
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
+            padding: var(--space-md);
+        }
+
+        .controlflow-hero {
+            border: 1px solid rgba(255, 170, 0, 0.28);
+            background: linear-gradient(180deg, rgba(255,170,0,0.12), rgba(255,170,0,0.03));
+            padding: var(--space-md);
+            margin-bottom: var(--space-md);
+        }
+
+        .controlflow-hero-title {
+            color: var(--state-warning);
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .controlflow-hero-main {
+            display: flex;
+            justify-content: space-between;
+            gap: var(--space-md);
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .controlflow-hero-addr {
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            overflow-wrap: anywhere;
+        }
+
+        .controlflow-hero-stats {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .controlflow-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .switch-card {
+            border: 1px solid rgba(0, 255, 136, 0.18);
+            background: linear-gradient(180deg, rgba(0,255,136,0.08), rgba(0,255,136,0.02));
+            padding: 10px;
+        }
+
+        .switch-card-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .switch-title {
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .switch-meta {
+            color: var(--text-dim);
+            font-family: var(--font-mono);
+            font-size: 10px;
+        }
+
+        .switch-desc {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .jumptable-card {
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
+            overflow: hidden;
+        }
+
+        .jumptable-head {
+            display: flex;
+            justify-content: space-between;
+            gap: var(--space-md);
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            background: var(--bg-element);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .jumptable-title {
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .jumptable-badges {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .jumptable-cluster-note {
+            margin-top: 6px;
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .jumptable-ref-list {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .jumptable-ref {
+            display: grid;
+            grid-template-columns: 120px minmax(0, 1fr);
+            gap: 1px;
+            background: var(--border-dim);
+        }
+
+        .jumptable-ref + .jumptable-ref {
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .jumptable-ref-meta,
+        .jumptable-ref-body {
+            background: var(--bg-panel);
+            padding: 8px 10px;
+            min-width: 0;
+        }
+
+        .jumptable-ref-meta {
+            color: var(--text-dim);
+            font-family: var(--font-mono);
+            font-size: 10px;
+        }
+
+        .jumptable-ref-body {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .jumptable-case-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .case-chip {
+            border: 1px solid rgba(0, 255, 136, 0.28);
+            background: rgba(0, 255, 136, 0.08);
+            color: var(--accent);
+            padding: 2px 6px;
+            font-size: 10px;
+            font-family: var(--font-mono);
+        }
+
+        .case-chip.default {
+            border-color: rgba(255, 170, 0, 0.4);
+            background: rgba(255, 170, 0, 0.1);
+            color: var(--state-warning);
+        }
+
+        .jumptable-graph {
+            border: 1px solid var(--border-subtle);
+            background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .jumptable-graph-node {
+            border: 1px solid var(--border-dim);
+            background: var(--bg-base);
+            padding: 8px 10px;
+        }
+
+        .jumptable-graph-node.root {
+            border-color: rgba(0, 255, 136, 0.35);
+        }
+
+        .jumptable-graph-label {
+            color: var(--text-dim);
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 4px;
+        }
+
+        .jumptable-graph-value {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .jumptable-graph-edge {
+            border-left: 1px solid rgba(0, 255, 136, 0.3);
+            margin-left: 12px;
+            padding-left: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
         .detail-loading {
             display: flex;
             align-items: center;
@@ -2489,6 +2728,11 @@ pub const HOME: &str = r#"<!doctype html>
             }
 
             .comment-item {
+                grid-template-columns: 1fr;
+            }
+
+            .controlflow-grid,
+            .jumptable-ref {
                 grid-template-columns: 1fr;
             }
         }
@@ -3092,6 +3336,7 @@ pub const HOME: &str = r#"<!doctype html>
         const resultPreviewCache = new Map();
         let compareBaselineKey = null;
         let draggingCompareKey = null;
+        const compareHydrating = new Set();
         let compareShowAll = false;
         let compareMode = 'summary';
 
@@ -3332,19 +3577,30 @@ pub const HOME: &str = r#"<!doctype html>
 
         function rememberCompareItem(hit) {
             if (!hit || !hit.key_hex) return;
+            const prev = compareItems.get(hit.key_hex) || {};
             compareItems.set(hit.key_hex, {
                 key_hex: hit.key_hex,
                 name: hit.func_name_demangled || hit.func_name || hit.key_hex,
                 ts: hit.ts || 0,
+                loading: false,
+                hydrated: true,
+                detail: prev.detail || null,
             });
         }
 
         async function hydrateCompareItems(keys = compareKeys) {
             const missing = keys.filter(keyHex => {
                 const item = compareItems.get(keyHex);
-                return !item || item.name === keyHex || !item.ts;
+                return (!item || item.name === keyHex || !item.ts) && !compareHydrating.has(keyHex);
             });
             if (missing.length === 0) return;
+
+            missing.forEach(keyHex => {
+                compareHydrating.add(keyHex);
+                const prev = compareItems.get(keyHex) || { key_hex: keyHex, name: keyHex, ts: 0 };
+                compareItems.set(keyHex, { ...prev, loading: true });
+            });
+            updateCompareTray();
 
             await Promise.all(missing.map(async keyHex => {
                 try {
@@ -3356,9 +3612,19 @@ pub const HOME: &str = r#"<!doctype html>
                             key_hex: keyHex,
                             name: data.name || keyHex,
                             ts: data.ts || 0,
+                            loading: false,
+                            hydrated: true,
+                            detail: data,
                         });
                     }
                 } catch (_) {}
+                finally {
+                    compareHydrating.delete(keyHex);
+                    const prev = compareItems.get(keyHex);
+                    if (prev && prev.loading) {
+                        compareItems.set(keyHex, { ...prev, loading: false });
+                    }
+                }
             }));
 
             updateCompareTray();
@@ -3431,13 +3697,14 @@ pub const HOME: &str = r#"<!doctype html>
             el.compareOpen.disabled = compareKeys.length < 2;
             el.comparePanel.classList.toggle('compact', compareKeys.length === 0);
             el.compareList.innerHTML = compareKeys.map(keyHex => {
-                const item = compareItems.get(keyHex) || { key_hex: keyHex, name: keyHex, ts: 0 };
+                const item = compareItems.get(keyHex) || { key_hex: keyHex, name: keyHex, ts: 0, loading: false };
                 const baseline = compareBaselineKey === keyHex;
-                return '<div class="compare-pill' + (baseline ? ' baseline' : '') + '" draggable="true" ondragstart="startCompareDrag(\'' + esc(keyHex) + '\')" ondragover="allowCompareDrop(event)" ondrop="dropCompareKey(\'' + esc(keyHex) + '\')">'
+                return '<div class="compare-pill' + (baseline ? ' baseline' : '') + (item.loading ? ' loading' : '') + '" draggable="true" ondragstart="startCompareDrag(\'' + esc(keyHex) + '\')" ondragover="allowCompareDrop(event)" ondrop="dropCompareKey(\'' + esc(keyHex) + '\')">'
                     + '<button class="compare-pill-handle" title="Drag to reorder">::</button>'
                     + '<div class="compare-pill-main">'
                     + '<div class="compare-pill-name">' + esc(item.name) + '</div>'
                     + '<div class="compare-pill-key">' + esc(keyHex) + (item.ts ? ' // ' + esc(fmtRelativeTs(item.ts)) : '') + '</div>'
+                    + (item.loading ? '<div class="compare-pill-status">loading metadata...</div>' : '')
                     + '</div>'
                     + '<button class="compare-pill-pin' + (baseline ? ' active' : '') + '" onclick="setCompareBaseline(\'' + esc(keyHex) + '\')" title="Set baseline">B</button>'
                     + '<button class="compare-pill-remove" onclick="removeCompareKey(\'' + esc(keyHex) + '\')">x</button>'
@@ -3681,6 +3948,92 @@ pub const HOME: &str = r#"<!doctype html>
                 return '<div class="frame-diagnostics"><span class="frame-chip">layout coherent</span></div>';
             }
             return '<div class="frame-diagnostics">' + diagnostics.map(d => '<span class="frame-chip' + (d.kind === 'warn' ? ' warn' : '') + '">' + esc(d.label) + '</span>').join('') + '</div>';
+        }
+
+        function renderControlFlowMetadata(cf) {
+            const switches = Array.isArray(cf && cf.switches) ? cf.switches : [];
+            const tables = Array.isArray(cf && cf.jumptables) ? cf.jumptables : [];
+            if (switches.length === 0 && tables.length === 0) {
+                return '<div class="metadata-empty">No switch or jumptable annotations</div>';
+            }
+
+            let html = '';
+            if (cf.dominant) {
+                html += '<div class="controlflow-hero">';
+                html += '<div class="controlflow-hero-title">Dominant Switch Cluster</div>';
+                html += '<div class="controlflow-hero-main">';
+                html += '<div class="controlflow-hero-addr">' + esc(cf.dominant.addr) + '</div>';
+                html += '<div class="controlflow-hero-stats">';
+                html += '<span class="frame-chip warn">' + esc(String(cf.dominant.ref_count)) + ' grouped refs</span>';
+                html += '<span class="frame-chip warn">' + esc(String(cf.dominant.case_count)) + ' cases</span>';
+                cf.dominant.labels.forEach(label => {
+                    html += '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>';
+                });
+                html += '</div></div></div>';
+            }
+
+            html += '<div class="controlflow-grid">';
+            html += '<div class="controlflow-panel"><div class="detail-label">Switch Sites</div><div class="controlflow-stack">';
+            if (switches.length === 0) {
+                html += '<div class="metadata-empty">No explicit switch comments</div>';
+            } else {
+                switches.forEach(sw => {
+                    html += '<div class="switch-card">';
+                    html += '<div class="switch-card-head"><span class="switch-title">' + esc(sw.kind) + ' switch</span><span class="switch-meta">chunk ' + esc(String(sw.fchunk_nr)) + ' @ ' + esc(fmtHex(sw.fchunk_off)) + '</span></div>';
+                    html += '<div class="switch-desc">' + esc(sw.description) + '</div>';
+                    html += '</div>';
+                });
+            }
+            html += '</div></div>';
+
+            html += '<div class="controlflow-panel"><div class="detail-label">Jump Tables</div><div class="controlflow-stack">';
+            if (tables.length === 0) {
+                html += '<div class="metadata-empty">No jumptable comments</div>';
+            } else {
+                tables.forEach(jt => {
+                    html += '<div class="jumptable-card">';
+                    html += '<div class="jumptable-head">';
+                    html += '<div class="jumptable-title">' + esc(jt.addr) + '</div>';
+                    html += '<div class="jumptable-badges">';
+                    html += '<span class="frame-chip">' + esc(String(jt.refs.length)) + ' refs</span>';
+                    html += '<span class="frame-chip">' + esc(String(jt.case_count)) + ' cases</span>';
+                    if (jt.has_default) html += '<span class="frame-chip warn">default case</span>';
+                    html += '</div></div>';
+                    if (jt.all_case_labels && jt.all_case_labels.length > 0) {
+                        html += '<div class="jumptable-cluster-note">Cluster cases</div>';
+                        html += '<div class="jumptable-case-strip" style="padding:0 12px 8px;">' + jt.all_case_labels.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
+                    }
+                    html += '<div class="jumptable-ref-list">';
+                    jt.refs.forEach(ref => {
+                        const rowId = 'cf-' + ref.kind.toLowerCase() + '-' + ref.fchunk_nr + '-' + ref.fchunk_off;
+                        html += '<div class="jumptable-ref">';
+                        html += '<div class="jumptable-ref-meta">' + esc(ref.kind) + '<br>chunk ' + esc(String(ref.fchunk_nr)) + '<br>@ <a href="javascript:void(0)" onclick="focusCommentRow(&quot;' + rowId + '&quot;, null, true);jumpToDetailSection(&quot;section-comments&quot;);setActiveDetailNav(&quot;section-comments&quot;);" style="color:var(--accent);text-decoration:none;">' + esc(fmtHex(ref.fchunk_off)) + '</a></div>';
+                        html += '<div class="jumptable-ref-body">' + esc(ref.relation || 'entry');
+                        if (ref.case_labels && ref.case_labels.length > 0) {
+                            html += '<div class="jumptable-case-strip">' + ref.case_labels.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
+                        }
+                        if (ref.lane_size && ref.lane_size > 1) {
+                            html += '<div class="jumptable-cluster-note">cluster lane x' + esc(String(ref.lane_size)) + '</div>';
+                        }
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                    html += '<div class="jumptable-graph">';
+                    html += '<div class="jumptable-graph-node root"><div class="jumptable-graph-label">Jump Table</div><div class="jumptable-graph-value">' + esc(jt.addr) + '</div></div>';
+                    html += '<div class="jumptable-graph-edge">';
+                    jt.refs.slice(0, 8).forEach(ref => {
+                        html += '<div class="jumptable-graph-node"><div class="jumptable-graph-label">' + esc(ref.kind) + ' source</div><div class="jumptable-graph-value">chunk ' + esc(String(ref.fchunk_nr)) + ' @ ' + esc(fmtHex(ref.fchunk_off)) + (ref.case_labels && ref.case_labels.length ? ' // ' + esc(ref.case_labels.join(', ')) : '') + '</div></div>';
+                    });
+                    if (jt.refs.length > 8) {
+                        html += '<div class="jumptable-graph-node"><div class="jumptable-graph-value">+' + esc(String(jt.refs.length - 8)) + ' more refs</div></div>';
+                    }
+                    html += '</div></div></div>';
+                });
+            }
+            html += '</div></div>';
+            html += '</div>';
+            return html;
         }
 
         function normalizeFrameMembers(fd) {
@@ -4281,6 +4634,7 @@ pub const HOME: &str = r#"<!doctype html>
                 list.forEach((ev, i) => {
                     ev.rowId = 'cmt-' + chunkId + '-' + i;
                     ev.markerId = 'cmtm-' + chunkId + '-' + i;
+                    ev.controlFlowRowId = 'cf-' + ev.kind.toLowerCase() + '-' + ev.chunk + '-' + ev.off;
                 });
 
                 const minOff = list[0].off;
@@ -4316,7 +4670,7 @@ pub const HOME: &str = r#"<!doctype html>
 
                 html += '<div class="comment-list">';
                 list.forEach(ev => {
-                    html += '<div class="comment-item" id="' + ev.rowId + '" onmouseenter="pulseCommentMarker(\'' + ev.markerId + '\')" onclick="focusCommentRow(\'' + ev.rowId + '\', \'' + ev.markerId + '\', false)">';
+                    html += '<div class="comment-item" id="' + ev.rowId + '" data-controlflow-id="' + ev.controlFlowRowId + '" onmouseenter="pulseCommentMarker(\'' + ev.markerId + '\')" onclick="focusCommentRow(\'' + ev.rowId + '\', \'' + ev.markerId + '\', false)">';
                     html += '<div class="comment-item-head">';
                     html += '<span class="comment-kind' + (ev.kind === 'rpt' ? ' repeatable' : '') + '">' + (ev.kind === 'rpt' ? 'RPT' : 'REG') + '</span>';
                     html += '<span>' + fmtHex(ev.off) + '</span>';
@@ -4367,7 +4721,10 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function focusCommentRow(rowId, markerId = null, shouldScroll = true) {
-            const row = document.getElementById(rowId);
+            let row = document.getElementById(rowId);
+            if (!row) {
+                row = document.querySelector('[data-controlflow-id="' + rowId + '"]');
+            }
             if (!row) return;
 
             pulseCommentMarker(markerId);
@@ -4832,6 +5189,7 @@ pub const HOME: &str = r#"<!doctype html>
             if (m.fcmt || m.frptcmt || m.vd_elapsed !== null) sections.push({ id: 'section-attrs', label: 'Attributes' });
             if (m.type_parts) sections.push({ id: 'section-type', label: 'Type' });
             if (m.frame_desc) sections.push({ id: 'section-frame', label: 'Frame' });
+            if (m.control_flow && ((m.control_flow.switches || []).length > 0 || (m.control_flow.jumptables || []).length > 0)) sections.push({ id: 'section-controlflow', label: 'Switches' });
             if (((m.insn_cmts || []).length + (m.rpt_insn_cmts || []).length) > 0) sections.push({ id: 'section-comments', label: 'Comments' });
             if ((m.errors || []).length > 0) sections.push({ id: 'section-errors', label: 'Errors' });
 
@@ -4903,6 +5261,12 @@ pub const HOME: &str = r#"<!doctype html>
 
                     html += renderFrameDiagnostics(fd);
                     html += renderFrameDescriptor(fd);
+                    html += '</div></div>';
+                }
+
+                if (m.control_flow && ((m.control_flow.switches || []).length > 0 || (m.control_flow.jumptables || []).length > 0)) {
+                    html += '<div class="metadata-section detail-anchor" id="section-controlflow"><div class="metadata-header"><span>Switch / Jumptable Analysis</span><span class="badge nominal">CONTROL FLOW</span></div><div class="metadata-content">';
+                    html += renderControlFlowMetadata(m.control_flow);
                     html += '</div></div>';
                 }
 
