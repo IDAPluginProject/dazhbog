@@ -52,6 +52,9 @@ pub struct BinarySummary {
     pub function_count: u64,
     pub version_count: u64,
     pub host_count: u64,
+    pub typed_functions: u64,
+    pub commented_functions: u64,
+    pub switch_functions: u64,
     pub score: f32,
 }
 
@@ -72,6 +75,8 @@ pub struct BinaryCompareItem {
     pub key_hex: String,
     pub name: String,
     pub ts: u64,
+    pub rarity_score: usize,
+    pub richness_score: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

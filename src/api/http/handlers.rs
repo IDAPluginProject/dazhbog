@@ -477,6 +477,12 @@ pub struct BinaryCompareResponse {
     pub left_only_count: usize,
     pub right_only_count: usize,
     pub sample_limit: usize,
+    pub active_bucket: String,
+    pub active_bucket_total: usize,
+    pub active_bucket_page: usize,
+    pub active_bucket_total_pages: usize,
+    pub active_bucket_query: String,
+    pub active_bucket_items: Vec<BinaryCompareItem>,
     pub shared: Vec<BinaryCompareItem>,
     pub left_only: Vec<BinaryCompareItem>,
     pub right_only: Vec<BinaryCompareItem>,
@@ -1055,9 +1061,49 @@ pub async fn handle_binary_compare(
         .and_then(|s| s.parse().ok())
         .unwrap_or(18)
         .clamp(1, 100);
+    let bucket_mode = parse_query_param(&req, "mode").unwrap_or_else(|| "all".to_string());
+    let bucket_query = parse_query_param(&req, "q").unwrap_or_default().to_ascii_lowercase();
+    let bucket_page: usize = parse_query_param(&req, "page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+    let bucket_per_page: usize = parse_query_param(&req, "per_page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(12)
+        .clamp(1, 50);
     match db.compare_binaries(left, right, sample_limit).await {
-        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only, recent, metadata_rich)) => json_response(
-            &BinaryCompareResponse {
+        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only, recent, metadata_rich, rare_symbols, freshest_drift)) => json_response(
+            &{
+                let buckets = vec![
+                    BinaryCompareBucket { label: "Shared".to_string(), items: shared.clone() },
+                    BinaryCompareBucket { label: "Left Only".to_string(), items: left_only.clone() },
+                    BinaryCompareBucket { label: "Right Only".to_string(), items: right_only.clone() },
+                    BinaryCompareBucket { label: "Recent".to_string(), items: recent.clone() },
+                    BinaryCompareBucket { label: "Metadata Rich".to_string(), items: metadata_rich.clone() },
+                    BinaryCompareBucket { label: "Rare Symbols".to_string(), items: rare_symbols.clone() },
+                    BinaryCompareBucket { label: "Freshest Drift".to_string(), items: freshest_drift.clone() },
+                ];
+                let active_label = match bucket_mode.as_str() {
+                    "Shared" | "Left Only" | "Right Only" | "Recent" | "Metadata Rich" | "Rare Symbols" | "Freshest Drift" => bucket_mode.clone(),
+                    _ => "All".to_string(),
+                };
+                let merged_all = [shared.clone(), left_only.clone(), right_only.clone()].concat();
+                let active_source = if active_label == "All" {
+                    merged_all
+                } else {
+                    buckets.iter().find(|b| b.label == active_label).map(|b| b.items.clone()).unwrap_or_default()
+                };
+                let filtered: Vec<BinaryCompareItem> = active_source.into_iter().filter(|item| {
+                    bucket_query.is_empty()
+                        || item.name.to_ascii_lowercase().contains(&bucket_query)
+                        || item.key_hex.to_ascii_lowercase().contains(&bucket_query)
+                }).collect();
+                let active_bucket_total = filtered.len();
+                let active_bucket_total_pages = active_bucket_total.div_ceil(bucket_per_page).max(1);
+                let active_bucket_page = bucket_page.min(active_bucket_total_pages);
+                let start = (active_bucket_page - 1) * bucket_per_page;
+                let active_bucket_items = filtered.into_iter().skip(start).take(bucket_per_page).collect();
+                BinaryCompareResponse {
                 left: left_summary,
                 right: right_summary,
                 left_facets,
@@ -1066,16 +1112,17 @@ pub async fn handle_binary_compare(
                 left_only_count,
                 right_only_count,
                 sample_limit,
-                shared: shared.clone(),
-                left_only: left_only.clone(),
-                right_only: right_only.clone(),
-                buckets: vec![
-                    BinaryCompareBucket { label: "Shared".to_string(), items: shared },
-                    BinaryCompareBucket { label: "Left Only".to_string(), items: left_only },
-                    BinaryCompareBucket { label: "Right Only".to_string(), items: right_only },
-                    BinaryCompareBucket { label: "Recent".to_string(), items: recent },
-                    BinaryCompareBucket { label: "Metadata Rich".to_string(), items: metadata_rich },
-                ],
+                active_bucket: active_label,
+                active_bucket_total,
+                active_bucket_page,
+                active_bucket_total_pages,
+                active_bucket_query: bucket_query,
+                active_bucket_items,
+                shared,
+                left_only,
+                right_only,
+                buckets,
+            }
             },
             StatusCode::OK,
         ),

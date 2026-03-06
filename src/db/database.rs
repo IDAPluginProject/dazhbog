@@ -510,6 +510,15 @@ impl Database {
         md5: [u8; 16],
         limit: usize,
     ) -> io::Result<Vec<(BinarySummary, u64)>> {
+        if let Some(cached) = self.rt.ctx_index.get_binary_overlap_cache(&md5)? {
+            let mut rows = Vec::new();
+            for entry in cached.into_iter().take(limit) {
+                if let Some(other_meta) = self.rt.ctx_index.get_binary_meta(&entry.md5)? {
+                    rows.push((binary_summary_from_meta(&other_meta, entry.shared_functions as f32), entry.shared_functions));
+                }
+            }
+            return Ok(rows);
+        }
         let seed_keys = self.rt.ctx_index.get_binary_function_keys(&md5, 4096)?;
         let mut overlap: HashMap<[u8; 16], u64> = HashMap::new();
         for key in seed_keys {
@@ -527,6 +536,15 @@ impl Database {
             }
         }
         rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.last_seen_ts.cmp(&a.0.last_seen_ts)));
+        let cache_rows: Vec<crate::engine::BinaryOverlapEntry> = rows
+            .iter()
+            .map(|(summary, shared)| crate::engine::BinaryOverlapEntry {
+                md5: parse_md5_hex_local(&summary.md5_hex).unwrap_or([0u8; 16]),
+                shared_functions: *shared,
+            })
+            .filter(|entry| entry.md5 != [0u8; 16])
+            .collect();
+        let _ = self.rt.ctx_index.set_binary_overlap_cache(&md5, &cache_rows);
         rows.truncate(limit);
         Ok(rows)
     }
@@ -589,6 +607,12 @@ impl Database {
         let Some(seed) = self.get_binary_summary(md5).await? else {
             return Ok((Vec::new(), Vec::new()));
         };
+        let mut seed = seed;
+        if let Some(facets) = self.rt.ctx_index.get_binary_facets(&md5)? {
+            seed.typed_functions = facets.typed_functions;
+            seed.commented_functions = facets.commented_functions;
+            seed.switch_functions = facets.switch_functions;
+        }
         let mut nodes = vec![seed.clone()];
         let mut seen = std::collections::HashSet::from([seed.md5_hex.clone()]);
         let mut frontier = vec![seed.md5_hex.clone()];
@@ -601,6 +625,16 @@ impl Database {
                     edges.push((node_md5_hex.clone(), neighbor.md5_hex.clone(), shared));
                     if seen.insert(neighbor.md5_hex.clone()) {
                         next.push(neighbor.md5_hex.clone());
+                        if let Some(neighbor_md5) = parse_md5_hex_local(&neighbor.md5_hex) {
+                            if let Some(facets) = self.rt.ctx_index.get_binary_facets(&neighbor_md5)? {
+                                let mut neighbor = neighbor;
+                                neighbor.typed_functions = facets.typed_functions;
+                                neighbor.commented_functions = facets.commented_functions;
+                                neighbor.switch_functions = facets.switch_functions;
+                                nodes.push(neighbor);
+                                continue;
+                            }
+                        }
                         nodes.push(neighbor);
                     }
                 }
@@ -618,7 +652,7 @@ impl Database {
         left: [u8; 16],
         right: [u8; 16],
         sample_limit: usize,
-    ) -> io::Result<(BinaryFacetSummary, BinaryFacetSummary, usize, usize, usize, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>)> {
+    ) -> io::Result<(BinaryFacetSummary, BinaryFacetSummary, usize, usize, usize, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>)> {
         let left_keys = self.rt.ctx_index.get_binary_function_keys(&left, 8192)?;
         let right_keys = self.rt.ctx_index.get_binary_function_keys(&right, 8192)?;
         let left_set: HashSet<u128> = left_keys.iter().copied().collect();
@@ -628,52 +662,68 @@ impl Database {
         let mut right_only = Vec::new();
         let mut recent = Vec::new();
         let mut metadata_rich = Vec::new();
+        let mut rare_symbols = Vec::new();
+        let mut freshest_drift = Vec::new();
         for key in left_set.intersection(&right_set).take(sample_limit) {
             if let Some(func) = self.get_latest(*key).await? {
-                shared.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec });
+                let rarity_score = self.get_binary_refs_for_key(*key, 64).map(|items| items.len()).unwrap_or(0);
+                let richness_score = metadata_richness(&func.data);
+                shared.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec, rarity_score, richness_score });
             }
         }
         for key in left_set.difference(&right_set).take(sample_limit) {
             if let Some(func) = self.get_latest(*key).await? {
-                left_only.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec });
+                let rarity_score = self.get_binary_refs_for_key(*key, 64).map(|items| items.len()).unwrap_or(0);
+                let richness_score = metadata_richness(&func.data);
+                left_only.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec, rarity_score, richness_score });
             }
         }
         for key in right_set.difference(&left_set).take(sample_limit) {
             if let Some(func) = self.get_latest(*key).await? {
-                right_only.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec });
+                let rarity_score = self.get_binary_refs_for_key(*key, 64).map(|items| items.len()).unwrap_or(0);
+                let richness_score = metadata_richness(&func.data);
+                right_only.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec, rarity_score, richness_score });
             }
         }
         let mut union_items = Vec::new();
         for key in left_set.union(&right_set).take(sample_limit.saturating_mul(4).max(sample_limit)) {
             if let Some(func) = self.get_latest(*key).await? {
-                let parsed = parse_metadata(&func.data);
-                let richness = usize::from(parsed.type_parts.is_some())
-                    + usize::from(parsed.frame_desc.is_some())
-                    + usize::from(parsed.fcmt.is_some() || parsed.frptcmt.is_some())
-                    + usize::from(!parsed.insn_cmts.is_empty() || !parsed.rpt_insn_cmts.is_empty())
-                    + usize::from(!parsed.errors.is_empty())
-                    + usize::from(parsed.vd_elapsed.is_some());
+                let richness = metadata_richness(&func.data);
+                let rarity = self.get_binary_refs_for_key(*key, 64).map(|items| items.len()).unwrap_or(0);
                 union_items.push((
                     richness,
+                    rarity,
                     BinaryCompareItem {
                         key_hex: format!("{:032x}", key),
                         name: func.name,
                         ts: func.ts_sec,
+                        rarity_score: rarity,
+                        richness_score: richness,
                     },
                 ));
             }
         }
         let mut by_recent = union_items.clone();
-        by_recent.sort_by(|a, b| b.1.ts.cmp(&a.1.ts).then_with(|| a.1.name.cmp(&b.1.name)));
-        recent.extend(by_recent.into_iter().take(sample_limit).map(|(_, item)| item));
-        union_items.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.ts.cmp(&a.1.ts)));
-        metadata_rich.extend(union_items.into_iter().take(sample_limit).map(|(_, item)| item));
+        by_recent.sort_by(|a, b| b.2.ts.cmp(&a.2.ts).then_with(|| a.2.name.cmp(&b.2.name)));
+        recent.extend(by_recent.iter().take(sample_limit).map(|(_, _, item)| item.clone()));
+        freshest_drift.extend(
+            by_recent
+                .iter()
+                .filter(|(_, _, item)| left_only.iter().any(|x| x.key_hex == item.key_hex) || right_only.iter().any(|x| x.key_hex == item.key_hex))
+                .take(sample_limit)
+                .map(|(_, _, item)| item.clone()),
+        );
+        union_items.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.2.ts.cmp(&a.2.ts)));
+        metadata_rich.extend(union_items.iter().take(sample_limit).map(|(_, _, item)| item.clone()));
+        let mut by_rare = union_items.clone();
+        by_rare.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)).then_with(|| b.2.ts.cmp(&a.2.ts)));
+        rare_symbols.extend(by_rare.into_iter().take(sample_limit).map(|(_, _, item)| item));
         let shared_count = left_set.intersection(&right_set).count();
         let left_only_count = left_set.difference(&right_set).count();
         let right_only_count = right_set.difference(&left_set).count();
         let left_facets = self.get_binary_facets(left, 8192).await?;
         let right_facets = self.get_binary_facets(right, 8192).await?;
-        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only, recent, metadata_rich))
+        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only, recent, metadata_rich, rare_symbols, freshest_drift))
     }
 
     fn attach_binary_refs(&self, hits: &mut [SearchHit]) -> io::Result<()> {
@@ -1049,6 +1099,7 @@ fn score_binary_meta(meta: &crate::engine::BinaryMeta, norm_query: &str) -> f32 
 }
 
 fn binary_summary_from_meta(meta: &crate::engine::BinaryMeta, score: f32) -> BinarySummary {
+    let facet_hint = BinaryFacetSummary::default();
     BinarySummary {
         md5_hex: hex_md5(&meta.md5),
         short_id: short_md5(&meta.md5),
@@ -1061,6 +1112,19 @@ fn binary_summary_from_meta(meta: &crate::engine::BinaryMeta, score: f32) -> Bin
         function_count: meta.function_count,
         version_count: meta.version_count,
         host_count: meta.host_count,
+        typed_functions: facet_hint.typed_functions,
+        commented_functions: facet_hint.commented_functions,
+        switch_functions: facet_hint.switch_functions,
         score,
     }
+}
+
+fn metadata_richness(data: &[u8]) -> usize {
+    let parsed = parse_metadata(data);
+    usize::from(parsed.type_parts.is_some())
+        + usize::from(parsed.frame_desc.is_some())
+        + usize::from(parsed.fcmt.is_some() || parsed.frptcmt.is_some())
+        + usize::from(!parsed.insn_cmts.is_empty() || !parsed.rpt_insn_cmts.is_empty())
+        + usize::from(!parsed.errors.is_empty())
+        + usize::from(parsed.vd_elapsed.is_some())
 }

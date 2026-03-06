@@ -1150,11 +1150,39 @@ pub const HOME: &str = r#"<!doctype html>
             padding: 10px 12px;
             cursor: pointer;
             box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
+            transition: transform 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
         }
 
         .binary-graph-node.root {
             border-color: rgba(0,255,136,0.45);
             box-shadow: 0 0 0 1px rgba(0,255,136,0.25), 0 18px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .binary-graph-node.dimmed {
+            opacity: 0.34;
+        }
+
+        .binary-graph-node.highlighted {
+            transform: translate(-50%, -50%) scale(1.03);
+            border-color: rgba(0,255,136,0.55);
+        }
+
+        .binary-graph-node-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .binary-graph-node-actions button {
+            flex: 1;
+        }
+
+        .binary-graph line.dimmed {
+            opacity: 0.16;
+        }
+
+        .binary-graph line.highlighted {
+            opacity: 1;
         }
 
         .binary-graph-node .name {
@@ -1217,6 +1245,63 @@ pub const HOME: &str = r#"<!doctype html>
             gap: 8px;
             flex-wrap: wrap;
             margin-bottom: var(--space-md);
+        }
+
+        .preset-note {
+            margin-top: 6px;
+            font-size: 10px;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            border-left: 2px solid rgba(0,255,136,0.28);
+            padding-left: 10px;
+        }
+
+        .workbench-layout {
+            display: grid;
+            grid-template-columns: 320px minmax(0, 1fr) 320px;
+            gap: var(--space-md);
+            align-items: start;
+        }
+
+        .workbench-side {
+            position: sticky;
+            top: var(--space-md);
+            border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.02);
+            padding: 12px;
+        }
+
+        .workbench-center {
+            min-width: 0;
+        }
+
+        .coverage-strip {
+            display: grid;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .coverage-strip-row {
+            display: grid;
+            grid-template-columns: 28px 1fr 44px;
+            gap: 8px;
+            align-items: center;
+            font-size: 10px;
+            color: var(--text-dim);
+        }
+
+        .coverage-strip-bar {
+            height: 6px;
+            border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.03);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .coverage-strip-fill {
+            position: absolute;
+            inset: 0 auto 0 0;
+            background: linear-gradient(90deg, rgba(0,255,136,0.35), rgba(0,255,136,0.8));
         }
         
         .result-meta {
@@ -3228,6 +3313,14 @@ pub const HOME: &str = r#"<!doctype html>
             .controlflow-matrix-row {
                 grid-template-columns: 1fr;
             }
+
+            .workbench-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .workbench-side {
+                position: static;
+            }
         }
 
         @media (max-width: 480px) {
@@ -3674,6 +3767,20 @@ pub const HOME: &str = r#"<!doctype html>
                 <div class="results-list" id="results-list"></div>
                 <div class="pagination" id="pagination"></div>
             </div>
+            <div id="binary-workbench" class="results-container hidden">
+                <div class="results-header">
+                    <div class="results-header-main">
+                        <div class="results-title">
+                            <span>BINARY WORKBENCH</span>
+                            <span class="results-hint">full-screen compare and graph analysis</span>
+                        </div>
+                    </div>
+                    <div class="results-tools">
+                        <button class="results-sort" onclick="closeBinaryWorkbench()">Exit Workbench</button>
+                    </div>
+                </div>
+                <div class="results-list" id="binary-workbench-body"></div>
+            </div>
         </main>
         
         <!-- Function Detail Modal -->
@@ -3685,6 +3792,18 @@ pub const HOME: &str = r#"<!doctype html>
                 </div>
                 <div class="modal-body" id="modal-body">
                     <div class="detail-loading">&gt;&gt;&gt; LOADING...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-overlay" id="binary-compare-modal">
+            <div class="modal-container" style="width:min(96vw, 1680px); max-width:none; height:min(92vh, 1100px);">
+                <div class="modal-header">
+                    <span class="modal-title">BINARY COMPARE // <span id="binary-compare-title">-</span></span>
+                    <button class="modal-close" onclick="closeBinaryCompareModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="binary-compare-body">
+                    <div class="detail-loading">&gt;&gt;&gt; LOADING COMPARE...</div>
                 </div>
             </div>
         </div>
@@ -3741,6 +3860,8 @@ pub const HOME: &str = r#"<!doctype html>
             dashboard: document.getElementById('dashboard'),
             secondary: document.getElementById('metrics-secondary'),
             results: document.getElementById('results'),
+            binaryWorkbench: document.getElementById('binary-workbench'),
+            binaryWorkbenchBody: document.getElementById('binary-workbench-body'),
             resultsList: document.getElementById('results-list'),
             resultsCount: document.getElementById('results-count'),
             resultsTotalLabel: document.getElementById('results-total-label'),
@@ -3807,6 +3928,9 @@ pub const HOME: &str = r#"<!doctype html>
             protoMixDonut: document.getElementById('proto-mix-donut'),
             protoMixLabel: document.getElementById('proto-mix-label'),
             detailModal: document.getElementById('detail-modal'),
+            binaryCompareModal: document.getElementById('binary-compare-modal'),
+            binaryCompareTitle: document.getElementById('binary-compare-title'),
+            binaryCompareBody: document.getElementById('binary-compare-body'),
             modalTitle: document.getElementById('modal-title'),
             modalKey: document.getElementById('modal-key'),
             modalBody: document.getElementById('modal-body'),
@@ -3831,6 +3955,12 @@ pub const HOME: &str = r#"<!doctype html>
         let currentBinaryGraphLimit = 6;
         let currentBinaryCompareLimit = 18;
         let currentBinaryCompareMode = 'all';
+        let currentGraphHoverMd5 = null;
+        let currentGraphFocusMd5 = null;
+        let currentBinaryCompareQuery = '';
+        let currentBinaryComparePage = 1;
+        const BINARY_COMPARE_PAGE_SIZE = 12;
+        let currentBinaryWorkbench = false;
 
         const pinnedKeys = new Set();
         const compareKeys = [];
@@ -5797,11 +5927,16 @@ pub const HOME: &str = r#"<!doctype html>
                 page: parseInt(params.get('page') || '1', 10) || 1,
                 f: params.get('f') || '',
                 b: params.get('b') || '',
-                s: params.get('s') || ''
+                s: params.get('s') || '',
+                bc: params.get('bc') || '',
+                bcm: params.get('bcm') || 'all',
+                bcp: parseInt(params.get('bcp') || '1', 10) || 1,
+                bcq: params.get('bcq') || '',
+                bw: params.get('bw') || ''
             };
         }
 
-        function updateHash(mode, query, page = 1, functionKey = '', binaryMd5 = '', sectionId = '') {
+        function updateHash(mode, query, page = 1, functionKey = '', binaryMd5 = '', sectionId = '', compareRightMd5 = '', compareMode = 'all', comparePage = 1, compareQuery = '', workbench = '') {
             const params = new URLSearchParams();
             if (mode && mode !== 'functions') params.set('m', mode);
             if (query) params.set('q', query);
@@ -5809,6 +5944,11 @@ pub const HOME: &str = r#"<!doctype html>
             if (functionKey) params.set('f', functionKey);
             if (binaryMd5) params.set('b', binaryMd5);
             if (functionKey && sectionId) params.set('s', sectionId);
+            if (binaryMd5 && compareRightMd5) params.set('bc', compareRightMd5);
+            if (binaryMd5 && compareRightMd5 && compareMode && compareMode !== 'all') params.set('bcm', compareMode);
+            if (binaryMd5 && compareRightMd5 && comparePage > 1) params.set('bcp', String(comparePage));
+            if (binaryMd5 && compareRightMd5 && compareQuery) params.set('bcq', compareQuery);
+            if (binaryMd5 && compareRightMd5 && workbench) params.set('bw', workbench);
             const nextHash = params.toString();
             if (!nextHash) {
                 history.replaceState(null, '', window.location.pathname);
@@ -5825,7 +5965,9 @@ pub const HOME: &str = r#"<!doctype html>
             const functionKey = el.detailModal.classList.contains('active') && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
             const binaryMd5 = el.detailModal.classList.contains('active') && currentDetailKind === 'binary' && currentBinaryMd5 ? currentBinaryMd5 : '';
             const sectionId = functionKey ? (currentDetailSection || pendingDetailSection || '') : '';
-            updateHash(currentSearchMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId);
+            const compareRightMd5 = el.binaryCompareModal.classList.contains('active') && currentBinaryCompareData && currentBinaryCompareData.right ? currentBinaryCompareData.right.md5_hex : '';
+            const workbench = currentBinaryWorkbench ? 'compare' : '';
+            updateHash(currentSearchMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId, compareRightMd5, currentBinaryCompareMode, currentBinaryComparePage, currentBinaryCompareQuery, workbench);
         }
 
         function applyHashState(state) {
@@ -5835,6 +5977,11 @@ pub const HOME: &str = r#"<!doctype html>
             const f = (state && state.f) ? state.f : '';
             const b = (state && state.b) ? state.b : '';
             const s = (state && state.s) ? state.s : null;
+            const bc = (state && state.bc) ? state.bc : '';
+            const bcm = (state && state.bcm) ? state.bcm : 'all';
+            const bcp = state && state.bcp ? state.bcp : 1;
+            const bcq = (state && state.bcq) ? state.bcq : '';
+            const bw = (state && state.bw) ? state.bw : '';
 
             setSearchMode(mode, false, false);
             el.q.value = q;
@@ -5844,6 +5991,12 @@ pub const HOME: &str = r#"<!doctype html>
                     if (needsOpen) showFunctionDetail(f, s, false);
                     else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) activateDetailSection(s, false, false);
                     else if (b && (!el.detailModal.classList.contains('active') || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) showBinaryDetail(b, false);
+                    if (b && bc) {
+                        currentBinaryCompareMode = bcm;
+                        currentBinaryComparePage = bcp;
+                        currentBinaryCompareQuery = bcq;
+                        setTimeout(() => loadBinaryCompare(bc, bw === 'compare'), 0);
+                    }
                     else if (!f && !b && el.detailModal.classList.contains('active') && !currentCompareRecords.length) closeDetailModal(false);
                 });
                 return;
@@ -5856,6 +6009,12 @@ pub const HOME: &str = r#"<!doctype html>
                 activateDetailSection(s, false, false);
             } else if (b && (!el.detailModal.classList.contains('active') || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) {
                 showBinaryDetail(b, false);
+                if (bc) {
+                    currentBinaryCompareMode = bcm;
+                    currentBinaryComparePage = bcp;
+                    currentBinaryCompareQuery = bcq;
+                    setTimeout(() => loadBinaryCompare(bc, bw === 'compare'), 0);
+                }
             } else if (!f && !b && el.detailModal.classList.contains('active') && !currentCompareRecords.length) {
                 closeDetailModal(false);
             }
@@ -6265,6 +6424,10 @@ pub const HOME: &str = r#"<!doctype html>
             currentBinaryGraphLimit = 6;
             currentBinaryCompareLimit = 18;
             currentBinaryCompareMode = 'all';
+            currentBinaryCompareQuery = '';
+            currentBinaryComparePage = 1;
+            currentGraphHoverMd5 = null;
+            currentGraphFocusMd5 = null;
             currentCompareRecords = [];
             pendingDetailSection = null;
             currentDetailSection = null;
@@ -6288,7 +6451,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         function closeDetailModal(updateUrl = true) {
             el.detailModal.classList.remove('active');
-            document.body.style.overflow = '';
+            if (!el.binaryCompareModal.classList.contains('active')) document.body.style.overflow = '';
             currentDetailData = null;
             currentDetailKind = 'function';
             currentDetailKeyHex = null;
@@ -6324,6 +6487,10 @@ pub const HOME: &str = r#"<!doctype html>
             if (e.target === el.detailModal) closeDetailModal();
         });
 
+        el.binaryCompareModal.addEventListener('click', e => {
+            if (e.target === el.binaryCompareModal) closeBinaryCompareModal();
+        });
+
         el.modalBody.addEventListener('scroll', () => {
             if (currentDetailKind !== 'function') return;
             if (detailScrollSyncRaf) cancelAnimationFrame(detailScrollSyncRaf);
@@ -6334,6 +6501,10 @@ pub const HOME: &str = r#"<!doctype html>
         });
 
         document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && el.binaryCompareModal.classList.contains('active')) {
+                closeBinaryCompareModal();
+                return;
+            }
             if (e.key === 'Escape' && el.detailModal.classList.contains('active')) {
                 closeDetailModal();
             }
@@ -6354,15 +6525,24 @@ pub const HOME: &str = r#"<!doctype html>
             }
         }
 
-        async function loadBinaryCompare(otherMd5Hex) {
+        async function loadBinaryCompare(otherMd5Hex, openWorkbench = false) {
             if (!currentBinaryMd5 || !otherMd5Hex) return;
+            openBinaryCompareModal();
             try {
-                const r = await fetch('/api/binary-compare/' + encodeURIComponent(currentBinaryMd5) + '/' + encodeURIComponent(otherMd5Hex) + '?limit=' + currentBinaryCompareLimit);
+                const params = new URLSearchParams();
+                params.set('limit', String(currentBinaryCompareLimit));
+                params.set('mode', currentBinaryCompareMode);
+                params.set('page', String(currentBinaryComparePage));
+                params.set('per_page', String(BINARY_COMPARE_PAGE_SIZE));
+                if (currentBinaryCompareQuery) params.set('q', currentBinaryCompareQuery);
+                const r = await fetch('/api/binary-compare/' + encodeURIComponent(currentBinaryMd5) + '/' + encodeURIComponent(otherMd5Hex) + '?' + params.toString());
                 if (!r.ok) throw new Error('Failed to fetch: ' + r.status);
                 currentBinaryCompareData = await r.json();
-                if (currentDetailKind === 'binary' && currentDetailData) renderBinaryDetail(currentDetailData);
+                if (openWorkbench) currentBinaryWorkbench = true;
+                renderBinaryCompareView();
+                syncHashWithUi();
             } catch (err) {
-                alert('Failed to compare binaries: ' + (err.message || String(err)));
+                el.binaryCompareBody.innerHTML = '<div class="state-message"><div class="icon">!</div><h3>COMPARE ERROR</h3><p>' + esc(err.message || String(err)) + '</p></div>';
             }
         }
 
@@ -6385,14 +6565,72 @@ pub const HOME: &str = r#"<!doctype html>
 
         function setBinaryCompareLimit(limit) {
             currentBinaryCompareLimit = Math.max(1, Math.min(100, Number(limit || currentBinaryCompareLimit || 18)));
+            currentBinaryComparePage = 1;
             if (currentBinaryCompareData && currentBinaryCompareData.right && currentBinaryCompareData.right.md5_hex) {
                 loadBinaryCompare(currentBinaryCompareData.right.md5_hex);
             }
+            syncHashWithUi();
         }
 
         function setBinaryCompareMode(mode) {
             currentBinaryCompareMode = mode || 'all';
+            currentBinaryComparePage = 1;
+            if (currentBinaryCompareData && currentBinaryCompareData.right && currentBinaryCompareData.right.md5_hex) {
+                loadBinaryCompare(currentBinaryCompareData.right.md5_hex, currentBinaryWorkbench);
+            } else {
+                renderBinaryCompareView();
+                syncHashWithUi();
+            }
+        }
+
+        function openBinaryCompareModal() {
+            el.binaryCompareModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            el.binaryCompareBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING COMPARE...</div>';
+            currentBinaryWorkbench = false;
+            syncHashWithUi();
+        }
+
+        function closeBinaryCompareModal() {
+            el.binaryCompareModal.classList.remove('active');
+            if (!el.detailModal.classList.contains('active')) document.body.style.overflow = '';
+            syncHashWithUi();
+        }
+
+        function openBinaryWorkbench() {
+            if (!currentBinaryCompareData) return;
+            currentBinaryWorkbench = true;
+            el.binaryWorkbench.classList.remove('hidden');
+            renderBinaryCompareView();
+            syncHashWithUi();
+        }
+
+        function closeBinaryWorkbench() {
+            currentBinaryWorkbench = false;
+            el.binaryWorkbench.classList.add('hidden');
+            el.binaryWorkbenchBody.innerHTML = '';
+            syncHashWithUi();
+        }
+
+        function setGraphHover(md5Hex) {
+            currentGraphHoverMd5 = md5Hex || null;
             if (currentDetailKind === 'binary' && currentDetailData) renderBinaryDetail(currentDetailData);
+        }
+
+        function setGraphFocus(md5Hex) {
+            currentGraphFocusMd5 = currentGraphFocusMd5 === md5Hex ? null : md5Hex;
+            if (currentDetailKind === 'binary' && currentDetailData) renderBinaryDetail(currentDetailData);
+        }
+
+        function setBinaryCompareQuery(value) {
+            currentBinaryCompareQuery = value || '';
+            currentBinaryComparePage = 1;
+            if (currentBinaryCompareData && currentBinaryCompareData.right) loadBinaryCompare(currentBinaryCompareData.right.md5_hex, currentBinaryWorkbench);
+        }
+
+        function setBinaryComparePage(page) {
+            currentBinaryComparePage = Math.max(1, Number(page || 1));
+            if (currentBinaryCompareData && currentBinaryCompareData.right) loadBinaryCompare(currentBinaryCompareData.right.md5_hex, currentBinaryWorkbench);
         }
 
         function exportBinaryCompareReport() {
@@ -6411,6 +6649,35 @@ pub const HOME: &str = r#"<!doctype html>
         function renderBinaryFacetCard(label, value, total) {
             const pct = total > 0 ? Math.round((Number(value || 0) / Number(total || 1)) * 100) : 0;
             return '<div class="coverage-card"><div class="label">' + esc(label) + '</div><div class="value">' + fmt(value || 0) + '<span class="detail-label"> // ' + pct + '%</span></div></div>';
+        }
+
+        function comparePresetDescription(mode) {
+            switch (mode) {
+                case 'Shared': return 'Functions present in both binaries.';
+                case 'Left Only': return 'Functions only observed in the left binary.';
+                case 'Right Only': return 'Functions only observed in the right binary.';
+                case 'Recent': return 'Most recently observed functions across the compared set.';
+                case 'Metadata Rich': return 'Functions with the richest type, frame, comment, and decompilation signal.';
+                case 'Rare Symbols': return 'Functions associated with fewer binaries, useful for discriminators.';
+                case 'Freshest Drift': return 'Recently observed functions that diverge between left and right.';
+                default: return 'Overview of the three primary diff buckets.';
+            }
+        }
+
+        function renderCoverageStrip(binary, facetsOverride) {
+            const total = Math.max(1, Number((facetsOverride && facetsOverride.function_count) || binary.function_count || 1));
+            const typed = Number((facetsOverride && facetsOverride.typed_functions) || binary.typed_functions || 0);
+            const commented = Number((facetsOverride && facetsOverride.commented_functions) || binary.commented_functions || 0);
+            const switchy = Number((facetsOverride && facetsOverride.switch_functions) || binary.switch_functions || 0);
+            const rows = [
+                ['T', typed],
+                ['C', commented],
+                ['S', switchy],
+            ];
+            return '<div class="coverage-strip">' + rows.map(([label, value]) => {
+                const pct = Math.round((Number(value) / total) * 100);
+                return '<div class="coverage-strip-row"><span>' + esc(label) + '</span><div class="coverage-strip-bar"><div class="coverage-strip-fill" style="width:' + pct + '%"></div></div><span>' + pct + '%</span></div>';
+            }).join('') + '</div>';
         }
 
         function renderBinaryGraph(graph, rootMd5) {
@@ -6450,6 +6717,15 @@ pub const HOME: &str = r#"<!doctype html>
             let html = '<div class="binary-graph">';
             html += '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none">';
             const positions = new Map();
+            const activeFocus = currentGraphFocusMd5 || currentGraphHoverMd5 || '';
+            const connected = new Set(activeFocus ? [activeFocus] : []);
+            if (activeFocus) {
+                edges.forEach(edge => {
+                    if (edge.source_md5 === activeFocus) connected.add(edge.target_md5);
+                    if (edge.target_md5 === activeFocus) connected.add(edge.source_md5);
+                });
+                connected.add(rootMd5);
+            }
             [...layers.keys()].sort((a, b) => a - b).forEach(depth => {
                 const layer = layers.get(depth) || [];
                 layer.sort((a, b) => Number(b.binary.function_count || 0) - Number(a.binary.function_count || 0));
@@ -6465,15 +6741,25 @@ pub const HOME: &str = r#"<!doctype html>
                 const b = positions.get(edge.target_md5);
                 if (!a || !b) return;
                 const alpha = Math.max(0.2, Math.min(0.85, Number(edge.shared_functions || 0) / 12));
-                html += '<line x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1) + '" stroke="rgba(0,255,136,' + alpha.toFixed(2) + ')" stroke-width="' + Math.max(1, Math.min(5, Number(edge.shared_functions || 0) / 4)).toFixed(1) + '" />';
+                const highlighted = activeFocus && (edge.source_md5 === activeFocus || edge.target_md5 === activeFocus);
+                const dimmed = activeFocus && !highlighted;
+                html += '<line class="' + (highlighted ? 'highlighted' : (dimmed ? 'dimmed' : '')) + '" x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1) + '" stroke="rgba(0,255,136,' + alpha.toFixed(2) + ')" stroke-width="' + Math.max(1, Math.min(5, Number(edge.shared_functions || 0) / 4)).toFixed(1) + '" />';
+                const mx = ((a.x + b.x) / 2).toFixed(1);
+                const my = ((a.y + b.y) / 2).toFixed(1);
+                html += '<text x="' + mx + '" y="' + my + '" fill="rgba(210,230,220,0.72)" font-size="10" text-anchor="middle">' + esc(String(edge.shared_functions || 0)) + '</text>';
             });
             html += '</svg>';
             nodes.forEach(node => {
                 const pos = positions.get(node.binary.md5_hex);
                 if (!pos) return;
-                html += '<div class="binary-graph-node' + (node.binary.md5_hex === rootMd5 ? ' root' : '') + '" style="left:' + ((pos.x / width) * 100).toFixed(2) + '%; top:' + ((pos.y / height) * 100).toFixed(2) + '%" onclick="showBinaryDetail(\'' + esc(node.binary.md5_hex) + '\')">'
+                const isHighlighted = activeFocus && connected.has(node.binary.md5_hex);
+                const isDimmed = activeFocus && !connected.has(node.binary.md5_hex);
+                html += '<div class="binary-graph-node' + (node.binary.md5_hex === rootMd5 ? ' root' : '') + (isHighlighted ? ' highlighted' : '') + (isDimmed ? ' dimmed' : '') + '" style="left:' + ((pos.x / width) * 100).toFixed(2) + '%; top:' + ((pos.y / height) * 100).toFixed(2) + '%" onmouseenter="setGraphHover(\'' + esc(node.binary.md5_hex) + '\')" onmouseleave="setGraphHover('')" onclick="setGraphFocus(\'' + esc(node.binary.md5_hex) + '\')">'
                     + '<div class="name">' + esc(node.binary.display_name || node.binary.basename) + '</div>'
                     + '<div class="meta">FN ' + fmt(node.binary.function_count || 0) + ' // VER ' + fmt(node.binary.version_count || 0) + '</div>'
+                    + '<div class="meta">OBS ' + fmt(node.binary.obs_count || 0) + ' // ID ' + esc(node.binary.short_id || '') + '</div>'
+                    + renderCoverageStrip(node.binary)
+                    + (node.binary.md5_hex !== rootMd5 ? '<div class="binary-graph-node-actions"><button class="pagination-btn" onclick="event.stopPropagation();showBinaryDetail(\'' + esc(node.binary.md5_hex) + '\')">open</button><button class="pagination-btn" onclick="event.stopPropagation();loadBinaryCompare(\'' + esc(node.binary.md5_hex) + '\')">diff</button></div>' : '')
                     + '</div>';
             });
             html += '</div>';
@@ -6482,6 +6768,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         function renderBinaryComparePanel(compare) {
             if (!compare) return '';
+            const activeLabel = compare.active_bucket || currentBinaryCompareMode || 'All';
             let html = '<div class="metadata-section"><div class="metadata-header"><span>Binary Diff</span><span class="badge nominal">COMPARE</span></div><div class="metadata-content">';
             html += '<div class="detail-grid" style="margin-bottom: var(--space-md);">';
             html += '<div class="detail-stat"><div class="label">Shared</div><div class="value">' + fmt(compare.shared_count || 0) + '</div></div>';
@@ -6491,13 +6778,18 @@ pub const HOME: &str = r#"<!doctype html>
             html += '<div class="compare-panel-actions" style="margin-bottom: var(--space-md);">';
             html += '<label class="detail-label">Sample <input class="comment-search" style="width:88px; margin-left:8px;" type="number" min="1" max="100" value="' + esc(String(compare.sample_limit || currentBinaryCompareLimit || 18)) + '" onchange="setBinaryCompareLimit(this.value)"></label>';
             html += '<button class="pagination-btn" onclick="exportBinaryCompareReport()">Export JSON</button>';
+            html += '<button class="pagination-btn" onclick="openBinaryWorkbench()">Open Workbench</button>';
             html += '</div>';
             html += '<div class="compare-mode-switch">';
-            [['all','All'], ['Shared','Shared'], ['Left Only','Left Only'], ['Right Only','Right Only'], ['Recent','Recent'], ['Metadata Rich','Metadata Rich']].forEach(entry => {
+            [['all','All'], ['Shared','Shared'], ['Left Only','Left Only'], ['Right Only','Right Only'], ['Recent','Recent'], ['Metadata Rich','Highest Coverage'], ['Rare Symbols','Rare Symbols'], ['Freshest Drift','Freshest Drift']].forEach(entry => {
                 const key = entry[0];
                 const active = ((key === 'all' && currentBinaryCompareMode === 'all') || currentBinaryCompareMode === key) ? ' active' : '';
                 html += '<button class="pagination-btn' + active + '" onclick="setBinaryCompareMode(\'' + key + '\')">' + esc(entry[1]) + '</button>';
             });
+            html += '</div>';
+            html += '<div class="preset-note">' + esc(comparePresetDescription(activeLabel === 'All' ? 'all' : activeLabel)) + '</div>';
+            html += '<div class="compare-panel-actions" style="margin-bottom: var(--space-md);">';
+            html += '<label class="detail-label">Filter <input class="comment-search" style="width:220px; margin-left:8px;" type="text" value="' + esc(currentBinaryCompareQuery || '') + '" oninput="setBinaryCompareQuery(this.value)" placeholder="search compare buckets"></label>';
             html += '</div>';
             html += '<div class="binary-compare-grid">';
             html += '<div class="coverage-card"><div class="label">LEFT</div><div class="value">' + esc(compare.left.display_name || compare.left.basename) + '</div></div>';
@@ -6506,20 +6798,56 @@ pub const HOME: &str = r#"<!doctype html>
             html += '<div class="compare-list-grid">';
             const groups = currentBinaryCompareMode === 'all'
                 ? [['Shared', compare.shared], ['Left Only', compare.left_only], ['Right Only', compare.right_only]]
-                : (compare.buckets || []).filter(bucket => bucket.label === currentBinaryCompareMode).map(bucket => [bucket.label, bucket.items]);
+                : [[compare.active_bucket || currentBinaryCompareMode, compare.active_bucket_items || []]];
             groups.forEach(group => {
+                const pageItems = group[1] || [];
                 html += '<div class="compare-list-column"><div class="detail-label">' + esc(group[0]) + '</div>';
-                if (!group[1] || !group[1].length) {
+                if (!pageItems.length) {
                     html += '<div class="detail-value">-</div>';
                 } else {
-                    group[1].forEach(item => {
-                        html += '<div class="compare-row clickable" onclick="showFunctionDetail(\'' + esc(item.key_hex) + '\')"><div>' + esc(item.name) + '</div><div class="compare-cell">' + esc(fmtRelativeTs(item.ts)) + '</div></div>';
+                    pageItems.forEach(item => {
+                        html += '<div class="compare-row clickable" onclick="showFunctionDetail(\'' + esc(item.key_hex) + '\')"><div>' + esc(item.name) + '<div class="detail-label">RARITY ' + fmt(item.rarity_score || 0) + ' // COVER ' + fmt(item.richness_score || 0) + '</div></div><div class="compare-cell">' + esc(fmtRelativeTs(item.ts)) + '</div></div>';
                     });
+                    const totalPages = Number(compare.active_bucket_total_pages || 1);
+                    const page = Number(compare.active_bucket_page || 1);
+                    if (currentBinaryCompareMode !== 'all' && totalPages > 1) {
+                        html += '<div class="pagination">';
+                        html += '<button class="pagination-btn" onclick="setBinaryComparePage(' + (page - 1) + ')"' + (page <= 1 ? ' disabled' : '') + '>&lt;&lt; PREV</button>';
+                        html += '<span class="pagination-info">PAGE <span class="accent">' + page + '</span> OF <span class="accent">' + totalPages + '</span></span>';
+                        html += '<button class="pagination-btn" onclick="setBinaryComparePage(' + (page + 1) + ')"' + (page >= totalPages ? ' disabled' : '') + '>NEXT &gt;&gt;</button>';
+                        html += '</div>';
+                    }
                 }
                 html += '</div>';
             });
             html += '</div></div></div>';
             return html;
+        }
+
+        function renderBinaryCompareView() {
+            const compare = currentBinaryCompareData;
+            if (!compare) {
+                el.binaryCompareTitle.textContent = '-';
+                el.binaryCompareBody.innerHTML = '<div class="state-message"><div class="icon">::</div><h3>NO COMPARE LOADED</h3><p>Select a related binary or graph node to start a diff.</p></div>';
+                el.binaryWorkbenchBody.innerHTML = '';
+                return;
+            }
+            if (currentBinaryComparePage < 1) currentBinaryComparePage = 1;
+            el.binaryCompareTitle.textContent = (compare.left && compare.left.display_name ? compare.left.display_name : 'left') + ' VS ' + (compare.right && compare.right.display_name ? compare.right.display_name : 'right');
+            let html = '<div class="detail-layout"><div class="detail-main">' + renderBinaryComparePanel(compare) + '</div></div>';
+            el.binaryCompareBody.innerHTML = html;
+            if (currentBinaryWorkbench) {
+                el.binaryWorkbench.classList.remove('hidden');
+                el.binaryWorkbenchBody.innerHTML = '<div class="workbench-layout">'
+                    + '<aside class="workbench-side"><div class="detail-label">LEFT BINARY</div><div class="detail-value accent">' + esc(compare.left.display_name || compare.left.basename) + '</div>'
+                    + '<div class="detail-grid"><div class="detail-stat"><div class="label">Functions</div><div class="value">' + fmt(compare.left.function_count || 0) + '</div></div><div class="detail-stat"><div class="label">Versions</div><div class="value">' + fmt(compare.left.version_count || 0) + '</div></div></div>'
+                    + renderCoverageStrip(compare.left, compare.left_facets) + '</aside>'
+                    + '<section class="workbench-center">' + renderBinaryComparePanel(compare) + '</section>'
+                    + '<aside class="workbench-side"><div class="detail-label">RIGHT BINARY</div><div class="detail-value accent">' + esc(compare.right.display_name || compare.right.basename) + '</div>'
+                    + '<div class="detail-grid"><div class="detail-stat"><div class="label">Functions</div><div class="value">' + fmt(compare.right.function_count || 0) + '</div></div><div class="detail-stat"><div class="label">Versions</div><div class="value">' + fmt(compare.right.version_count || 0) + '</div></div></div>'
+                    + renderCoverageStrip(compare.right, compare.right_facets) + '</aside>'
+                    + '</div>';
+            }
         }
 
         function renderBinaryDetail(data) {
@@ -6584,7 +6912,9 @@ pub const HOME: &str = r#"<!doctype html>
                 html += '</div></div>';
             }
 
-            html += renderBinaryComparePanel(currentBinaryCompareData);
+            if (currentBinaryCompareData && currentBinaryCompareData.right) {
+                html += '<div class="metadata-section"><div class="metadata-header"><span>Active Compare</span><span class="badge nominal">FULL VIEW</span></div><div class="metadata-content"><div class="compare-row clickable" onclick="openBinaryCompareModal();renderBinaryCompareView();"><div><div class="detail-value accent">' + esc(currentBinaryCompareData.right.display_name || currentBinaryCompareData.right.basename) + '</div><div class="detail-label">Open dedicated compare surface</div></div><div class="compare-cell"><span class="frame-chip">SHARED ' + fmt(currentBinaryCompareData.shared_count || 0) + '</span></div></div></div></div>';
+            }
 
             html += '<div class="metadata-section"><div class="metadata-header"><span>Functions In Binary</span><span class="badge">' + fmt(fnPage.total || 0) + ' TOTAL</span></div><div class="metadata-content">';
             if (!fnPage.results || fnPage.results.length === 0) {
