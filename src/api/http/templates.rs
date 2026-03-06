@@ -1363,6 +1363,18 @@ pub const HOME: &str = r#"<!doctype html>
             background: rgba(255, 170, 0, 0.07);
         }
 
+        .compare-cell .diff-add {
+            background: rgba(0, 255, 136, 0.16);
+            color: var(--accent);
+            padding: 0 1px;
+        }
+
+        .compare-cell .diff-del {
+            background: rgba(255, 102, 0, 0.16);
+            color: var(--state-warning);
+            padding: 0 1px;
+        }
+
         .compare-subsection {
             border-top: 1px solid var(--border-subtle);
             padding: 10px;
@@ -3282,8 +3294,8 @@ pub const HOME: &str = r#"<!doctype html>
             const lp = parseDecodedSignature(leftDecl || '');
             const rp = parseDecodedSignature(rightDecl || '');
             const rows = [
-                compareRow('Declaration', leftDecl || '-', rightDecl || '-'),
-                compareRow('Return Type', lp ? lp.returnType : '-', rp ? rp.returnType : '-'),
+                compareRow('Declaration', leftDecl || '-', rightDecl || '-', { mode: 'type' }),
+                compareRow('Return Type', lp ? lp.returnType : '-', rp ? rp.returnType : '-', { mode: 'type' }),
                 compareRow('Call Conv', lp ? (lp.cc || 'default') : '-', rp ? (rp.cc || 'default') : '-'),
                 compareRow('Return Loc', lp ? (lp.retLoc || '-') : '-', rp ? (rp.retLoc || '-') : '-'),
             ];
@@ -3292,7 +3304,7 @@ pub const HOME: &str = r#"<!doctype html>
             const rargs = rp ? rp.args : [];
             const maxArgs = Math.max(largs.length, rargs.length);
             for (let i = 0; i < maxArgs; i++) {
-                rows.push(compareRow('Arg ' + i, largs[i] || '-', rargs[i] || '-'));
+                rows.push(compareRow('Arg ' + i, largs[i] || '-', rargs[i] || '-', { mode: 'type' }));
             }
             return renderCompareSection('Type Signature', rows);
         }
@@ -3300,7 +3312,6 @@ pub const HOME: &str = r#"<!doctype html>
         function renderFrameMemberDiff(leftFd, rightFd) {
             const leftMembers = normalizeFrameMembers(leftFd);
             const rightMembers = normalizeFrameMembers(rightFd);
-            const maxLen = Math.max(leftMembers.length, rightMembers.length);
             const rows = [
                 compareRow('Members', String(leftMembers.length), String(rightMembers.length)),
                 compareRow('Frame Size', fmtHex(leftFd && leftFd.frsize), fmtHex(rightFd && rightFd.frsize)),
@@ -3308,35 +3319,80 @@ pub const HOME: &str = r#"<!doctype html>
                 compareRow('Diagnostics', analyzeFrame(leftFd || {}).map(x => x.label).join(', ') || 'layout coherent', analyzeFrame(rightFd || {}).map(x => x.label).join(', ') || 'layout coherent'),
             ];
 
-            for (let i = 0; i < maxLen; i++) {
-                const l = leftMembers[i];
-                const r = rightMembers[i];
-                rows.push(compareRow('Member ' + i, l ? ((l.offset !== null ? fmtHex(l.offset) : '-') + ' ' + l.name + ' : ' + l.type) : '-', r ? ((r.offset !== null ? fmtHex(r.offset) : '-') + ' ' + r.name + ' : ' + r.type) : '-'));
+            const usedRight = new Set();
+            const pairs = [];
+
+            function takeRightIndex(pred) {
+                for (let i = 0; i < rightMembers.length; i++) {
+                    if (usedRight.has(i)) continue;
+                    if (pred(rightMembers[i])) {
+                        usedRight.add(i);
+                        return i;
+                    }
+                }
+                return -1;
             }
+
+            leftMembers.forEach(l => {
+                let idx = takeRightIndex(r => r.offset === l.offset && r.name === l.name);
+                if (idx < 0) idx = takeRightIndex(r => r.offset === l.offset);
+                if (idx < 0) idx = takeRightIndex(r => r.name === l.name);
+                pairs.push([l, idx >= 0 ? rightMembers[idx] : null]);
+            });
+
+            rightMembers.forEach((r, i) => {
+                if (!usedRight.has(i)) pairs.push([null, r]);
+            });
+
+            pairs.forEach(([l, r], i) => {
+                const ldesc = l ? ((l.offset !== null ? fmtHex(l.offset) : '-') + ' ' + l.name + ' : ' + l.type + (l.size !== null ? ' [' + fmtHex(l.size) + ']' : '') + (l.cmt ? ' // ' + l.cmt : '')) : '-';
+                const rdesc = r ? ((r.offset !== null ? fmtHex(r.offset) : '-') + ' ' + r.name + ' : ' + r.type + (r.size !== null ? ' [' + fmtHex(r.size) + ']' : '') + (r.cmt ? ' // ' + r.cmt : '')) : '-';
+                rows.push(compareRow('Member ' + i, ldesc, rdesc, { mode: 'type' }));
+            });
             return renderCompareSection('Frame Layout', rows);
         }
 
         function renderCommentDiff(leftMeta, rightMeta) {
             const leftEvents = normalizeCommentEvents(leftMeta);
             const rightEvents = normalizeCommentEvents(rightMeta);
-            const leftMap = new Map(leftEvents.map(e => [e.key, e]));
-            const rightMap = new Map(rightEvents.map(e => [e.key, e]));
-            const shared = leftEvents.filter(e => rightMap.has(e.key));
-            const onlyLeft = leftEvents.filter(e => !rightMap.has(e.key));
-            const onlyRight = rightEvents.filter(e => !leftMap.has(e.key));
+            const leftMap = new Map(leftEvents.map(e => [e.kind + ':' + e.chunk + ':' + e.off, e]));
+            const rightMap = new Map(rightEvents.map(e => [e.kind + ':' + e.chunk + ':' + e.off, e]));
+            const shared = [];
+            const changed = [];
+            const onlyLeft = [];
+            const onlyRight = [];
+
+            for (const [k, le] of leftMap.entries()) {
+                const re = rightMap.get(k);
+                if (!re) {
+                    onlyLeft.push(le);
+                } else if (le.cmt === re.cmt) {
+                    shared.push(le);
+                } else {
+                    changed.push([le, re]);
+                }
+            }
+            for (const [k, re] of rightMap.entries()) {
+                if (!leftMap.has(k)) {
+                    onlyRight.push(re);
+                }
+            }
 
             const rows = [
                 compareRow('Total Comments', String(leftEvents.length), String(rightEvents.length)),
                 compareRow('Shared', String(shared.length), String(shared.length)),
+                compareRow('Changed In Place', String(changed.length), String(changed.length)),
                 compareRow('Unique Left/Right', String(onlyLeft.length), String(onlyRight.length)),
-                compareRow('Regular Comment', leftMeta && leftMeta.fcmt ? leftMeta.fcmt : '-', rightMeta && rightMeta.fcmt ? rightMeta.fcmt : '-'),
-                compareRow('Repeatable Comment', leftMeta && leftMeta.frptcmt ? leftMeta.frptcmt : '-', rightMeta && rightMeta.frptcmt ? rightMeta.frptcmt : '-'),
+                compareRow('Regular Comment', leftMeta && leftMeta.fcmt ? leftMeta.fcmt : '-', rightMeta && rightMeta.fcmt ? rightMeta.fcmt : '-', { mode: 'comment' }),
+                compareRow('Repeatable Comment', leftMeta && leftMeta.frptcmt ? leftMeta.frptcmt : '-', rightMeta && rightMeta.frptcmt ? rightMeta.frptcmt : '-', { mode: 'comment' }),
             ];
 
-            const leftUniqueRows = onlyLeft.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off), e.kind + ' ' + e.cmt, '-'));
-            const rightUniqueRows = onlyRight.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off), '-', e.kind + ' ' + e.cmt));
+            const changedRows = changed.slice(0, 10).map(([l, r]) => compareRow('Chunk ' + l.chunk + ' @ ' + fmtHex(l.off) + ' [' + l.kind + ']', l.cmt, r.cmt, { mode: 'comment' }));
+            const leftUniqueRows = onlyLeft.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off) + ' [' + e.kind + ']', e.cmt, '-', { mode: 'comment' }));
+            const rightUniqueRows = onlyRight.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off) + ' [' + e.kind + ']', '-', e.cmt, { mode: 'comment' }));
 
             return renderCompareSection('Comments', rows)
+                + renderCompareSubsection('Changed At Same Chunk/Offset', changedRows)
                 + renderCompareSubsection('Only In Left', leftUniqueRows)
                 + renderCompareSubsection('Only In Right', rightUniqueRows);
         }
@@ -3345,12 +3401,69 @@ pub const HOME: &str = r#"<!doctype html>
             return String(a || '') !== String(b || '');
         }
 
-        function compareRow(label, left, right) {
+        function tokenizeForDiff(text, mode = 'generic') {
+            const s = String(text || '-');
+            if (mode === 'comment') {
+                return s.match(/\s+|\w+|[^\w\s]/g) || [s];
+            }
+            if (mode === 'type') {
+                return s.match(/\s+|::|->|=>|@<|>|<|\w+|[^\w\s]/g) || [s];
+            }
+            return s.match(/\s+|\w+|[^\w\s]/g) || [s];
+        }
+
+        function diffTokenHtml(left, right, mode = 'generic') {
+            const a = tokenizeForDiff(left, mode);
+            const b = tokenizeForDiff(right, mode);
+            const m = a.length;
+            const n = b.length;
+            const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+            for (let i = m - 1; i >= 0; i--) {
+                for (let j = n - 1; j >= 0; j--) {
+                    dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+                }
+            }
+
+            let i = 0;
+            let j = 0;
+            let leftHtml = '';
+            let rightHtml = '';
+            while (i < m && j < n) {
+                if (a[i] === b[j]) {
+                    const t = esc(a[i]);
+                    leftHtml += t;
+                    rightHtml += t;
+                    i++;
+                    j++;
+                } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+                    leftHtml += '<span class="diff-del">' + esc(a[i]) + '</span>';
+                    i++;
+                } else {
+                    rightHtml += '<span class="diff-add">' + esc(b[j]) + '</span>';
+                    j++;
+                }
+            }
+            while (i < m) {
+                leftHtml += '<span class="diff-del">' + esc(a[i]) + '</span>';
+                i++;
+            }
+            while (j < n) {
+                rightHtml += '<span class="diff-add">' + esc(b[j]) + '</span>';
+                j++;
+            }
+
+            return { leftHtml, rightHtml };
+        }
+
+        function compareRow(label, left, right, options = {}) {
             const diff = compareValue(left, right);
+            const mode = options.mode || 'generic';
+            const rendered = diff ? diffTokenHtml(left, right, mode) : { leftHtml: esc(String(left || '-')), rightHtml: esc(String(right || '-')) };
             return '<div class="compare-row">'
-                + '<div class="compare-cell' + (diff ? ' diff' : '') + '">' + esc(String(left || '-')) + '</div>'
+                + '<div class="compare-cell' + (diff ? ' diff' : '') + '">' + rendered.leftHtml + '</div>'
                 + '<div class="compare-label">' + esc(label) + '</div>'
-                + '<div class="compare-cell' + (diff ? ' diff' : '') + '">' + esc(String(right || '-')) + '</div>'
+                + '<div class="compare-cell' + (diff ? ' diff' : '') + '">' + rendered.rightHtml + '</div>'
                 + '</div>';
         }
 
