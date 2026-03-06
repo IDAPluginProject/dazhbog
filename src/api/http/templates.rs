@@ -1274,6 +1274,46 @@ pub const HOME: &str = r#"<!doctype html>
             gap: var(--space-lg);
         }
 
+        .compare-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: var(--space-md);
+            flex-wrap: wrap;
+        }
+
+        .compare-toolbar-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .compare-toggle {
+            background: var(--bg-base);
+            border: 1px solid var(--border-dim);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 5px 9px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .compare-toggle.active {
+            color: var(--accent);
+            border-color: rgba(0, 255, 136, 0.35);
+            background: rgba(0, 255, 136, 0.08);
+        }
+
+        .compare-status {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
         .compare-head {
             display: grid;
             grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr);
@@ -1329,6 +1369,23 @@ pub const HOME: &str = r#"<!doctype html>
             grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr);
             gap: 1px;
             background: var(--border-dim);
+        }
+
+        .compare-row.jumpable {
+            cursor: pointer;
+        }
+
+        .compare-row.jumpable:hover .compare-cell,
+        .compare-row.jumpable:hover .compare-label {
+            background: rgba(0, 255, 136, 0.05);
+        }
+
+        .compare-row.unchanged {
+            display: none;
+        }
+
+        .compare-diff.show-all .compare-row.unchanged {
+            display: grid;
         }
 
         .compare-row + .compare-row {
@@ -2896,6 +2953,8 @@ pub const HOME: &str = r#"<!doctype html>
         const pinnedKeys = new Set();
         const compareKeys = [];
         const resultPreviewCache = new Map();
+        let compareShowAll = false;
+        let compareMode = 'summary';
 
         let metricsPrevSnapshot = null;
         let metricsPrevTsMs = 0;
@@ -3110,6 +3169,22 @@ pub const HOME: &str = r#"<!doctype html>
             el.compareOpen.disabled = compareKeys.length !== 2;
         }
 
+        function setCompareShowAll(next) {
+            compareShowAll = !!next;
+            rerenderCompareDiff();
+        }
+
+        function setCompareMode(next) {
+            compareMode = next === 'full' ? 'full' : 'summary';
+            rerenderCompareDiff();
+        }
+
+        function rerenderCompareDiff() {
+            if (currentCompareLeft && currentCompareRight) {
+                el.modalBody.innerHTML = buildStructuredDiff(currentCompareLeft, currentCompareRight);
+            }
+        }
+
         function togglePin(keyHex) {
             if (pinnedKeys.has(keyHex)) pinnedKeys.delete(keyHex);
             else pinnedKeys.add(keyHex);
@@ -3138,6 +3213,9 @@ pub const HOME: &str = r#"<!doctype html>
             if (compareKeys.length !== 2) return;
             const [a, b] = compareKeys;
             currentDetailData = null;
+            currentCompareLeft = null;
+            currentCompareRight = null;
+            pendingDetailSection = null;
             el.modalKey.textContent = a + ' // ' + b;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING COMPARISON...</div>';
             el.detailModal.classList.add('active');
@@ -3145,7 +3223,9 @@ pub const HOME: &str = r#"<!doctype html>
 
             Promise.all(compareKeys.map(k => fetch('/api/function/' + encodeURIComponent(k)).then(r => r.json())))
                 .then(([left, right]) => {
-                    el.modalBody.innerHTML = buildStructuredDiff(left, right);
+                    currentCompareLeft = left;
+                    currentCompareRight = right;
+                    rerenderCompareDiff();
                 })
                 .catch(err => {
                     el.modalBody.innerHTML = '<div class="state-message"><div class="icon">!</div><h3>COMPARE ERROR</h3><p>' + esc(err.message || String(err)) + '</p></div>';
@@ -3293,20 +3373,22 @@ pub const HOME: &str = r#"<!doctype html>
         function renderSignatureDiff(leftDecl, rightDecl) {
             const lp = parseDecodedSignature(leftDecl || '');
             const rp = parseDecodedSignature(rightDecl || '');
+            const typeJump = { leftJump: { key: currentCompareLeft.key_hex, section: 'section-type' }, rightJump: { key: currentCompareRight.key_hex, section: 'section-type' } };
             const rows = [
-                compareRow('Declaration', leftDecl || '-', rightDecl || '-', { mode: 'type' }),
-                compareRow('Return Type', lp ? lp.returnType : '-', rp ? rp.returnType : '-', { mode: 'type' }),
-                compareRow('Call Conv', lp ? (lp.cc || 'default') : '-', rp ? (rp.cc || 'default') : '-'),
-                compareRow('Return Loc', lp ? (lp.retLoc || '-') : '-', rp ? (rp.retLoc || '-') : '-'),
+                compareRow('Declaration', leftDecl || '-', rightDecl || '-', { mode: 'type', ...typeJump }),
+                compareRow('Return Type', lp ? lp.returnType : '-', rp ? rp.returnType : '-', { mode: 'type', ...typeJump }),
+                compareRow('Call Conv', lp ? (lp.cc || 'default') : '-', rp ? (rp.cc || 'default') : '-', typeJump),
+                compareRow('Return Loc', lp ? (lp.retLoc || '-') : '-', rp ? (rp.retLoc || '-') : '-', typeJump),
             ];
 
             const largs = lp ? lp.args : [];
             const rargs = rp ? rp.args : [];
             const maxArgs = Math.max(largs.length, rargs.length);
+            const fullRows = [];
             for (let i = 0; i < maxArgs; i++) {
-                rows.push(compareRow('Arg ' + i, largs[i] || '-', rargs[i] || '-', { mode: 'type' }));
+                fullRows.push(compareRow('Arg ' + i, largs[i] || '-', rargs[i] || '-', { mode: 'type', ...typeJump }));
             }
-            return renderCompareSection('Type Signature', rows);
+            return renderCompareSection('Type Signature', rows.concat(compareMode === 'full' ? fullRows : []));
         }
 
         function renderFrameMemberDiff(leftFd, rightFd) {
@@ -3344,12 +3426,13 @@ pub const HOME: &str = r#"<!doctype html>
                 if (!usedRight.has(i)) pairs.push([null, r]);
             });
 
+            const fullRows = [];
             pairs.forEach(([l, r], i) => {
                 const ldesc = l ? ((l.offset !== null ? fmtHex(l.offset) : '-') + ' ' + l.name + ' : ' + l.type + (l.size !== null ? ' [' + fmtHex(l.size) + ']' : '') + (l.cmt ? ' // ' + l.cmt : '')) : '-';
                 const rdesc = r ? ((r.offset !== null ? fmtHex(r.offset) : '-') + ' ' + r.name + ' : ' + r.type + (r.size !== null ? ' [' + fmtHex(r.size) + ']' : '') + (r.cmt ? ' // ' + r.cmt : '')) : '-';
-                rows.push(compareRow('Member ' + i, ldesc, rdesc, { mode: 'type' }));
+                fullRows.push(compareRow('Member ' + i, ldesc, rdesc, { mode: 'type', leftJump: { key: currentCompareLeft.key_hex, section: 'section-frame' }, rightJump: { key: currentCompareRight.key_hex, section: 'section-frame' } }));
             });
-            return renderCompareSection('Frame Layout', rows);
+            return renderCompareSection('Frame Layout', rows.concat(compareMode === 'full' ? fullRows : []));
         }
 
         function renderCommentDiff(leftMeta, rightMeta) {
@@ -3387,14 +3470,15 @@ pub const HOME: &str = r#"<!doctype html>
                 compareRow('Repeatable Comment', leftMeta && leftMeta.frptcmt ? leftMeta.frptcmt : '-', rightMeta && rightMeta.frptcmt ? rightMeta.frptcmt : '-', { mode: 'comment' }),
             ];
 
-            const changedRows = changed.slice(0, 10).map(([l, r]) => compareRow('Chunk ' + l.chunk + ' @ ' + fmtHex(l.off) + ' [' + l.kind + ']', l.cmt, r.cmt, { mode: 'comment' }));
-            const leftUniqueRows = onlyLeft.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off) + ' [' + e.kind + ']', e.cmt, '-', { mode: 'comment' }));
-            const rightUniqueRows = onlyRight.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off) + ' [' + e.kind + ']', '-', e.cmt, { mode: 'comment' }));
+            const commentJump = { leftJump: { key: currentCompareLeft.key_hex, section: 'section-comments' }, rightJump: { key: currentCompareRight.key_hex, section: 'section-comments' } };
+            const changedRows = changed.slice(0, 10).map(([l, r]) => compareRow('Chunk ' + l.chunk + ' @ ' + fmtHex(l.off) + ' [' + l.kind + ']', l.cmt, r.cmt, { mode: 'comment', ...commentJump }));
+            const leftUniqueRows = onlyLeft.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off) + ' [' + e.kind + ']', e.cmt, '-', { mode: 'comment', ...commentJump }));
+            const rightUniqueRows = onlyRight.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off) + ' [' + e.kind + ']', '-', e.cmt, { mode: 'comment', ...commentJump }));
 
             return renderCompareSection('Comments', rows)
-                + renderCompareSubsection('Changed At Same Chunk/Offset', changedRows)
-                + renderCompareSubsection('Only In Left', leftUniqueRows)
-                + renderCompareSubsection('Only In Right', rightUniqueRows);
+                + (compareMode === 'full' ? renderCompareSubsection('Changed At Same Chunk/Offset', changedRows) : '')
+                + (compareMode === 'full' ? renderCompareSubsection('Only In Left', leftUniqueRows) : '')
+                + (compareMode === 'full' ? renderCompareSubsection('Only In Right', rightUniqueRows) : '');
         }
 
         function compareValue(a, b) {
@@ -3460,10 +3544,17 @@ pub const HOME: &str = r#"<!doctype html>
             const diff = compareValue(left, right);
             const mode = options.mode || 'generic';
             const rendered = diff ? diffTokenHtml(left, right, mode) : { leftHtml: esc(String(left || '-')), rightHtml: esc(String(right || '-')) };
-            return '<div class="compare-row">'
-                + '<div class="compare-cell' + (diff ? ' diff' : '') + '">' + rendered.leftHtml + '</div>'
-                + '<div class="compare-label">' + esc(label) + '</div>'
-                + '<div class="compare-cell' + (diff ? ' diff' : '') + '">' + rendered.rightHtml + '</div>'
+            const jumpable = options.leftJump || options.rightJump;
+            const classes = ['compare-row'];
+            if (jumpable) classes.push('jumpable');
+            if (!diff) classes.push('unchanged');
+            const leftClick = options.leftJump ? ' onclick="event.stopPropagation();showFunctionDetail(\'' + esc(options.leftJump.key) + '\', \'' + esc(options.leftJump.section) + '\')"' : '';
+            const rightClick = options.rightJump ? ' onclick="event.stopPropagation();showFunctionDetail(\'' + esc(options.rightJump.key) + '\', \'' + esc(options.rightJump.section) + '\')"' : '';
+            const labelExtra = jumpable ? '<div style="margin-top:4px;font-size:9px;color:var(--text-tertiary);">jump: ' + (options.leftJump ? 'L' : '-') + ' / ' + (options.rightJump ? 'R' : '-') + '</div>' : '';
+            return '<div class="' + classes.join(' ') + '">'
+                + '<div class="compare-cell' + (diff ? ' diff' : '') + '"' + leftClick + '>' + rendered.leftHtml + '</div>'
+                + '<div class="compare-label">' + esc(label) + labelExtra + '</div>'
+                + '<div class="compare-cell' + (diff ? ' diff' : '') + '"' + rightClick + '>' + rendered.rightHtml + '</div>'
                 + '</div>';
         }
 
@@ -3477,7 +3568,15 @@ pub const HOME: &str = r#"<!doctype html>
             const lm = left.metadata || {};
             const rm = right.metadata || {};
 
-            let html = '<div class="compare-diff">';
+            let html = '<div class="compare-diff' + (compareShowAll ? ' show-all' : '') + '">';
+            html += '<div class="compare-toolbar">';
+            html += '<div class="compare-toolbar-group">';
+            html += '<button class="compare-toggle' + (compareMode === 'summary' ? ' active' : '') + '" onclick="setCompareMode(\'summary\')">Summary</button>';
+            html += '<button class="compare-toggle' + (compareMode === 'full' ? ' active' : '') + '" onclick="setCompareMode(\'full\')">Full Diff</button>';
+            html += '<button class="compare-toggle' + (compareShowAll ? ' active' : '') + '" onclick="setCompareShowAll(' + (!compareShowAll) + ')">' + (compareShowAll ? 'Hide Unchanged' : 'Show Unchanged') + '</button>';
+            html += '</div>';
+            html += '<div class="compare-status">' + esc(compareMode) + ' mode</div>';
+            html += '</div>';
             html += '<div class="compare-head">';
             html += '<div class="compare-head-cell"><div class="compare-name">' + esc(left.name) + '</div><div class="compare-key">' + esc(left.key_hex) + '</div></div>';
             html += '<div class="compare-head-cell center">Structured Diff</div>';
@@ -3870,6 +3969,9 @@ pub const HOME: &str = r#"<!doctype html>
         let currentDetailData = null;
         let copiedKeyHex = null;
         let copiedKeyTimer = null;
+        let pendingDetailSection = null;
+        let currentCompareLeft = null;
+        let currentCompareRight = null;
 
         function pulseCommentMarker(markerId) {
             if (!markerId) return;
@@ -4271,8 +4373,11 @@ pub const HOME: &str = r#"<!doctype html>
         // FUNCTION DETAIL MODAL
         // ═══════════════════════════════════════════════════════════════
 
-        function showFunctionDetail(keyHex) {
+        function showFunctionDetail(keyHex, sectionId = null) {
             currentDetailData = null;
+            currentCompareLeft = null;
+            currentCompareRight = null;
+            pendingDetailSection = sectionId;
             el.modalKey.textContent = keyHex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
             el.detailModal.classList.add('active');
@@ -4293,6 +4398,9 @@ pub const HOME: &str = r#"<!doctype html>
             el.detailModal.classList.remove('active');
             document.body.style.overflow = '';
             currentDetailData = null;
+            currentCompareLeft = null;
+            currentCompareRight = null;
+            pendingDetailSection = null;
             if (activeCommentRow) {
                 activeCommentRow.classList.remove('active');
                 activeCommentRow = null;
@@ -4434,6 +4542,11 @@ pub const HOME: &str = r#"<!doctype html>
 
             html += '</div></div>';
             el.modalBody.innerHTML = html;
+            if (pendingDetailSection) {
+                jumpToDetailSection(pendingDetailSection);
+                setActiveDetailNav(pendingDetailSection);
+                pendingDetailSection = null;
+            }
         }
     </script>
 </body>
