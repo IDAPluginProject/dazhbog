@@ -73,3 +73,9 @@ pub struct BinaryCompareItem {
     pub name: String,
     pub ts: u64,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BinaryCompareBucket {
+    pub label: String,
+    pub items: Vec<BinaryCompareItem>,
+}

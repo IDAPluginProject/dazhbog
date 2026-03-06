@@ -618,7 +618,7 @@ impl Database {
         left: [u8; 16],
         right: [u8; 16],
         sample_limit: usize,
-    ) -> io::Result<(BinaryFacetSummary, BinaryFacetSummary, usize, usize, usize, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>)> {
+    ) -> io::Result<(BinaryFacetSummary, BinaryFacetSummary, usize, usize, usize, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>)> {
         let left_keys = self.rt.ctx_index.get_binary_function_keys(&left, 8192)?;
         let right_keys = self.rt.ctx_index.get_binary_function_keys(&right, 8192)?;
         let left_set: HashSet<u128> = left_keys.iter().copied().collect();
@@ -626,6 +626,8 @@ impl Database {
         let mut shared = Vec::new();
         let mut left_only = Vec::new();
         let mut right_only = Vec::new();
+        let mut recent = Vec::new();
+        let mut metadata_rich = Vec::new();
         for key in left_set.intersection(&right_set).take(sample_limit) {
             if let Some(func) = self.get_latest(*key).await? {
                 shared.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec });
@@ -641,12 +643,37 @@ impl Database {
                 right_only.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec });
             }
         }
+        let mut union_items = Vec::new();
+        for key in left_set.union(&right_set).take(sample_limit.saturating_mul(4).max(sample_limit)) {
+            if let Some(func) = self.get_latest(*key).await? {
+                let parsed = parse_metadata(&func.data);
+                let richness = usize::from(parsed.type_parts.is_some())
+                    + usize::from(parsed.frame_desc.is_some())
+                    + usize::from(parsed.fcmt.is_some() || parsed.frptcmt.is_some())
+                    + usize::from(!parsed.insn_cmts.is_empty() || !parsed.rpt_insn_cmts.is_empty())
+                    + usize::from(!parsed.errors.is_empty())
+                    + usize::from(parsed.vd_elapsed.is_some());
+                union_items.push((
+                    richness,
+                    BinaryCompareItem {
+                        key_hex: format!("{:032x}", key),
+                        name: func.name,
+                        ts: func.ts_sec,
+                    },
+                ));
+            }
+        }
+        let mut by_recent = union_items.clone();
+        by_recent.sort_by(|a, b| b.1.ts.cmp(&a.1.ts).then_with(|| a.1.name.cmp(&b.1.name)));
+        recent.extend(by_recent.into_iter().take(sample_limit).map(|(_, item)| item));
+        union_items.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.ts.cmp(&a.1.ts)));
+        metadata_rich.extend(union_items.into_iter().take(sample_limit).map(|(_, item)| item));
         let shared_count = left_set.intersection(&right_set).count();
         let left_only_count = left_set.difference(&right_set).count();
         let right_only_count = right_set.difference(&left_set).count();
         let left_facets = self.get_binary_facets(left, 8192).await?;
         let right_facets = self.get_binary_facets(right, 8192).await?;
-        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only))
+        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only, recent, metadata_rich))
     }
 
     fn attach_binary_refs(&self, hits: &mut [SearchHit]) -> io::Result<()> {

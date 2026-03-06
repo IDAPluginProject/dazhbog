@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::api::metrics::METRICS;
-use crate::db::{BinaryCompareItem, BinaryFacetSummary, BinarySummary, Database};
+use crate::db::{BinaryCompareBucket, BinaryCompareItem, BinaryFacetSummary, BinarySummary, Database};
 use crate::engine::SearchHit;
 use crate::protocol::lumina::metadata::{parse_metadata, InsnCmt};
 
@@ -480,6 +480,7 @@ pub struct BinaryCompareResponse {
     pub shared: Vec<BinaryCompareItem>,
     pub left_only: Vec<BinaryCompareItem>,
     pub right_only: Vec<BinaryCompareItem>,
+    pub buckets: Vec<BinaryCompareBucket>,
 }
 
 #[derive(Serialize)]
@@ -1055,7 +1056,7 @@ pub async fn handle_binary_compare(
         .unwrap_or(18)
         .clamp(1, 100);
     match db.compare_binaries(left, right, sample_limit).await {
-        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only)) => json_response(
+        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only, recent, metadata_rich)) => json_response(
             &BinaryCompareResponse {
                 left: left_summary,
                 right: right_summary,
@@ -1065,9 +1066,16 @@ pub async fn handle_binary_compare(
                 left_only_count,
                 right_only_count,
                 sample_limit,
-                shared,
-                left_only,
-                right_only,
+                shared: shared.clone(),
+                left_only: left_only.clone(),
+                right_only: right_only.clone(),
+                buckets: vec![
+                    BinaryCompareBucket { label: "Shared".to_string(), items: shared },
+                    BinaryCompareBucket { label: "Left Only".to_string(), items: left_only },
+                    BinaryCompareBucket { label: "Right Only".to_string(), items: right_only },
+                    BinaryCompareBucket { label: "Recent".to_string(), items: recent },
+                    BinaryCompareBucket { label: "Metadata Rich".to_string(), items: metadata_rich },
+                ],
             },
             StatusCode::OK,
         ),

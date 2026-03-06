@@ -1211,6 +1211,13 @@ pub const HOME: &str = r#"<!doctype html>
             background: rgba(255,255,255,0.02);
             padding: 10px 12px;
         }
+
+        .compare-mode-switch {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: var(--space-md);
+        }
         
         .result-meta {
             display: flex;
@@ -3823,6 +3830,7 @@ pub const HOME: &str = r#"<!doctype html>
         let currentBinaryGraphDepth = 2;
         let currentBinaryGraphLimit = 6;
         let currentBinaryCompareLimit = 18;
+        let currentBinaryCompareMode = 'all';
 
         const pinnedKeys = new Set();
         const compareKeys = [];
@@ -6256,6 +6264,7 @@ pub const HOME: &str = r#"<!doctype html>
             currentBinaryGraphDepth = 2;
             currentBinaryGraphLimit = 6;
             currentBinaryCompareLimit = 18;
+            currentBinaryCompareMode = 'all';
             currentCompareRecords = [];
             pendingDetailSection = null;
             currentDetailSection = null;
@@ -6381,6 +6390,11 @@ pub const HOME: &str = r#"<!doctype html>
             }
         }
 
+        function setBinaryCompareMode(mode) {
+            currentBinaryCompareMode = mode || 'all';
+            if (currentDetailKind === 'binary' && currentDetailData) renderBinaryDetail(currentDetailData);
+        }
+
         function exportBinaryCompareReport() {
             if (!currentBinaryCompareData) return;
             const blob = new Blob([JSON.stringify(currentBinaryCompareData, null, 2)], { type: 'application/json' });
@@ -6407,16 +6421,43 @@ pub const HOME: &str = r#"<!doctype html>
             const height = 360;
             const rootIndex = nodes.findIndex(n => n.binary && n.binary.md5_hex === rootMd5);
             const rootNode = rootIndex >= 0 ? nodes[rootIndex] : nodes[0];
-            const others = nodes.filter(n => n !== rootNode);
+            const adjacency = new Map();
+            edges.forEach(edge => {
+                if (!adjacency.has(edge.source_md5)) adjacency.set(edge.source_md5, []);
+                if (!adjacency.has(edge.target_md5)) adjacency.set(edge.target_md5, []);
+                adjacency.get(edge.source_md5).push(edge.target_md5);
+                adjacency.get(edge.target_md5).push(edge.source_md5);
+            });
+            const depthMap = new Map();
+            depthMap.set(rootNode.binary.md5_hex, 0);
+            const queue = [rootNode.binary.md5_hex];
+            while (queue.length) {
+                const cur = queue.shift();
+                const curDepth = depthMap.get(cur) || 0;
+                (adjacency.get(cur) || []).forEach(next => {
+                    if (!depthMap.has(next)) {
+                        depthMap.set(next, curDepth + 1);
+                        queue.push(next);
+                    }
+                });
+            }
+            const layers = new Map();
+            nodes.forEach(node => {
+                const depth = depthMap.get(node.binary.md5_hex) || (node.binary.md5_hex === rootMd5 ? 0 : currentBinaryGraphDepth);
+                if (!layers.has(depth)) layers.set(depth, []);
+                layers.get(depth).push(node);
+            });
             let html = '<div class="binary-graph">';
             html += '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none">';
             const positions = new Map();
-            positions.set(rootNode.binary.md5_hex, { x: width * 0.5, y: height * 0.5 });
-            others.forEach((node, idx) => {
-                const angle = (Math.PI * 2 * idx) / Math.max(1, others.length);
-                positions.set(node.binary.md5_hex, {
-                    x: width * 0.5 + Math.cos(angle) * (width * 0.32),
-                    y: height * 0.5 + Math.sin(angle) * (height * 0.32),
+            [...layers.keys()].sort((a, b) => a - b).forEach(depth => {
+                const layer = layers.get(depth) || [];
+                layer.sort((a, b) => Number(b.binary.function_count || 0) - Number(a.binary.function_count || 0));
+                const x = depth === 0 ? width * 0.5 : 120 + ((width - 240) * (depth / Math.max(1, currentBinaryGraphDepth || 2)));
+                layer.forEach((node, idx) => {
+                    const slot = idx + 1;
+                    const y = (height / (layer.length + 1)) * slot;
+                    positions.set(node.binary.md5_hex, { x, y });
                 });
             });
             edges.forEach(edge => {
@@ -6451,12 +6492,22 @@ pub const HOME: &str = r#"<!doctype html>
             html += '<label class="detail-label">Sample <input class="comment-search" style="width:88px; margin-left:8px;" type="number" min="1" max="100" value="' + esc(String(compare.sample_limit || currentBinaryCompareLimit || 18)) + '" onchange="setBinaryCompareLimit(this.value)"></label>';
             html += '<button class="pagination-btn" onclick="exportBinaryCompareReport()">Export JSON</button>';
             html += '</div>';
+            html += '<div class="compare-mode-switch">';
+            [['all','All'], ['Shared','Shared'], ['Left Only','Left Only'], ['Right Only','Right Only'], ['Recent','Recent'], ['Metadata Rich','Metadata Rich']].forEach(entry => {
+                const key = entry[0];
+                const active = ((key === 'all' && currentBinaryCompareMode === 'all') || currentBinaryCompareMode === key) ? ' active' : '';
+                html += '<button class="pagination-btn' + active + '" onclick="setBinaryCompareMode(\'' + key + '\')">' + esc(entry[1]) + '</button>';
+            });
+            html += '</div>';
             html += '<div class="binary-compare-grid">';
             html += '<div class="coverage-card"><div class="label">LEFT</div><div class="value">' + esc(compare.left.display_name || compare.left.basename) + '</div></div>';
             html += '<div class="coverage-card"><div class="label">RIGHT</div><div class="value">' + esc(compare.right.display_name || compare.right.basename) + '</div></div>';
             html += '</div>';
             html += '<div class="compare-list-grid">';
-            [['Shared', compare.shared], ['Left Only', compare.left_only], ['Right Only', compare.right_only]].forEach(group => {
+            const groups = currentBinaryCompareMode === 'all'
+                ? [['Shared', compare.shared], ['Left Only', compare.left_only], ['Right Only', compare.right_only]]
+                : (compare.buckets || []).filter(bucket => bucket.label === currentBinaryCompareMode).map(bucket => [bucket.label, bucket.items]);
+            groups.forEach(group => {
                 html += '<div class="compare-list-column"><div class="detail-label">' + esc(group[0]) + '</div>';
                 if (!group[1] || !group[1].length) {
                     html += '<div class="detail-value">-</div>';

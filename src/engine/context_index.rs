@@ -319,6 +319,7 @@ impl ContextIndex {
         self.t_binary_meta
             .insert(key, enc)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+        let _ = self.t_binary_facets.remove(key);
 
         Ok(())
     }
@@ -467,6 +468,7 @@ impl ContextIndex {
         if inc_function_count > 0 || inc_version_count > 0 {
             self.bump_binary_meta_counts(&md5, inc_function_count, inc_version_count)?;
         }
+        let _ = self.t_binary_facets.remove(md5);
 
         // version stats (if provided)
         if let Some(vid) = version_id {
