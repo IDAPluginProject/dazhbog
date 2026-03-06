@@ -2464,6 +2464,11 @@ pub const HOME: &str = r#"<!doctype html>
             background: var(--bg-base);
         }
 
+        button.controlflow-density-bin {
+            padding: 0;
+            cursor: pointer;
+        }
+
         .controlflow-density-bin.fill {
             background: rgba(0, 255, 136, 0.32);
             border-color: rgba(0, 255, 136, 0.18);
@@ -2472,6 +2477,14 @@ pub const HOME: &str = r#"<!doctype html>
         .controlflow-density-bin.default {
             background: rgba(255, 170, 0, 0.42);
             border-color: rgba(255, 170, 0, 0.24);
+        }
+
+        .controlflow-density-bin.active {
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 0 1px rgba(255, 170, 0, 0.35);
+        }
+
+        .controlflow-density-bin:hover {
+            transform: translateY(-1px);
         }
 
         .controlflow-legend {
@@ -2548,6 +2561,10 @@ pub const HOME: &str = r#"<!doctype html>
 
         .coverage-bin.default::before {
             background: rgba(255,170,0,0.55);
+        }
+
+        .coverage-bin.active {
+            box-shadow: 0 0 0 1px rgba(255, 170, 0, 0.4);
         }
 
         .coverage-meta {
@@ -2635,10 +2652,20 @@ pub const HOME: &str = r#"<!doctype html>
             font-family: var(--font-mono);
         }
 
+        button.case-chip {
+            cursor: pointer;
+        }
+
         .case-chip.default {
             border-color: rgba(255, 170, 0, 0.4);
             background: rgba(255, 170, 0, 0.1);
             color: var(--state-warning);
+        }
+
+        .case-chip.active {
+            border-color: rgba(255, 170, 0, 0.55);
+            background: rgba(255, 170, 0, 0.16);
+            color: var(--text-primary);
         }
 
         .jumptable-graph {
@@ -2709,6 +2736,11 @@ pub const HOME: &str = r#"<!doctype html>
             padding: 8px 10px;
         }
 
+        .jumptable-graph-node.active {
+            border-color: rgba(255, 170, 0, 0.4);
+            background: rgba(255, 170, 0, 0.05);
+        }
+
         .jumptable-graph-node.root {
             border-color: rgba(0, 255, 136, 0.35);
         }
@@ -2726,6 +2758,13 @@ pub const HOME: &str = r#"<!doctype html>
             font-family: var(--font-mono);
             font-size: 12px;
             overflow-wrap: anywhere;
+        }
+
+        .jumptable-graph-badges {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 6px;
         }
 
         .jumptable-graph-edge {
@@ -3657,6 +3696,7 @@ pub const HOME: &str = r#"<!doctype html>
         const collapsedSwitchGroups = new Set();
         let selectedControlFlowGroup = null;
         let selectedControlFlowRow = null;
+        let selectedControlFlowCase = null;
         let controlFlowFocusMode = false;
         let compareShowAll = false;
         let compareMode = 'summary';
@@ -3791,7 +3831,7 @@ pub const HOME: &str = r#"<!doctype html>
             return { switches, tables, switchLinks, tableSwitchCounts, groupedSwitches, rowToGroup, controlFlowId };
         }
 
-        function renderCompactControlFlowStrip(labels, stats) {
+        function renderCompactControlFlowStrip(labels, stats, groupId = null) {
             const bins = Array.isArray(labels) ? labels.slice(0, 18) : [];
             let html = '<div class="controlflow-group-strip">';
             html += '<div class="controlflow-group-strip-head">';
@@ -3803,13 +3843,21 @@ pub const HOME: &str = r#"<!doctype html>
             html += '</div></div>';
             html += '<div class="controlflow-density-strip">';
             bins.forEach(label => {
-                html += '<div class="controlflow-density-bin fill' + (label === 'default' ? ' default' : '') + '" title="' + esc(label) + '"></div>';
+                const active = selectedControlFlowGroup === groupId && selectedControlFlowCase === label;
+                html += '<button class="controlflow-density-bin fill' + (label === 'default' ? ' default' : '') + (active ? ' active' : '') + '" title="' + esc(label) + '" onclick="event.stopPropagation();setControlFlowCase(\'' + esc(groupId || '') + '\', \'' + esc(label) + '\')"></button>';
             });
             for (let i = bins.length; i < 18; i++) {
                 html += '<div class="controlflow-density-bin"></div>';
             }
             html += '</div></div>';
             return html;
+        }
+
+        function controlFlowCaseMatches(ref, label) {
+            if (!label) return true;
+            if (!ref) return false;
+            if (label === 'default') return !!ref.is_default || ref.source_role === 'default';
+            return Array.isArray(ref.case_labels) && ref.case_labels.includes(label);
         }
 
         function estimateMetricMax(name, value) {
@@ -4363,6 +4411,13 @@ pub const HOME: &str = r#"<!doctype html>
                 return '<button class="controlflow-toggle" onclick="event.stopPropagation();copyText(\'' + esc(value) + '\')">' + esc(label) + '</button>';
             }
 
+            function renderCaseChip(label, groupId = null) {
+                const active = selectedControlFlowCase === label;
+                const cls = 'case-chip' + (label === 'default' ? ' default' : '') + (active ? ' active' : '');
+                if (!groupId) return '<span class="' + cls + '">' + esc(label) + '</span>';
+                return '<button class="' + cls + '" onclick="event.stopPropagation();setControlFlowCase(\'' + esc(groupId) + '\', \'' + esc(label) + '\')">' + esc(label) + '</button>';
+            }
+
             let html = '';
             html += '<div class="controlflow-legend">';
             html += '<span class="frame-chip">entry</span><span class="frame-chip">case</span><span class="frame-chip warn">default</span><span class="comment-kind">REG</span><span class="comment-kind repeatable">RPT</span>';
@@ -4387,7 +4442,7 @@ pub const HOME: &str = r#"<!doctype html>
                 html += '<span class="frame-chip warn">' + esc(String(cf.dominant.ref_count)) + ' grouped refs</span>';
                 html += '<span class="frame-chip warn">' + esc(String(cf.dominant.case_count)) + ' cases</span>';
                 cf.dominant.labels.forEach(label => {
-                    html += '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>';
+                    html += renderCaseChip(label, 'grp:' + cf.dominant.addr);
                 });
                 html += '</div></div></div>';
             }
@@ -4430,12 +4485,12 @@ pub const HOME: &str = r#"<!doctype html>
                             { label: String(linkedTable.refs.length || 0) + ' refs' },
                             { label: linkedTable.has_default ? 'default path' : 'no default', warn: !!linkedTable.has_default },
                             { label: linkedTable.sparse ? 'sparse' : 'dense', warn: !!linkedTable.sparse },
-                        ]);
+                        ], filterId);
                     } else {
                         html += renderCompactControlFlowStrip([], [
                             { label: String(group.length) + ' sites' },
                             { label: 'unlinked', warn: true },
-                        ]);
+                        ], filterId);
                     }
                     html += '<div class="switch-group-body">';
                     group.forEach(sw => {
@@ -4462,7 +4517,10 @@ pub const HOME: &str = r#"<!doctype html>
                 tables.forEach(jt => {
                     if (controlFlowFocusMode && selectedControlFlowGroup && selectedControlFlowGroup !== ('grp:' + jt.addr)) return;
                     const expanded = expandedJumpTables.has(jt.addr);
-                    const visibleRefs = expanded ? jt.refs : jt.refs.slice(0, 6);
+                    const filteredRefs = selectedControlFlowCase && selectedControlFlowGroup === ('grp:' + jt.addr)
+                        ? jt.refs.filter(ref => controlFlowCaseMatches(ref, selectedControlFlowCase))
+                        : jt.refs;
+                    const visibleRefs = expanded ? filteredRefs : filteredRefs.slice(0, 6);
                     const dimmed = selectedControlFlowGroup && selectedControlFlowGroup !== ('grp:' + jt.addr);
                     html += '<div class="jumptable-card' + (dimmed ? ' dimmed' : '') + '" id="jt-' + esc(jt.addr) + '">';
                     html += '<div class="jumptable-head">';
@@ -4478,11 +4536,11 @@ pub const HOME: &str = r#"<!doctype html>
                     html += '<div class="jumptable-coverage">';
                     html += '<div class="detail-label" style="margin:0;">Case Coverage</div>';
                     if (jt.coverage_runs && jt.coverage_runs.length > 0) {
-                        html += '<div class="coverage-meta">' + jt.coverage_runs.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
+                        html += '<div class="coverage-meta">' + jt.coverage_runs.map(label => renderCaseChip(label, 'grp:' + jt.addr)).join('') + '</div>';
                         html += '<div class="jumptable-coverage-strip">';
                         const bins = jt.coverage_runs.slice(0, 24);
                         bins.forEach(label => {
-                            html += '<div class="coverage-bin fill' + (label === 'default' ? ' default' : '') + '" title="' + esc(label) + '"></div>';
+                            html += '<div class="coverage-bin fill' + (label === 'default' ? ' default' : '') + (selectedControlFlowCase === label ? ' active' : '') + '" title="' + esc(label) + '"></div>';
                         });
                         for (let i = bins.length; i < 24; i++) {
                             html += '<div class="coverage-bin"></div>';
@@ -4494,7 +4552,7 @@ pub const HOME: &str = r#"<!doctype html>
                     html += '</div>';
                     if (jt.all_case_labels && jt.all_case_labels.length > 0) {
                         html += '<div class="jumptable-cluster-note">Cluster cases</div>';
-                        html += '<div class="jumptable-case-strip" style="padding:0 12px 8px;">' + jt.all_case_labels.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
+                        html += '<div class="jumptable-case-strip" style="padding:0 12px 8px;">' + jt.all_case_labels.map(label => renderCaseChip(label, 'grp:' + jt.addr)).join('') + '</div>';
                     }
                     html += '<div class="jumptable-ref-list">';
                     visibleRefs.forEach(ref => {
@@ -4503,7 +4561,7 @@ pub const HOME: &str = r#"<!doctype html>
                         html += '<div class="jumptable-ref-meta">' + esc(ref.kind) + '<br>chunk ' + esc(String(ref.fchunk_nr)) + '<br>@ <a href="javascript:void(0)" onclick="event.stopPropagation();focusCommentRow(&quot;' + rowId + '&quot;, null, true);jumpToDetailSection(&quot;section-comments&quot;);setActiveDetailNav(&quot;section-comments&quot;);" style="color:var(--accent);text-decoration:none;">' + esc(fmtHex(ref.fchunk_off)) + '</a></div>';
                         html += '<div class="jumptable-ref-body"><div class="relation-summary"><span class="frame-chip">' + esc(ref.source_role) + '</span><span class="frame-chip">' + esc(summarizeRelation(ref)) + '</span></div>';
                         if (ref.case_labels && ref.case_labels.length > 0) {
-                            html += '<div class="jumptable-case-strip">' + ref.case_labels.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
+                            html += '<div class="jumptable-case-strip">' + ref.case_labels.map(label => renderCaseChip(label, 'grp:' + jt.addr)).join('') + '</div>';
                         }
                         if (ref.lane_size && ref.lane_size > 1) {
                             html += '<div class="jumptable-cluster-note">cluster lane x' + esc(String(ref.lane_size)) + '</div>';
@@ -4512,18 +4570,22 @@ pub const HOME: &str = r#"<!doctype html>
                         html += '</div>';
                         html += '</div>';
                     });
+                    if (visibleRefs.length === 0) {
+                        html += '<div class="metadata-empty" style="padding:10px 12px;">No refs for selected case bin</div>';
+                    }
                     html += '</div>';
-                    if (jt.refs.length > 6) {
-                        html += '<div class="jumptable-more"><button class="controlflow-toggle" onclick="event.stopPropagation();toggleJumpTableExpand(&quot;' + esc(jt.addr) + '&quot;)">' + (expanded ? 'Show Less' : ('Show All ' + jt.refs.length + ' Refs')) + '</button></div>';
+                    if (filteredRefs.length > 6) {
+                        html += '<div class="jumptable-more"><button class="controlflow-toggle" onclick="event.stopPropagation();toggleJumpTableExpand(&quot;' + esc(jt.addr) + '&quot;)">' + (expanded ? 'Show Less' : ('Show All ' + filteredRefs.length + ' Refs')) + '</button></div>';
                     }
                     html += '<div class="jumptable-graph">';
                     html += '<div class="jumptable-graph-node root"><div class="jumptable-graph-label">Jump Table</div><div class="jumptable-graph-value">' + esc(jt.addr) + '</div></div>';
                     html += '<div class="jumptable-graph-edge">';
-                    jt.refs.slice(0, 8).forEach(ref => {
-                        html += '<div class="jumptable-graph-node"><div class="jumptable-graph-label">' + esc(ref.kind) + ' source</div><div class="jumptable-graph-value">chunk ' + esc(String(ref.fchunk_nr)) + ' @ ' + esc(fmtHex(ref.fchunk_off)) + (ref.case_labels && ref.case_labels.length ? ' // ' + esc(ref.case_labels.join(', ')) : '') + '</div></div>';
+                    filteredRefs.slice(0, 8).forEach(ref => {
+                        const isActive = selectedControlFlowRow === controlFlowId(ref.kind, ref.fchunk_nr, ref.fchunk_off);
+                        html += '<div class="jumptable-graph-node' + (isActive ? ' active' : '') + '"><div class="jumptable-graph-label">' + esc(ref.kind) + ' source</div><div class="jumptable-graph-value">chunk ' + esc(String(ref.fchunk_nr)) + ' @ ' + esc(fmtHex(ref.fchunk_off)) + (ref.case_labels && ref.case_labels.length ? ' // ' + esc(ref.case_labels.join(', ')) : '') + '</div><div class="jumptable-graph-badges"><span class="frame-chip">' + esc(ref.source_role) + '</span>' + (ref.is_default ? '<span class="frame-chip warn">default</span>' : '') + (ref.lane_size && ref.lane_size > 1 ? '<span class="frame-chip">lane x' + esc(String(ref.lane_size)) + '</span>' : '') + (ref.case_labels && ref.case_labels[0] ? renderCaseChip(ref.case_labels[0], 'grp:' + jt.addr) : '') + '</div></div>';
                     });
-                    if (jt.refs.length > 8) {
-                        html += '<div class="jumptable-graph-node"><div class="jumptable-graph-value">+' + esc(String(jt.refs.length - 8)) + ' more refs</div></div>';
+                    if (filteredRefs.length > 8) {
+                        html += '<div class="jumptable-graph-node"><div class="jumptable-graph-value">+' + esc(String(filteredRefs.length - 8)) + ' more refs</div></div>';
                     }
                     html += '</div></div></div>';
                 });
@@ -5296,11 +5358,13 @@ pub const HOME: &str = r#"<!doctype html>
         function clearControlFlowSelection() {
             selectedControlFlowGroup = null;
             selectedControlFlowRow = null;
+            selectedControlFlowCase = null;
             controlFlowFocusMode = false;
             if (currentDetailData) renderFunctionDetail(currentDetailData);
         }
 
         function selectControlFlowRow(rowId, groupId = null, rerender = true) {
+            const prevGroup = selectedControlFlowGroup;
             const sameRow = selectedControlFlowRow === rowId;
             const sameGroup = (groupId || null) === (selectedControlFlowGroup || null);
             if (sameRow && sameGroup) {
@@ -5310,16 +5374,29 @@ pub const HOME: &str = r#"<!doctype html>
                 selectedControlFlowRow = rowId;
                 if (groupId) selectedControlFlowGroup = groupId;
             }
+            if (groupId && prevGroup !== groupId) selectedControlFlowCase = null;
             if (controlFlowFocusMode && !selectedControlFlowGroup) controlFlowFocusMode = false;
             if (rerender && currentDetailData) renderFunctionDetail(currentDetailData);
         }
 
         function setControlFlowGroup(groupId) {
-            selectedControlFlowGroup = selectedControlFlowGroup === groupId ? null : groupId;
+            const nextGroup = selectedControlFlowGroup === groupId ? null : groupId;
+            if (nextGroup !== selectedControlFlowGroup) selectedControlFlowCase = null;
+            selectedControlFlowGroup = nextGroup;
             if (!selectedControlFlowGroup) {
                 selectedControlFlowRow = null;
                 controlFlowFocusMode = false;
             }
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function setControlFlowCase(groupId, label) {
+            if (!groupId || !label) return;
+            if (selectedControlFlowGroup !== groupId) {
+                selectedControlFlowGroup = groupId;
+            }
+            selectedControlFlowCase = selectedControlFlowCase === label ? null : label;
+            selectedControlFlowRow = null;
             if (currentDetailData) renderFunctionDetail(currentDetailData);
         }
 
@@ -5749,6 +5826,7 @@ pub const HOME: &str = r#"<!doctype html>
             pendingDetailSection = sectionId;
             selectedControlFlowGroup = null;
             selectedControlFlowRow = null;
+            selectedControlFlowCase = null;
             controlFlowFocusMode = false;
             el.modalKey.textContent = keyHex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
@@ -5774,6 +5852,7 @@ pub const HOME: &str = r#"<!doctype html>
             pendingDetailSection = null;
             selectedControlFlowGroup = null;
             selectedControlFlowRow = null;
+            selectedControlFlowCase = null;
             controlFlowFocusMode = false;
             if (activeCommentRow) {
                 activeCommentRow.classList.remove('active');
