@@ -832,6 +832,15 @@ pub const HOME: &str = r#"<!doctype html>
             flex-wrap: wrap;
         }
 
+        .compare-panel-actions select {
+            background: var(--bg-base);
+            border: 1px solid var(--border-dim);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 5px 8px;
+        }
+
         .compare-panel-list {
             display: flex;
             flex-wrap: wrap;
@@ -848,6 +857,35 @@ pub const HOME: &str = r#"<!doctype html>
             padding: 6px 8px;
             min-width: 0;
             max-width: 100%;
+        }
+
+        .compare-pill.baseline {
+            border-color: rgba(255, 170, 0, 0.45);
+            background: rgba(255, 170, 0, 0.08);
+        }
+
+        .compare-pill.dragging {
+            opacity: 0.5;
+        }
+
+        .compare-pill-handle,
+        .compare-pill-pin {
+            background: var(--bg-base);
+            border: 1px solid var(--border-dim);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 3px 6px;
+            cursor: grab;
+        }
+
+        .compare-pill-pin {
+            cursor: pointer;
+        }
+
+        .compare-pill-pin.active {
+            color: var(--state-warning);
+            border-color: rgba(255, 170, 0, 0.45);
         }
 
         .compare-pill-main {
@@ -2570,6 +2608,10 @@ pub const HOME: &str = r#"<!doctype html>
             <div class="compare-panel-actions">
                 <button class="pagination-btn" id="compare-open" disabled>Open Compare</button>
                 <button class="pagination-btn" id="compare-clear">Clear</button>
+                <button class="pagination-btn" id="compare-save">Save Set</button>
+                <button class="pagination-btn" id="compare-export">Export JSON</button>
+                <button class="pagination-btn" id="compare-import">Import JSON</button>
+                <select id="compare-load"><option value="">Load Set</option></select>
             </div>
             <div class="compare-panel-list" id="compare-list"></div>
         </section>
@@ -2911,6 +2953,8 @@ pub const HOME: &str = r#"<!doctype html>
             </div>
         </div>
 
+        <input type="file" id="compare-import-file" accept="application/json,.json" style="display:none;">
+
         <!-- Telemetry Footer -->
         <footer class="telemetry-bar">
             <div class="telemetry-left">
@@ -2971,6 +3015,11 @@ pub const HOME: &str = r#"<!doctype html>
             compareList: document.getElementById('compare-list'),
             compareOpen: document.getElementById('compare-open'),
             compareClear: document.getElementById('compare-clear'),
+            compareSave: document.getElementById('compare-save'),
+            compareExport: document.getElementById('compare-export'),
+            compareImport: document.getElementById('compare-import'),
+            compareLoad: document.getElementById('compare-load'),
+            compareImportFile: document.getElementById('compare-import-file'),
             pagination: document.getElementById('pagination'),
             statusRing: document.getElementById('status-ring'),
             statusLabel: document.getElementById('status-label'),
@@ -3041,6 +3090,8 @@ pub const HOME: &str = r#"<!doctype html>
         const compareKeys = [];
         const compareItems = new Map();
         const resultPreviewCache = new Map();
+        let compareBaselineKey = null;
+        let draggingCompareKey = null;
         let compareShowAll = false;
         let compareMode = 'summary';
 
@@ -3191,7 +3242,92 @@ pub const HOME: &str = r#"<!doctype html>
         function compareTextForKeys() {
             if (compareKeys.length === 0) return 'No functions queued';
             if (compareKeys.length === 1) return '1 function queued';
-            return compareKeys.length + ' functions queued';
+            const baseline = compareBaselineKey ? (' // baseline ' + compareBaselineKey.slice(0, 8)) : '';
+            return compareKeys.length + ' functions queued' + baseline;
+        }
+
+        function compareStorageKey() {
+            return 'dazhbog.compareSets.v1';
+        }
+
+        function compareStateStorageKey() {
+            return 'dazhbog.compareState.v1';
+        }
+
+        function loadCompareSets() {
+            try {
+                return JSON.parse(localStorage.getItem(compareStorageKey()) || '{}') || {};
+            } catch (_) {
+                return {};
+            }
+        }
+
+        function storeCompareSets(sets) {
+            localStorage.setItem(compareStorageKey(), JSON.stringify(sets));
+        }
+
+        function persistCompareState() {
+            try {
+                localStorage.setItem(compareStateStorageKey(), JSON.stringify({
+                    keys: [...compareKeys],
+                    baseline: compareBaselineKey,
+                }));
+            } catch (_) {}
+        }
+
+        function restoreCompareState() {
+            try {
+                const raw = localStorage.getItem(compareStateStorageKey());
+                if (!raw) return;
+                const state = JSON.parse(raw);
+                if (!state || !Array.isArray(state.keys)) return;
+                compareKeys.length = 0;
+                state.keys.forEach(k => {
+                    if (typeof k === 'string' && k) compareKeys.push(k);
+                });
+                compareBaselineKey = typeof state.baseline === 'string' ? state.baseline : (compareKeys[0] || null);
+            } catch (_) {}
+        }
+
+        function refreshCompareLoadOptions() {
+            const sets = loadCompareSets();
+            const names = Object.keys(sets).sort();
+            el.compareLoad.innerHTML = '<option value="">Load Set</option>' + names.map(name => '<option value="' + esc(name) + '">' + esc(name) + '</option>').join('');
+        }
+
+        function exportCompareSet() {
+            if (compareKeys.length === 0) return;
+            const payload = {
+                name: 'compare-set',
+                exported_at: new Date().toISOString(),
+                keys: [...compareKeys],
+                baseline: compareBaselineKey,
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'dazhbog-compare-set.json';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function importCompareSetFromText(text) {
+            const parsed = JSON.parse(text);
+            if (!parsed || !Array.isArray(parsed.keys)) {
+                throw new Error('invalid compare set file');
+            }
+            compareKeys.length = 0;
+            parsed.keys.forEach(k => {
+                if (typeof k === 'string' && k) compareKeys.push(k);
+            });
+            compareBaselineKey = typeof parsed.baseline === 'string' ? parsed.baseline : (compareKeys[0] || null);
+            persistCompareState();
+            updateCompareTray();
+            renderResultsList();
+            hydrateCompareItems(compareKeys);
         }
 
         function rememberCompareItem(hit) {
@@ -3201,6 +3337,31 @@ pub const HOME: &str = r#"<!doctype html>
                 name: hit.func_name_demangled || hit.func_name || hit.key_hex,
                 ts: hit.ts || 0,
             });
+        }
+
+        async function hydrateCompareItems(keys = compareKeys) {
+            const missing = keys.filter(keyHex => {
+                const item = compareItems.get(keyHex);
+                return !item || item.name === keyHex || !item.ts;
+            });
+            if (missing.length === 0) return;
+
+            await Promise.all(missing.map(async keyHex => {
+                try {
+                    const resp = await fetch('/api/function/' + encodeURIComponent(keyHex));
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    if (data && !data.error) {
+                        compareItems.set(keyHex, {
+                            key_hex: keyHex,
+                            name: data.name || keyHex,
+                            ts: data.ts || 0,
+                        });
+                    }
+                } catch (_) {}
+            }));
+
+            updateCompareTray();
         }
 
         function sortHits(hits, mode) {
@@ -3263,24 +3424,84 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function updateCompareTray() {
+            if (compareBaselineKey && !compareKeys.includes(compareBaselineKey)) {
+                compareBaselineKey = compareKeys[0] || null;
+            }
             el.compareSummary.textContent = compareTextForKeys();
             el.compareOpen.disabled = compareKeys.length < 2;
             el.comparePanel.classList.toggle('compact', compareKeys.length === 0);
             el.compareList.innerHTML = compareKeys.map(keyHex => {
                 const item = compareItems.get(keyHex) || { key_hex: keyHex, name: keyHex, ts: 0 };
-                return '<div class="compare-pill">'
+                const baseline = compareBaselineKey === keyHex;
+                return '<div class="compare-pill' + (baseline ? ' baseline' : '') + '" draggable="true" ondragstart="startCompareDrag(\'' + esc(keyHex) + '\')" ondragover="allowCompareDrop(event)" ondrop="dropCompareKey(\'' + esc(keyHex) + '\')">'
+                    + '<button class="compare-pill-handle" title="Drag to reorder">::</button>'
                     + '<div class="compare-pill-main">'
                     + '<div class="compare-pill-name">' + esc(item.name) + '</div>'
                     + '<div class="compare-pill-key">' + esc(keyHex) + (item.ts ? ' // ' + esc(fmtRelativeTs(item.ts)) : '') + '</div>'
                     + '</div>'
+                    + '<button class="compare-pill-pin' + (baseline ? ' active' : '') + '" onclick="setCompareBaseline(\'' + esc(keyHex) + '\')" title="Set baseline">B</button>'
                     + '<button class="compare-pill-remove" onclick="removeCompareKey(\'' + esc(keyHex) + '\')">x</button>'
                     + '</div>';
             }).join('');
+            persistCompareState();
         }
 
         function setCompareShowAll(next) {
             compareShowAll = !!next;
             rerenderCompareDiff();
+        }
+
+        function setCompareBaseline(keyHex) {
+            compareBaselineKey = keyHex;
+            updateCompareTray();
+            rerenderCompareDiff();
+        }
+
+        function startCompareDrag(keyHex) {
+            draggingCompareKey = keyHex;
+        }
+
+        function allowCompareDrop(event) {
+            event.preventDefault();
+        }
+
+        function dropCompareKey(targetKey) {
+            if (!draggingCompareKey || draggingCompareKey === targetKey) return;
+            const from = compareKeys.indexOf(draggingCompareKey);
+            const to = compareKeys.indexOf(targetKey);
+            if (from < 0 || to < 0) return;
+            const [moved] = compareKeys.splice(from, 1);
+            compareKeys.splice(to, 0, moved);
+            draggingCompareKey = null;
+            updateCompareTray();
+            rerenderCompareDiff();
+        }
+
+        function saveCompareSet() {
+            if (compareKeys.length === 0) return;
+            const name = prompt('Save compare set as:', 'set-' + new Date().toISOString().slice(0, 10));
+            if (!name) return;
+            const sets = loadCompareSets();
+            sets[name] = {
+                keys: [...compareKeys],
+                baseline: compareBaselineKey,
+                saved_at: Date.now(),
+            };
+            storeCompareSets(sets);
+            refreshCompareLoadOptions();
+        }
+
+        function loadCompareSet(name) {
+            if (!name) return;
+            const sets = loadCompareSets();
+            const set = sets[name];
+            if (!set || !Array.isArray(set.keys)) return;
+            compareKeys.length = 0;
+            set.keys.forEach(k => compareKeys.push(k));
+            compareBaselineKey = set.baseline || compareKeys[0] || null;
+            updateCompareTray();
+            renderResultsList();
+            hydrateCompareItems(compareKeys);
         }
 
         function setCompareMode(next) {
@@ -3317,6 +3538,7 @@ pub const HOME: &str = r#"<!doctype html>
                 compareKeys.splice(idx, 1);
             } else {
                 compareKeys.push(keyHex);
+                if (!compareBaselineKey) compareBaselineKey = keyHex;
             }
             updateCompareTray();
             renderResultsList();
@@ -3324,6 +3546,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         function clearCompareKeys() {
             compareKeys.length = 0;
+            compareBaselineKey = null;
             updateCompareTray();
             renderResultsList();
         }
@@ -3706,8 +3929,14 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function buildStructuredDiff(records) {
-            const summaries = records.map(summaryFromMetadata);
-            const metas = records.map(r => r.metadata || {});
+            const ordered = [...records];
+            const baselineIndex = compareBaselineKey ? ordered.findIndex(r => r.key_hex === compareBaselineKey) : 0;
+            if (baselineIndex > 0) {
+                const [baseline] = ordered.splice(baselineIndex, 1);
+                ordered.unshift(baseline);
+            }
+            const summaries = ordered.map(summaryFromMetadata);
+            const metas = ordered.map(r => r.metadata || {});
             let html = '<div class="compare-diff' + (compareShowAll ? ' show-all' : '') + '">';
             html += '<div class="compare-toolbar">';
             html += '<div class="compare-toolbar-group">';
@@ -3715,26 +3944,27 @@ pub const HOME: &str = r#"<!doctype html>
             html += '<button class="compare-toggle' + (compareMode === 'full' ? ' active' : '') + '" onclick="setCompareMode(\'full\')">Full Diff</button>';
             html += '<button class="compare-toggle' + (compareShowAll ? ' active' : '') + '" onclick="setCompareShowAll(' + (!compareShowAll) + ')">' + (compareShowAll ? 'Hide Unchanged' : 'Show Unchanged') + '</button>';
             html += '</div>';
-            html += '<div class="compare-status">' + records.length + ' functions // ' + esc(compareMode) + ' mode</div>';
+            html += '<div class="compare-status">' + ordered.length + ' functions // ' + esc(compareMode) + ' mode // baseline first</div>';
             html += '</div>';
-            html += '<div class="compare-head" style="--compare-cols:' + records.length + ';"><div class="compare-head-cell center">Field</div>';
-            records.forEach(rec => {
-                html += '<div class="compare-head-cell"><div class="compare-name">' + esc(rec.name) + '</div><div class="compare-key">' + esc(rec.key_hex) + '</div></div>';
+            html += '<div class="compare-head" style="--compare-cols:' + ordered.length + ';"><div class="compare-head-cell center">Field</div>';
+            ordered.forEach((rec, idx) => {
+                html += '<div class="compare-head-cell"><div class="compare-name">' + esc(rec.name) + (idx === 0 ? ' [baseline]' : '') + '</div><div class="compare-key">' + esc(rec.key_hex) + '</div></div>';
             });
             html += '</div>';
 
             html += renderCompareSection('Identity', [
-                renderMatrixRow('Age', records.map(r => fmtRelativeTs(r.ts))),
-                renderMatrixRow('Data Size', records.map(r => fmtBytes(r.data_size || 0))),
-                renderMatrixRow('Binary Count', records.map(r => String((r.binary_names || []).length))),
-                renderMatrixRow('Binaries', records.map(r => (r.binary_names || []).join(', '))),
+                renderMatrixRow('Age', ordered.map(r => fmtRelativeTs(r.ts))),
+                renderMatrixRow('Data Size', ordered.map(r => fmtBytes(r.data_size || 0))),
+                renderMatrixRow('Binary Count', ordered.map(r => String((r.binary_names || []).length))),
+                renderMatrixRow('Binaries', ordered.map(r => (r.binary_names || []).join(', '))),
             ]);
 
-            html += renderSignatureDiff(records);
+            currentCompareRecords = ordered;
+            html += renderSignatureDiff(ordered);
 
-            html += renderFrameMemberDiff(records);
+            html += renderFrameMemberDiff(ordered);
 
-            html += renderCommentDiff(records);
+            html += renderCommentDiff(ordered);
 
             html += renderCompareSection('Parser', [
                 renderMatrixRow('Bytes Parsed', metas.map(m => String(m.bytes_parsed || 0))),
@@ -4492,6 +4722,22 @@ pub const HOME: &str = r#"<!doctype html>
         });
         el.compareClear.addEventListener('click', clearCompareKeys);
         el.compareOpen.addEventListener('click', openCompareModal);
+        el.compareSave.addEventListener('click', saveCompareSet);
+        el.compareExport.addEventListener('click', exportCompareSet);
+        el.compareImport.addEventListener('click', () => el.compareImportFile.click());
+        el.compareLoad.addEventListener('change', e => loadCompareSet(e.target.value));
+        el.compareImportFile.addEventListener('change', async e => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                importCompareSetFromText(text);
+            } catch (err) {
+                alert('Failed to import compare set: ' + (err.message || String(err)));
+            } finally {
+                e.target.value = '';
+            }
+        });
         window.addEventListener('hashchange', () => {
             const { q, page } = parseHash();
             el.q.value = q;
@@ -4502,7 +4748,10 @@ pub const HOME: &str = r#"<!doctype html>
         setInterval(updateTime, 1000);
         fetchMetrics();
         setInterval(fetchMetrics, 5000);
+        restoreCompareState();
         updateCompareTray();
+        hydrateCompareItems(compareKeys);
+        refreshCompareLoadOptions();
         el.resultsSort.value = currentSort;
 
         const init = parseHash();
