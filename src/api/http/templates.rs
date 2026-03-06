@@ -1363,56 +1363,23 @@ pub const HOME: &str = r#"<!doctype html>
             background: rgba(255, 170, 0, 0.07);
         }
 
+        .compare-subsection {
+            border-top: 1px solid var(--border-subtle);
+            padding: 10px;
+            background: var(--bg-panel);
+        }
+
+        .compare-subtitle {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
         .detail-anchor {
             scroll-margin-top: 14px;
         }
-
-        .health-panel {
-            border: 1px solid var(--border-subtle);
-            background: var(--bg-panel);
-            padding: var(--space-md);
-            margin-bottom: var(--space-lg);
-        }
-
-        .health-bar {
-            height: 10px;
-            border: 1px solid var(--border-dim);
-            background: var(--bg-base);
-            position: relative;
-            overflow: hidden;
-            margin-top: var(--space-sm);
-        }
-
-        .health-bar-fill {
-            position: absolute;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
-        }
-
-        .health-meta {
-            margin-top: var(--space-sm);
-            display: flex;
-            justify-content: space-between;
-            gap: var(--space-sm);
-            flex-wrap: wrap;
-            font-size: 10px;
-            color: var(--text-dim);
-        }
-
-        .health-badge {
-            border: 1px solid var(--border-dim);
-            background: var(--bg-base);
-            padding: 2px 8px;
-            font-size: 10px;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-
-        .health-badge.good { color: var(--accent); border-color: rgba(0, 255, 136, 0.4); }
-        .health-badge.warn { color: var(--state-warning); border-color: rgba(255, 102, 0, 0.45); }
-        .health-badge.bad { color: var(--state-critical); border-color: rgba(255, 34, 68, 0.45); }
 
         .frame-diagnostics {
             display: flex;
@@ -3246,30 +3213,6 @@ pub const HOME: &str = r#"<!doctype html>
             });
         }
 
-        function healthBadgeClass(ratio, errorCount) {
-            if (errorCount > 0 || ratio < 0.75) return 'bad';
-            if (ratio < 0.98) return 'warn';
-            return 'good';
-        }
-
-        function renderParseHealth(metadata) {
-            const raw = Math.max(1, Number(metadata.raw_size || 0));
-            const parsed = Math.max(0, Number(metadata.bytes_parsed || 0));
-            const ratio = Math.max(0, Math.min(1, parsed / raw));
-            const errCount = (metadata.errors || []).length;
-            const stateClass = healthBadgeClass(ratio, errCount);
-            const stateLabel = stateClass === 'good' ? 'high confidence' : stateClass === 'warn' ? 'partial' : 'degraded';
-            let html = '<div class="health-panel detail-anchor" id="section-health">';
-            html += '<div class="detail-label">Parse Health</div>';
-            html += '<div class="health-bar"><div class="health-bar-fill" style="width:' + (ratio * 100).toFixed(1) + '%;"></div></div>';
-            html += '<div class="health-meta">';
-            html += '<span>' + parsed + ' / ' + raw + ' bytes parsed (' + (ratio * 100).toFixed(1) + '%)</span>';
-            html += '<span class="health-badge ' + stateClass + '">' + esc(stateLabel) + '</span>';
-            html += '<span class="health-badge ' + (errCount ? 'warn' : 'good') + '">' + errCount + ' parser errors</span>';
-            html += '</div></div>';
-            return html;
-        }
-
         function analyzeFrame(fd) {
             const diagnostics = [];
             if (!fd || !Array.isArray(fd.members) || fd.members.length === 0) return diagnostics;
@@ -3301,6 +3244,103 @@ pub const HOME: &str = r#"<!doctype html>
             return '<div class="frame-diagnostics">' + diagnostics.map(d => '<span class="frame-chip' + (d.kind === 'warn' ? ' warn' : '') + '">' + esc(d.label) + '</span>').join('') + '</div>';
         }
 
+        function normalizeFrameMembers(fd) {
+            const members = fd && Array.isArray(fd.members) ? fd.members : [];
+            return [...members]
+                .map((m, i) => ({
+                    key: ((m.offset ?? 'na') + ':' + (m.name || ('#' + i))),
+                    name: m.name || ('member_' + i),
+                    offset: m.offset ?? null,
+                    size: m.nbytes ?? null,
+                    type: m.tinfo && m.tinfo.declaration ? m.tinfo.declaration : '-',
+                    cmt: m.cmt || '',
+                    rptcmt: m.rptcmt || '',
+                }))
+                .sort((a, b) => {
+                    const ao = a.offset === null ? Number.MAX_SAFE_INTEGER : Number(a.offset);
+                    const bo = b.offset === null ? Number.MAX_SAFE_INTEGER : Number(b.offset);
+                    if (ao !== bo) return ao - bo;
+                    return a.name.localeCompare(b.name);
+                });
+        }
+
+        function normalizeCommentEvents(metadata) {
+            const reg = Array.isArray(metadata && metadata.insn_cmts) ? metadata.insn_cmts : [];
+            const rpt = Array.isArray(metadata && metadata.rpt_insn_cmts) ? metadata.rpt_insn_cmts : [];
+            const events = [];
+            reg.forEach(c => events.push({ key: 'reg:' + c.fchunk_nr + ':' + c.fchunk_off + ':' + c.cmt, kind: 'REG', chunk: c.fchunk_nr, off: c.fchunk_off, cmt: c.cmt }));
+            rpt.forEach(c => events.push({ key: 'rpt:' + c.fchunk_nr + ':' + c.fchunk_off + ':' + c.cmt, kind: 'RPT', chunk: c.fchunk_nr, off: c.fchunk_off, cmt: c.cmt }));
+            return events.sort((a, b) => a.chunk - b.chunk || a.off - b.off || a.kind.localeCompare(b.kind));
+        }
+
+        function renderCompareSubsection(title, rows) {
+            if (!rows.length) return '';
+            return '<div class="compare-subsection"><div class="compare-subtitle">' + esc(title) + '</div>' + rows.join('') + '</div>';
+        }
+
+        function renderSignatureDiff(leftDecl, rightDecl) {
+            const lp = parseDecodedSignature(leftDecl || '');
+            const rp = parseDecodedSignature(rightDecl || '');
+            const rows = [
+                compareRow('Declaration', leftDecl || '-', rightDecl || '-'),
+                compareRow('Return Type', lp ? lp.returnType : '-', rp ? rp.returnType : '-'),
+                compareRow('Call Conv', lp ? (lp.cc || 'default') : '-', rp ? (rp.cc || 'default') : '-'),
+                compareRow('Return Loc', lp ? (lp.retLoc || '-') : '-', rp ? (rp.retLoc || '-') : '-'),
+            ];
+
+            const largs = lp ? lp.args : [];
+            const rargs = rp ? rp.args : [];
+            const maxArgs = Math.max(largs.length, rargs.length);
+            for (let i = 0; i < maxArgs; i++) {
+                rows.push(compareRow('Arg ' + i, largs[i] || '-', rargs[i] || '-'));
+            }
+            return renderCompareSection('Type Signature', rows);
+        }
+
+        function renderFrameMemberDiff(leftFd, rightFd) {
+            const leftMembers = normalizeFrameMembers(leftFd);
+            const rightMembers = normalizeFrameMembers(rightFd);
+            const maxLen = Math.max(leftMembers.length, rightMembers.length);
+            const rows = [
+                compareRow('Members', String(leftMembers.length), String(rightMembers.length)),
+                compareRow('Frame Size', fmtHex(leftFd && leftFd.frsize), fmtHex(rightFd && rightFd.frsize)),
+                compareRow('Arg Size', fmtHex(leftFd && leftFd.argsize), fmtHex(rightFd && rightFd.argsize)),
+                compareRow('Diagnostics', analyzeFrame(leftFd || {}).map(x => x.label).join(', ') || 'layout coherent', analyzeFrame(rightFd || {}).map(x => x.label).join(', ') || 'layout coherent'),
+            ];
+
+            for (let i = 0; i < maxLen; i++) {
+                const l = leftMembers[i];
+                const r = rightMembers[i];
+                rows.push(compareRow('Member ' + i, l ? ((l.offset !== null ? fmtHex(l.offset) : '-') + ' ' + l.name + ' : ' + l.type) : '-', r ? ((r.offset !== null ? fmtHex(r.offset) : '-') + ' ' + r.name + ' : ' + r.type) : '-'));
+            }
+            return renderCompareSection('Frame Layout', rows);
+        }
+
+        function renderCommentDiff(leftMeta, rightMeta) {
+            const leftEvents = normalizeCommentEvents(leftMeta);
+            const rightEvents = normalizeCommentEvents(rightMeta);
+            const leftMap = new Map(leftEvents.map(e => [e.key, e]));
+            const rightMap = new Map(rightEvents.map(e => [e.key, e]));
+            const shared = leftEvents.filter(e => rightMap.has(e.key));
+            const onlyLeft = leftEvents.filter(e => !rightMap.has(e.key));
+            const onlyRight = rightEvents.filter(e => !leftMap.has(e.key));
+
+            const rows = [
+                compareRow('Total Comments', String(leftEvents.length), String(rightEvents.length)),
+                compareRow('Shared', String(shared.length), String(shared.length)),
+                compareRow('Unique Left/Right', String(onlyLeft.length), String(onlyRight.length)),
+                compareRow('Regular Comment', leftMeta && leftMeta.fcmt ? leftMeta.fcmt : '-', rightMeta && rightMeta.fcmt ? rightMeta.fcmt : '-'),
+                compareRow('Repeatable Comment', leftMeta && leftMeta.frptcmt ? leftMeta.frptcmt : '-', rightMeta && rightMeta.frptcmt ? rightMeta.frptcmt : '-'),
+            ];
+
+            const leftUniqueRows = onlyLeft.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off), e.kind + ' ' + e.cmt, '-'));
+            const rightUniqueRows = onlyRight.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off), '-', e.kind + ' ' + e.cmt));
+
+            return renderCompareSection('Comments', rows)
+                + renderCompareSubsection('Only In Left', leftUniqueRows)
+                + renderCompareSubsection('Only In Right', rightUniqueRows);
+        }
+
         function compareValue(a, b) {
             return String(a || '') !== String(b || '');
         }
@@ -3323,8 +3363,6 @@ pub const HOME: &str = r#"<!doctype html>
             const r = summaryFromMetadata(right);
             const lm = left.metadata || {};
             const rm = right.metadata || {};
-            const leftFrameDiag = analyzeFrame(lm.frame_desc || {});
-            const rightFrameDiag = analyzeFrame(rm.frame_desc || {});
 
             let html = '<div class="compare-diff">';
             html += '<div class="compare-head">';
@@ -3340,25 +3378,11 @@ pub const HOME: &str = r#"<!doctype html>
                 compareRow('Binaries', (left.binary_names || []).join(', '), (right.binary_names || []).join(', ')),
             ]);
 
-            html += renderCompareSection('Type Signature', [
-                compareRow('Declaration', l.typeDecl, r.typeDecl),
-                compareRow('Parser State', l.parseState, r.parseState),
-                compareRow('Parser Errors', String(l.parseErrors), String(r.parseErrors)),
-                compareRow('Decomp Time', l.vdElapsed !== null ? String(l.vdElapsed) + ' sec' : '-', r.vdElapsed !== null ? String(r.vdElapsed) + ' sec' : '-'),
-            ]);
+            html += renderSignatureDiff(l.typeDecl, r.typeDecl);
 
-            html += renderCompareSection('Frame Layout', [
-                compareRow('Members', String(l.frameMembers), String(r.frameMembers)),
-                compareRow('Frame Size', fmtHex(lm.frame_desc && lm.frame_desc.frsize), fmtHex(rm.frame_desc && rm.frame_desc.frsize)),
-                compareRow('Arg Size', fmtHex(lm.frame_desc && lm.frame_desc.argsize), fmtHex(rm.frame_desc && rm.frame_desc.argsize)),
-                compareRow('Diagnostics', leftFrameDiag.map(x => x.label).join(', ') || 'layout coherent', rightFrameDiag.map(x => x.label).join(', ') || 'layout coherent'),
-            ]);
+            html += renderFrameMemberDiff(lm.frame_desc || {}, rm.frame_desc || {});
 
-            html += renderCompareSection('Comments', [
-                compareRow('Instruction Comments', String(l.comments), String(r.comments)),
-                compareRow('Regular Comment', l.fcmt || '-', r.fcmt || '-'),
-                compareRow('Repeatable Comment', l.frptcmt || '-', r.frptcmt || '-'),
-            ]);
+            html += renderCommentDiff(lm, rm);
 
             html += renderCompareSection('Parser', [
                 compareRow('Bytes Parsed', String(lm.bytes_parsed || 0), String(rm.bytes_parsed || 0)),
@@ -4197,7 +4221,6 @@ pub const HOME: &str = r#"<!doctype html>
 
             const sections = [
                 { id: 'section-overview', label: 'Overview' },
-                { id: 'section-health', label: 'Health' },
             ];
             if (m.fcmt || m.frptcmt || m.vd_elapsed !== null) sections.push({ id: 'section-attrs', label: 'Attributes' });
             if (m.type_parts) sections.push({ id: 'section-type', label: 'Type' });
@@ -4224,8 +4247,6 @@ pub const HOME: &str = r#"<!doctype html>
             html += '<div class="detail-stat"><div class="label">Metadata State</div><div class="value">' + esc(parseBadge) + '</div></div>';
             html += '<div class="detail-stat"><div class="label">Age</div><div class="value">' + esc(fmtRelativeTs(data.ts)) + '</div></div>';
             html += '</div>';
-
-            html += renderParseHealth(m);
 
             // Binary names
             if (data.binary_names && data.binary_names.length > 0) {
