@@ -25,6 +25,7 @@ pub struct SearchHit {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
     pub binary_names: Vec<String>,
+    pub ts: u64,
     pub score: f32,
 }
 
@@ -36,6 +37,7 @@ impl SearchHit {
         func_name_demangled: String,
         lang: String,
         binary_names: Vec<String>,
+        ts: u64,
         score: f32,
     ) -> Self {
         let (func_name_demangled, lang) = if func_name_demangled.is_empty() {
@@ -53,6 +55,7 @@ impl SearchHit {
             func_name_demangled,
             lang,
             binary_names,
+            ts,
             score,
         }
     }

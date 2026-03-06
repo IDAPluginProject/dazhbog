@@ -651,20 +651,23 @@ async fn handle_lumina_get_pop<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
             // But we don't store ea64, md5, or host per popular function currently easily in index,
             // so we might need to send empty/dummy values for the pop-specific fields, or fetch them.
             // For now, we'll send dummy context info if needed, or query it.
-            let mapped: Vec<_> = results.into_iter().map(|f| {
-                (
-                    f.name,
-                    f.len_bytes,
-                    f.data,
-                    0, // pattern_type unknown
-                    Vec::new(), // pattern data
-                    f.popularity,
-                    String::new(), // hostname
-                    String::new(), // path
-                    [0u8; 16], // md5
-                    0u64, // ea64
-                )
-            }).collect();
+            let mapped: Vec<_> = results
+                .into_iter()
+                .map(|f| {
+                    (
+                        f.name,
+                        f.len_bytes,
+                        f.data,
+                        0,          // pattern_type unknown
+                        Vec::new(), // pattern data
+                        f.popularity,
+                        String::new(), // hostname
+                        String::new(), // path
+                        [0u8; 16],     // md5
+                        0u64,          // ea64
+                    )
+                })
+                .collect();
             lumina::send_lumina_pop_result(stream, &mapped).await
         }
         Err(e) => {
@@ -680,10 +683,15 @@ async fn handle_lumina_info<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
     cfg: &Config,
 ) -> io::Result<()> {
     debug!("Lumina GET_INFO request");
-    
+
     // Hardcode a default MAC and version if needed
-    let start_time = METRICS.start_time.load(std::sync::atomic::Ordering::Relaxed);
-    let current_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let start_time = METRICS
+        .start_time
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     lumina::send_lumina_info_result(
         stream,
@@ -691,7 +699,8 @@ async fn handle_lumina_info<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
         &format!("dazhbog-{}", env!("CARGO_PKG_VERSION")),
         start_time,
         current_time,
-    ).await
+    )
+    .await
 }
 
 /// Handle Lumina GetStats (0x2d) command.
@@ -703,9 +712,13 @@ async fn handle_lumina_stats<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + U
     debug!("Lumina GET_STATS request");
 
     // Gather stats
-    let nfuncs = METRICS.total_records.load(std::sync::atomic::Ordering::Relaxed);
+    let nfuncs = METRICS
+        .total_records
+        .load(std::sync::atomic::Ordering::Relaxed);
     let npushes = METRICS.pushes.load(std::sync::atomic::Ordering::Relaxed);
-    let nidbs = METRICS.unique_binaries.load(std::sync::atomic::Ordering::Relaxed);
+    let nidbs = METRICS
+        .unique_binaries
+        .load(std::sync::atomic::Ordering::Relaxed);
 
     let mut user = lumina::LuminaUser::default();
     user.name = "global".to_string();

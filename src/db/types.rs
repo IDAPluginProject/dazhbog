@@ -5,6 +5,7 @@
 pub struct FuncLatest {
     pub popularity: u32,
     pub len_bytes: u32,
+    pub ts_sec: u64,
     pub name: String,
     pub data: Vec<u8>,
 }

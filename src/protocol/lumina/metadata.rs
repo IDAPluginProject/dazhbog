@@ -4,6 +4,7 @@
 //! from Lumina servers. The metadata contains function-level information encoded as a
 //! sequence of key-value pairs (mdkey_t).
 
+use super::type_decoder::decode_tinfo_decl;
 use super::wire::{unpack_dd, unpack_dq, unpack_dw, unpack_ea64, unpack_var_bytes_capped};
 
 /// Known Lumina metadata keys (mdkey_t).
@@ -50,17 +51,23 @@ impl From<u32> for MdKey {
 pub struct MdTypeParts {
     /// True if this is a user-defined type
     pub userti: bool,
-    /// The primary type string
-    pub type_str: String,
-    /// The fields string (struct members, etc)
-    pub fields_str: String,
+    /// Raw IDA type_t bytes
+    pub type_bytes: Vec<u8>,
+    /// Raw IDA p_list bytes
+    pub fields_bytes: Vec<u8>,
+    /// Decoded declaration rendered from the raw bytes
+    pub declaration: Option<String>,
+    /// Decode failure, if any
+    pub decode_error: Option<String>,
 }
 
 /// Serialized `tinfo_t` from `MDK_FRAME_DESC`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SerializedTinfo {
-    pub type_str: String,
-    pub fields_str: String,
+    pub type_bytes: Vec<u8>,
+    pub fields_bytes: Vec<u8>,
+    pub declaration: Option<String>,
+    pub decode_error: Option<String>,
 }
 
 /// A member of a stack frame (stack variable, register save, etc).
@@ -259,22 +266,28 @@ fn parse_mdk_type(data: &[u8]) -> Option<MdTypeParts> {
     let userti = data[0] != 0;
     let rest = &data[1..];
 
-    let type_str: String;
-    let fields_str: String;
-
-    if let Some(nul_pos) = rest.iter().position(|&b| b == 0) {
-        type_str = String::from_utf8_lossy(&rest[..nul_pos]).into_owned();
-        let fstr = String::from_utf8_lossy(&rest[nul_pos + 1..]).into_owned();
-        fields_str = fstr.trim_end_matches('\0').to_string();
+    let (type_bytes, fields_bytes) = if let Some(nul_pos) = rest.iter().position(|&b| b == 0) {
+        let type_bytes = rest[..nul_pos].to_vec();
+        let mut fields_bytes = rest[nul_pos + 1..].to_vec();
+        while fields_bytes.last().copied() == Some(0) {
+            fields_bytes.pop();
+        }
+        (type_bytes, fields_bytes)
     } else {
-        type_str = String::from_utf8_lossy(rest).into_owned();
-        fields_str = String::new();
-    }
+        (rest.to_vec(), Vec::new())
+    };
+
+    let (declaration, decode_error) = match decode_tinfo_decl(&type_bytes, &fields_bytes) {
+        Ok(decl) => (Some(decl), None),
+        Err(err) => (None, Some(err)),
+    };
 
     Some(MdTypeParts {
         userti,
-        type_str,
-        fields_str,
+        type_bytes,
+        fields_bytes,
+        declaration,
+        decode_error,
     })
 }
 
@@ -406,7 +419,7 @@ impl<'a> FrameParser<'a> {
         Some(v)
     }
 
-    fn read_str(&mut self) -> Option<String> {
+    fn read_cstr_bytes(&mut self) -> Option<Vec<u8>> {
         let start = self.offset;
         let mut end = start;
         while end < self.data.len() && self.data[end] != 0 {
@@ -415,17 +428,27 @@ impl<'a> FrameParser<'a> {
         if end >= self.data.len() {
             return None; // No null terminator
         }
-        let s = String::from_utf8_lossy(&self.data[start..end]).into_owned();
+        let s = self.data[start..end].to_vec();
         self.offset = end + 1;
         Some(s)
     }
 
+    fn read_str(&mut self) -> Option<String> {
+        Some(String::from_utf8_lossy(&self.read_cstr_bytes()?).into_owned())
+    }
+
     fn read_tinfo(&mut self) -> Option<SerializedTinfo> {
-        let type_str = self.read_str()?;
-        let fields_str = self.read_str()?;
+        let type_bytes = self.read_cstr_bytes()?;
+        let fields_bytes = self.read_cstr_bytes()?;
+        let (declaration, decode_error) = match decode_tinfo_decl(&type_bytes, &fields_bytes) {
+            Ok(decl) => (Some(decl), None),
+            Err(err) => (None, Some(err)),
+        };
         Some(SerializedTinfo {
-            type_str,
-            fields_str,
+            type_bytes,
+            fields_bytes,
+            declaration,
+            decode_error,
         })
     }
 

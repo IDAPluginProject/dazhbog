@@ -254,12 +254,18 @@ impl SearchIndex {
                 .filter(|s| !s.is_empty())
                 .collect();
 
+            let ts = doc
+                .get_first(self.fields.ts)
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+
             hits.push(SearchHit::new_with_demangled(
                 key_hex,
                 func_name,
                 func_name_demangled,
                 lang,
                 binary_names,
+                ts,
                 score,
             ));
         }
@@ -340,12 +346,18 @@ impl SearchIndex {
                 .filter(|s| !s.is_empty())
                 .collect();
 
+            let ts = doc
+                .get_first(self.fields.ts)
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+
             hits.push(SearchHit::new_with_demangled(
                 key_hex,
                 func_name,
                 func_name_demangled,
                 lang,
                 binary_names,
+                ts,
                 score,
             ));
         }

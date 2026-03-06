@@ -10,12 +10,16 @@
 mod builder;
 pub mod metadata;
 mod parser;
+pub(crate) mod type_decoder;
 mod types;
 mod wire;
 
 pub use crate::common::error::LuminaError;
 pub use builder::*;
-pub use metadata::{parse_metadata, FunctionMetadata, MetadataParser, MdKey, MdTypeParts, FrameDesc, FrameMem, InsnCmt};
+pub use metadata::{
+    parse_metadata, FrameDesc, FrameMem, FunctionMetadata, InsnCmt, MdKey, MdTypeParts,
+    MetadataParser,
+};
 pub use parser::*;
 pub use types::*;
 pub use wire::*;

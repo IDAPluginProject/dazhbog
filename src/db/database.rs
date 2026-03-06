@@ -114,6 +114,7 @@ impl Database {
         Ok(Some(FuncLatest {
             popularity: rec.popularity,
             len_bytes: rec.len_bytes,
+            ts_sec: rec.ts_sec,
             name: rec.name,
             data: rec.data,
         }))
@@ -392,7 +393,7 @@ impl Database {
     pub async fn get_popular_functions(&self, limit: usize) -> io::Result<Vec<FuncLatest>> {
         let top_keys = self.rt.ctx_index.get_top_popular_keys(limit)?;
         let mut results = Vec::with_capacity(top_keys.len());
-        
+
         for (key, pop) in top_keys {
             if let Ok(Some(mut func)) = self.get_latest(key).await {
                 // Overwrite the segment popularity with the live context popularity
@@ -400,7 +401,7 @@ impl Database {
                 results.push(func);
             }
         }
-        
+
         Ok(results)
     }
 

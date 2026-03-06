@@ -27,14 +27,14 @@ pub struct SearchResponse {
 #[derive(Serialize)]
 pub struct TypePartsJson {
     pub userti: bool,
-    pub type_str: String,
-    pub fields_str: String,
+    pub declaration: Option<String>,
+    pub decode_error: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct SerializedTinfoJson {
-    pub type_str: String,
-    pub fields_str: String,
+    pub declaration: Option<String>,
+    pub decode_error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -84,6 +84,7 @@ pub struct FunctionDetailResponse {
     pub key_hex: String,
     pub name: String,
     pub popularity: u32,
+    pub ts: u64,
     pub data_size: usize,
     pub metadata: Option<ParsedMetadataJson>,
     pub binary_names: Vec<String>,
@@ -215,10 +216,7 @@ pub fn json_response<T: Serialize>(value: &T, status: StatusCode) -> Response<Fu
 }
 
 /// Handle function detail API request.
-pub async fn handle_function_detail(
-    db: Arc<Database>,
-    key_hex: &str,
-) -> Response<Full<Bytes>> {
+pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Response<Full<Bytes>> {
     // Parse the key from hex
     let key = match u128::from_str_radix(key_hex, 16) {
         Ok(k) => k,
@@ -235,7 +233,7 @@ pub async fn handle_function_detail(
         Ok(Some(func)) => {
             // Parse the metadata
             let parsed = parse_metadata(&func.data);
-            
+
             let metadata = Some(ParsedMetadataJson {
                 raw_size: parsed.raw_size,
                 bytes_parsed: parsed.bytes_parsed,
@@ -243,37 +241,49 @@ pub async fn handle_function_detail(
                 vd_elapsed: parsed.vd_elapsed,
                 fcmt: parsed.fcmt,
                 frptcmt: parsed.frptcmt,
-                insn_cmts: parsed.insn_cmts.into_iter().map(|c| InsnCmtJson {
-                    fchunk_nr: c.fchunk_nr,
-                    fchunk_off: c.fchunk_off,
-                    cmt: c.cmt,
-                }).collect(),
-                rpt_insn_cmts: parsed.rpt_insn_cmts.into_iter().map(|c| InsnCmtJson {
-                    fchunk_nr: c.fchunk_nr,
-                    fchunk_off: c.fchunk_off,
-                    cmt: c.cmt,
-                }).collect(),
+                insn_cmts: parsed
+                    .insn_cmts
+                    .into_iter()
+                    .map(|c| InsnCmtJson {
+                        fchunk_nr: c.fchunk_nr,
+                        fchunk_off: c.fchunk_off,
+                        cmt: c.cmt,
+                    })
+                    .collect(),
+                rpt_insn_cmts: parsed
+                    .rpt_insn_cmts
+                    .into_iter()
+                    .map(|c| InsnCmtJson {
+                        fchunk_nr: c.fchunk_nr,
+                        fchunk_off: c.fchunk_off,
+                        cmt: c.cmt,
+                    })
+                    .collect(),
                 type_parts: parsed.type_parts.map(|tp| TypePartsJson {
                     userti: tp.userti,
-                    type_str: tp.type_str,
-                    fields_str: tp.fields_str,
+                    declaration: tp.declaration,
+                    decode_error: tp.decode_error,
                 }),
                 frame_desc: parsed.frame_desc.map(|fd| FrameDescJson {
                     frsize: fd.frsize,
                     argsize: fd.argsize,
                     frregs: fd.frregs,
-                    members: fd.members.into_iter().map(|m| FrameMemJson {
-                        name: m.name,
-                        tinfo: m.tinfo.map(|t| SerializedTinfoJson {
-                            type_str: t.type_str,
-                            fields_str: t.fields_str,
-                        }),
-                        cmt: m.cmt,
-                        rptcmt: m.rptcmt,
-                        offset: m.offset,
-                        nbytes: m.nbytes,
-                        has_info: m.info.is_some(),
-                    }).collect(),
+                    members: fd
+                        .members
+                        .into_iter()
+                        .map(|m| FrameMemJson {
+                            name: m.name,
+                            tinfo: m.tinfo.map(|t| SerializedTinfoJson {
+                                declaration: t.declaration,
+                                decode_error: t.decode_error,
+                            }),
+                            cmt: m.cmt,
+                            rptcmt: m.rptcmt,
+                            offset: m.offset,
+                            nbytes: m.nbytes,
+                            has_info: m.info.is_some(),
+                        })
+                        .collect(),
                 }),
             });
 
@@ -285,6 +295,7 @@ pub async fn handle_function_detail(
                     key_hex: format!("{:032x}", key),
                     name: func.name,
                     popularity: func.popularity,
+                    ts: func.ts_sec,
                     data_size: func.data.len(),
                     metadata,
                     binary_names,

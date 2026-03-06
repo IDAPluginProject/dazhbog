@@ -429,7 +429,11 @@ fn list_trees(data_dir: &PathBuf) -> io::Result<()> {
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
             if name_str.starts_with("ctx.") {
                 has_ctx_trees = true;
-                println!("  {:30} {:>12} entries (NEEDS MIGRATION)", name_str, tree.len());
+                println!(
+                    "  {:30} {:>12} entries (NEEDS MIGRATION)",
+                    name_str,
+                    tree.len()
+                );
             } else {
                 println!("  {:30} {:>12} entries", name_str, tree.len());
             }
@@ -494,7 +498,10 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
 
     // Check if context_db already exists
     if ctx_db_dir.exists() {
-        log_info(&format!("context_db already exists at {}", ctx_db_dir.display()));
+        log_info(&format!(
+            "context_db already exists at {}",
+            ctx_db_dir.display()
+        ));
         log_info("If you want to re-migrate, delete it first");
         log_info(&format!("  rm -rf {}", ctx_db_dir.display()));
         return Ok(());
@@ -526,10 +533,18 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
         log_info("No ctx.* trees found in index");
         log_info("Creating empty context_db...");
         std::fs::create_dir_all(&ctx_db_dir)?;
-        let dst_db = sled::open(&ctx_db_dir)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e)))?;
-        for name in &["key_md5", "key_bins", "version_stats", "binary_meta", "key_basenames"] {
-            dst_db.open_tree(name)
+        let dst_db = sled::open(&ctx_db_dir).map_err(|e| {
+            io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e))
+        })?;
+        for name in &[
+            "key_md5",
+            "key_bins",
+            "version_stats",
+            "binary_meta",
+            "key_basenames",
+        ] {
+            dst_db
+                .open_tree(name)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
         }
         dst_db.flush()?;
@@ -546,16 +561,23 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
     log_step(2, 4, "Analyzing source trees");
     // ─────────────────────────────────────────────────────────────────────────
 
-    log_info(&format!("Found {} context trees to migrate", ctx_tree_names.len()));
+    log_info(&format!(
+        "Found {} context trees to migrate",
+        ctx_tree_names.len()
+    ));
     let mut total_entries: u64 = 0;
     for name in &ctx_tree_names {
-        let tree = src_db.open_tree(name)
+        let tree = src_db
+            .open_tree(name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
         let count = tree.len() as u64;
         total_entries += count;
         log_info(&format!("  {} ({} entries)", name, fmt_num(count)));
     }
-    log_info(&format!("Total entries to migrate: {}", fmt_num(total_entries)));
+    log_info(&format!(
+        "Total entries to migrate: {}",
+        fmt_num(total_entries)
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(3, 4, "Migrating trees");
@@ -566,16 +588,20 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
         .path(&ctx_db_dir)
         .cache_capacity(64 * 1024 * 1024)
         .open()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e)))?;
+        .map_err(|e| {
+            io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e))
+        })?;
 
     let mut overall_progress = Progress::new("Migration", total_entries);
     let mut total_migrated = 0u64;
 
     for (tree_idx, src_name) in ctx_tree_names.iter().enumerate() {
         let dst_name = src_name.strip_prefix("ctx.").unwrap_or(src_name);
-        let src_tree = src_db.open_tree(src_name)
+        let src_tree = src_db
+            .open_tree(src_name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
-        let dst_tree = dst_db.open_tree(dst_name)
+        let dst_tree = dst_db
+            .open_tree(dst_name)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {}", e)))?;
 
         let tree_len = src_tree.len() as u64;
@@ -596,7 +622,8 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
                 Ok(kv) => kv,
                 Err(_) => continue,
             };
-            dst_tree.insert(&k, &v)
+            dst_tree
+                .insert(&k, &v)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("insert: {}", e)))?;
             tree_migrated += 1;
             tree_progress.inc(1);
@@ -610,7 +637,10 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
     log_info("Flushing destination database...");
     let flush_start = Instant::now();
     dst_db.flush()?;
-    log_info(&format!("Flushed in {:.2}s", flush_start.elapsed().as_secs_f64()));
+    log_info(&format!(
+        "Flushed in {:.2}s",
+        flush_start.elapsed().as_secs_f64()
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(4, 4, "Cleaning up source database");
@@ -618,7 +648,8 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
 
     log_info("Removing ctx.* trees from index...");
     for name in &ctx_tree_names {
-        src_db.drop_tree(name.as_bytes())
+        src_db
+            .drop_tree(name.as_bytes())
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("drop_tree: {}", e)))?;
         log_info(&format!("  Dropped {}", name));
     }
@@ -627,8 +658,14 @@ fn migrate_context(data_dir: &PathBuf) -> io::Result<()> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║  CONTEXT MIGRATION COMPLETE                                  ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Entries migrated:  {:>12}                           ║", fmt_num(total_migrated));
-    println!("║  Trees processed:   {:>12}                           ║", ctx_tree_names.len());
+    println!(
+        "║  Entries migrated:  {:>12}                           ║",
+        fmt_num(total_migrated)
+    );
+    println!(
+        "║  Trees processed:   {:>12}                           ║",
+        ctx_tree_names.len()
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
 
     Ok(())
@@ -639,7 +676,10 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
     let index_dir = data_dir.join("index");
 
     if !seg_db_dir.exists() {
-        eprintln!("[ERROR] {}/segments_db directory not found.", data_dir.display());
+        eprintln!(
+            "[ERROR] {}/segments_db directory not found.",
+            data_dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -674,10 +714,16 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
     index_db
         .drop_tree("latest")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("drop latest tree: {}", e)))?;
-    log_info(&format!("Dropped in {:.2}s", drop_start.elapsed().as_secs_f64()));
+    log_info(&format!(
+        "Dropped in {:.2}s",
+        drop_start.elapsed().as_secs_f64()
+    ));
 
     let index_tree = index_db.open_tree("latest").map_err(|e| {
-        io::Error::new(io::ErrorKind::Other, format!("sled open latest tree: {}", e))
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("sled open latest tree: {}", e),
+        )
     })?;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -700,7 +746,10 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
         .filter_map(|name| seg_db.open_tree(name).ok())
         .map(|t| t.len() as u64)
         .sum();
-    log_info(&format!("Total records to scan: {}", fmt_num(total_expected)));
+    log_info(&format!(
+        "Total records to scan: {}",
+        fmt_num(total_expected)
+    ));
 
     let mut latest_by_key: HashMap<u128, (u64, u64, u8)> = HashMap::new();
     let mut total_records = 0u64;
@@ -790,9 +839,18 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
     }
 
     println!();
-    log_info(&format!("Valid records scanned: {}", fmt_num(total_records)));
-    log_info(&format!("Corrupt records skipped: {}", fmt_num(corrupt_records)));
-    log_info(&format!("Unique keys found: {}", fmt_num(latest_by_key.len() as u64)));
+    log_info(&format!(
+        "Valid records scanned: {}",
+        fmt_num(total_records)
+    ));
+    log_info(&format!(
+        "Corrupt records skipped: {}",
+        fmt_num(corrupt_records)
+    ));
+    log_info(&format!(
+        "Unique keys found: {}",
+        fmt_num(latest_by_key.len() as u64)
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(4, 4, "Writing index entries");
@@ -821,13 +879,22 @@ fn rebuild_index(data_dir: &PathBuf) -> io::Result<()> {
     log_info("Flushing to disk...");
     let flush_start = Instant::now();
     index_db.flush()?;
-    log_info(&format!("Flushed in {:.2}s", flush_start.elapsed().as_secs_f64()));
+    log_info(&format!(
+        "Flushed in {:.2}s",
+        flush_start.elapsed().as_secs_f64()
+    ));
 
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║  INDEX REBUILD COMPLETE                                      ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Indexed keys:    {:>12}                              ║", fmt_num(indexed));
-    println!("║  Deleted keys:    {:>12}                              ║", fmt_num(deleted));
+    println!(
+        "║  Indexed keys:    {:>12}                              ║",
+        fmt_num(indexed)
+    );
+    println!(
+        "║  Deleted keys:    {:>12}                              ║",
+        fmt_num(deleted)
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
 
     Ok(())
@@ -887,7 +954,10 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
     let ctx_db_dir = data_dir.join("context_db");
 
     if !ctx_db_dir.exists() {
-        eprintln!("[ERROR] {}/context_db directory not found.", data_dir.display());
+        eprintln!(
+            "[ERROR] {}/context_db directory not found.",
+            data_dir.display()
+        );
         eprintln!("        Run --migrate-context first to create it.");
         std::process::exit(1);
     }
@@ -909,23 +979,29 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
     let key_bins = db
         .open_tree("key_bins")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open key_bins: {}", e)))?;
-    let binary_meta = db.open_tree("binary_meta").map_err(|e| {
-        io::Error::new(io::ErrorKind::Other, format!("open binary_meta: {}", e))
-    })?;
-    let key_basenames = db.open_tree("key_basenames").map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("open key_basenames: {}", e),
-        )
-    })?;
+    let binary_meta = db
+        .open_tree("binary_meta")
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open binary_meta: {}", e)))?;
+    let key_basenames = db
+        .open_tree("key_basenames")
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open key_basenames: {}", e)))?;
 
     let key_bins_count = key_bins.len() as u64;
     let binary_meta_count = binary_meta.len() as u64;
     let basenames_before = key_basenames.len() as u64;
 
-    log_info(&format!("key_bins:        {} entries", fmt_num(key_bins_count)));
-    log_info(&format!("binary_meta:     {} entries", fmt_num(binary_meta_count)));
-    log_info(&format!("key_basenames:   {} entries (before)", fmt_num(basenames_before)));
+    log_info(&format!(
+        "key_bins:        {} entries",
+        fmt_num(key_bins_count)
+    ));
+    log_info(&format!(
+        "binary_meta:     {} entries",
+        fmt_num(binary_meta_count)
+    ));
+    log_info(&format!(
+        "key_basenames:   {} entries (before)",
+        fmt_num(basenames_before)
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(2, 4, "Building MD5 -> basename lookup");
@@ -952,7 +1028,10 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
         }
     }
     progress.finish();
-    log_info(&format!("Found {} binaries with basenames", fmt_num(md5_to_basename.len() as u64)));
+    log_info(&format!(
+        "Found {} binaries with basenames",
+        fmt_num(md5_to_basename.len() as u64)
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(3, 4, "Populating key_basenames");
@@ -999,16 +1078,28 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
     log_info("Flushing to disk...");
     let flush_start = Instant::now();
     db.flush()?;
-    log_info(&format!("Flushed in {:.2}s", flush_start.elapsed().as_secs_f64()));
+    log_info(&format!(
+        "Flushed in {:.2}s",
+        flush_start.elapsed().as_secs_f64()
+    ));
 
     let basenames_after = key_basenames.len() as u64;
 
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║  BASENAMES REBUILD COMPLETE                                  ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Keys processed:     {:>12}                          ║", fmt_num(key_bins_count));
-    println!("║  Keys populated:     {:>12}                          ║", fmt_num(populated));
-    println!("║  key_basenames now:  {:>12}                          ║", fmt_num(basenames_after));
+    println!(
+        "║  Keys processed:     {:>12}                          ║",
+        fmt_num(key_bins_count)
+    );
+    println!(
+        "║  Keys populated:     {:>12}                          ║",
+        fmt_num(populated)
+    );
+    println!(
+        "║  key_basenames now:  {:>12}                          ║",
+        fmt_num(basenames_after)
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!("\nRun --rebuild-search to update the search index with basenames.");
 
@@ -1114,7 +1205,10 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
     let ctx_db_dir = data_dir.join("context_db");
 
     if !seg_db_dir.exists() {
-        eprintln!("[ERROR] {}/segments_db directory not found.", data_dir.display());
+        eprintln!(
+            "[ERROR] {}/segments_db directory not found.",
+            data_dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -1130,8 +1224,9 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
 
     let ctx_basenames_tree: Option<sled::Tree> = if ctx_db_dir.exists() {
         log_info(&format!("Opening context_db at {}", ctx_db_dir.display()));
-        let ctx_db = sled::open(&ctx_db_dir)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e)))?;
+        let ctx_db = sled::open(&ctx_db_dir).map_err(|e| {
+            io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e))
+        })?;
         match ctx_db.open_tree("key_basenames") {
             Ok(tree) => {
                 let count = tree.len();
@@ -1139,7 +1234,10 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
                     log_info("[WARN] key_basenames is empty, run --rebuild-basenames first");
                     None
                 } else {
-                    log_info(&format!("Opened key_basenames tree ({} entries)", fmt_num(count as u64)));
+                    log_info(&format!(
+                        "Opened key_basenames tree ({} entries)",
+                        fmt_num(count as u64)
+                    ));
                     Some(tree)
                 }
             }
@@ -1177,7 +1275,10 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
         .filter_map(|name| seg_db.open_tree(name).ok())
         .map(|t| t.len() as u64)
         .sum();
-    log_info(&format!("Total records to scan: {}", fmt_num(total_expected)));
+    log_info(&format!(
+        "Total records to scan: {}",
+        fmt_num(total_expected)
+    ));
 
     let mut latest_by_key: HashMap<u128, (u64, String)> = HashMap::new();
     let mut total_records = 0u64;
@@ -1266,8 +1367,14 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
     }
 
     println!();
-    log_info(&format!("Valid records scanned: {}", fmt_num(total_records)));
-    log_info(&format!("Unique keys to index: {}", fmt_num(latest_by_key.len() as u64)));
+    log_info(&format!(
+        "Valid records scanned: {}",
+        fmt_num(total_records)
+    ));
+    log_info(&format!(
+        "Unique keys to index: {}",
+        fmt_num(latest_by_key.len() as u64)
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(3, 5, "Creating search index");
@@ -1381,8 +1488,16 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
     }
     progress.finish();
 
-    log_info(&format!("Demangled: {} ({:.1}%)", fmt_num(demangled_count), demangled_count as f64 / indexed as f64 * 100.0));
-    log_info(&format!("With binary names: {} ({:.1}%)", fmt_num(with_basenames), with_basenames as f64 / indexed as f64 * 100.0));
+    log_info(&format!(
+        "Demangled: {} ({:.1}%)",
+        fmt_num(demangled_count),
+        demangled_count as f64 / indexed as f64 * 100.0
+    ));
+    log_info(&format!(
+        "With binary names: {} ({:.1}%)",
+        fmt_num(with_basenames),
+        with_basenames as f64 / indexed as f64 * 100.0
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(5, 5, "Committing index");
@@ -1393,14 +1508,26 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
     writer
         .commit()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("commit: {}", e)))?;
-    log_info(&format!("Committed in {:.2}s", commit_start.elapsed().as_secs_f64()));
+    log_info(&format!(
+        "Committed in {:.2}s",
+        commit_start.elapsed().as_secs_f64()
+    ));
 
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║  SEARCH INDEX REBUILD COMPLETE                               ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Functions indexed:   {:>12}                         ║", fmt_num(indexed));
-    println!("║  Demangled:           {:>12}                         ║", fmt_num(demangled_count));
-    println!("║  With binary names:   {:>12}                         ║", fmt_num(with_basenames));
+    println!(
+        "║  Functions indexed:   {:>12}                         ║",
+        fmt_num(indexed)
+    );
+    println!(
+        "║  Demangled:           {:>12}                         ║",
+        fmt_num(demangled_count)
+    );
+    println!(
+        "║  With binary names:   {:>12}                         ║",
+        fmt_num(with_basenames)
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
 
     Ok(())
@@ -1441,7 +1568,10 @@ fn rebuild_all(data_dir: &PathBuf) -> io::Result<()> {
     println!("\n\n╔══════════════════════════════════════════════════════════════╗");
     println!("║  FULL REBUILD COMPLETE                                       ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Total time: {:>10.2}s                                    ║", elapsed.as_secs_f64());
+    println!(
+        "║  Total time: {:>10.2}s                                    ║",
+        elapsed.as_secs_f64()
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!("\nAll databases have been rebuilt. You can now start the server.");
 
@@ -1499,7 +1629,10 @@ fn main() -> io::Result<()> {
     let temp_dir = PathBuf::from("data.recovered");
 
     if !seg_db_dir.exists() {
-        eprintln!("[ERROR] {}/segments_db directory not found.", data_dir.display());
+        eprintln!(
+            "[ERROR] {}/segments_db directory not found.",
+            data_dir.display()
+        );
         eprintln!("        This tool requires the new sled-based storage.");
         eprintln!("        If you have old seg.*.dat files, run the main dazhbog server once to migrate them.");
         std::process::exit(1);
@@ -1534,7 +1667,10 @@ fn main() -> io::Result<()> {
         .sum();
 
     log_info(&format!("Found {} segment trees", tree_names.len()));
-    log_info(&format!("Total records to scan: {}", fmt_num(total_expected)));
+    log_info(&format!(
+        "Total records to scan: {}",
+        fmt_num(total_expected)
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(2, 5, "Scanning segment records");
@@ -1651,8 +1787,14 @@ fn main() -> io::Result<()> {
 
     println!();
     log_info(&format!("Valid records scanned: {}", fmt_num(total_valid)));
-    log_info(&format!("Corrupt records skipped: {}", fmt_num(corrupt_records)));
-    log_info(&format!("Unique keys found: {}", fmt_num(all_records.len() as u64)));
+    log_info(&format!(
+        "Corrupt records skipped: {}",
+        fmt_num(corrupt_records)
+    ));
+    log_info(&format!(
+        "Unique keys found: {}",
+        fmt_num(all_records.len() as u64)
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
     log_step(3, 5, "Deduplicating records");
@@ -1676,8 +1818,14 @@ fn main() -> io::Result<()> {
     }
     progress.finish();
 
-    log_info(&format!("Records to recover: {}", fmt_num(final_records.len() as u64)));
-    log_info(&format!("Deleted records skipped: {}", fmt_num(deleted_count)));
+    log_info(&format!(
+        "Records to recover: {}",
+        fmt_num(final_records.len() as u64)
+    ));
+    log_info(&format!(
+        "Deleted records skipped: {}",
+        fmt_num(deleted_count)
+    ));
 
     if final_records.is_empty() {
         println!("\n[WARN] No records to recover!");
@@ -1717,7 +1865,10 @@ fn main() -> io::Result<()> {
     log_info("Flushing to disk...");
     let flush_start = Instant::now();
     recovered_db.flush()?;
-    log_info(&format!("Flushed in {:.2}s", flush_start.elapsed().as_secs_f64()));
+    log_info(&format!(
+        "Flushed in {:.2}s",
+        flush_start.elapsed().as_secs_f64()
+    ));
     drop(recovered_db);
 
     log_info(&format!("Written {} bytes", fmt_num(bytes_written)));
@@ -1732,7 +1883,10 @@ fn main() -> io::Result<()> {
     }
     std::fs::create_dir_all(&backup_dir)?;
     std::fs::rename(&seg_db_dir, backup_dir.join("segments_db"))?;
-    log_info(&format!("Old data backed up to {}", backup_dir.join("segments_db").display()));
+    log_info(&format!(
+        "Old data backed up to {}",
+        backup_dir.join("segments_db").display()
+    ));
 
     log_info("Moving recovered data into place...");
     std::fs::rename(&temp_dir, &seg_db_dir)?;
@@ -1743,9 +1897,18 @@ fn main() -> io::Result<()> {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║  FULL RECOVERY COMPLETE                                      ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Records recovered:   {:>12}                         ║", fmt_num(final_records.len() as u64));
-    println!("║  Data written:        {:>12}                         ║", fmt_num(bytes_written));
-    println!("║  Total time:          {:>10.2}s                           ║", elapsed.as_secs_f64());
+    println!(
+        "║  Records recovered:   {:>12}                         ║",
+        fmt_num(final_records.len() as u64)
+    );
+    println!(
+        "║  Data written:        {:>12}                         ║",
+        fmt_num(bytes_written)
+    );
+    println!(
+        "║  Total time:          {:>10.2}s                           ║",
+        elapsed.as_secs_f64()
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!("\nBackup location: {}", backup_dir.display());
     println!("You can now restart the dazhbog server.");

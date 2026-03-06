@@ -128,7 +128,7 @@ pub async fn send_lumina_info_result<W: AsyncWriteExt + Unpin>(
     // peer_conn_t client
     payload.extend_from_slice(&pack_dd(1)); // session_id
     payload.extend_from_slice(b"dazhbog-client\0"); // peer_name
-    // lumina_user_t
+                                                    // lumina_user_t
     payload.extend_from_slice(b"\0\0\0"); // license_info: id, name, email
     payload.extend_from_slice(b"\0"); // name
     payload.extend_from_slice(&pack_dd(0)); // karma
@@ -154,7 +154,7 @@ pub async fn send_lumina_stats_result<W: AsyncWriteExt + Unpin>(
 ) -> io::Result<()> {
     let mut payload = BytesMut::new();
     payload.extend_from_slice(&pack_dd(stats.len() as u32));
-    
+
     for stat in stats {
         // lumina_user_t
         payload.extend_from_slice(stat.user.license_info.id.as_bytes());
@@ -196,7 +196,18 @@ pub async fn send_lumina_fail<W: AsyncWriteExt + Unpin>(
 /// Send a Lumina Pop Result response (0x13).
 pub async fn send_lumina_pop_result<W: AsyncWriteExt + Unpin>(
     w: &mut W,
-    results: &[(String, u32, Vec<u8>, u32, Vec<u8>, u32, String, String, [u8; 16], u64)],
+    results: &[(
+        String,
+        u32,
+        Vec<u8>,
+        u32,
+        Vec<u8>,
+        u32,
+        String,
+        String,
+        [u8; 16],
+        u64,
+    )],
 ) -> io::Result<()> {
     // (name, size, metadata, pattern_type, pattern_data, freq, hostname, file_path, md5, ea64)
     let mut payload = BytesMut::new();
@@ -208,28 +219,28 @@ pub async fn send_lumina_pop_result<W: AsyncWriteExt + Unpin>(
         payload.extend_from_slice(&pack_dd(*size));
         payload.extend_from_slice(&pack_dd(metadata.len() as u32));
         payload.extend_from_slice(metadata);
-        
+
         // pattern_id_t
         payload.extend_from_slice(&pack_dd(*pat_type));
         payload.extend_from_slice(&pack_dd(pat_data.len() as u32));
         payload.extend_from_slice(pat_data);
-        
+
         // frequency
         payload.extend_from_slice(&pack_dd(*freq));
-        
+
         // pop_fun_t specific
         payload.extend_from_slice(host.as_bytes());
         payload.extend_from_slice(b"\0");
-        
+
         // input_file_t
         payload.extend_from_slice(path.as_bytes());
         payload.extend_from_slice(b"\0");
         payload.extend_from_slice(md5);
-        
+
         // ea64
         payload.extend_from_slice(&pack_ea64(*ea));
     }
-    
+
     write_lumina_packet(w, 0x13, &payload).await
 }
 
