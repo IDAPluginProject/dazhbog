@@ -2210,9 +2210,46 @@ pub const HOME: &str = r#"<!doctype html>
             padding: var(--space-md);
         }
 
+        .controlflow-matrix {
+            border: 1px solid var(--border-subtle);
+            background: var(--border-dim);
+            margin-bottom: var(--space-md);
+        }
+
+        .controlflow-matrix-row {
+            display: grid;
+            grid-template-columns: 150px minmax(0, 1fr);
+            gap: 1px;
+            background: var(--border-dim);
+        }
+
+        .controlflow-matrix-row + .controlflow-matrix-row {
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .controlflow-matrix-cell {
+            background: var(--bg-panel);
+            padding: 8px 10px;
+            min-width: 0;
+        }
+
+        .controlflow-matrix-label {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .controlflow-matrix-value {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+
         .controlflow-hero {
-            border: 1px solid rgba(255, 170, 0, 0.28);
-            background: linear-gradient(180deg, rgba(255,170,0,0.12), rgba(255,170,0,0.03));
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
             padding: var(--space-md);
             margin-bottom: var(--space-md);
         }
@@ -2253,9 +2290,49 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         .switch-card {
-            border: 1px solid rgba(0, 255, 136, 0.18);
-            background: linear-gradient(180deg, rgba(0,255,136,0.08), rgba(0,255,136,0.02));
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-base);
             padding: 10px;
+        }
+
+        .switch-group {
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-base);
+        }
+
+        .switch-group.collapsed .switch-group-body {
+            display: none;
+        }
+
+        .switch-group-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.01);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .switch-group-body {
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .switch-group-title {
+            color: var(--accent);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .switch-card:hover,
+        .switch-card.linked {
+            border-color: rgba(0, 255, 136, 0.28);
+            background: rgba(0, 255, 136, 0.04);
         }
 
         .switch-card-head {
@@ -2324,6 +2401,59 @@ pub const HOME: &str = r#"<!doctype html>
             text-transform: uppercase;
         }
 
+        .jumptable-coverage {
+            border-top: 1px solid var(--border-subtle);
+            padding: 10px 12px 8px;
+            background: rgba(255,255,255,0.01);
+        }
+
+        .jumptable-coverage-strip {
+            display: grid;
+            grid-template-columns: repeat(24, minmax(0, 1fr));
+            gap: 3px;
+            margin-top: 8px;
+        }
+
+        .coverage-bin {
+            height: 14px;
+            border: 1px solid var(--border-dim);
+            background: var(--bg-base);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .coverage-bin.fill::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(0,255,136,0.55), rgba(0,255,136,0.2));
+        }
+
+        .coverage-bin.default::before {
+            background: linear-gradient(180deg, rgba(255,170,0,0.65), rgba(255,170,0,0.2));
+        }
+
+        .coverage-meta {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .jumptable-more {
+            margin-top: 8px;
+        }
+
+        .controlflow-toggle {
+            background: var(--bg-base);
+            border: 1px solid var(--border-dim);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 4px 8px;
+            cursor: pointer;
+        }
+
         .jumptable-ref-list {
             display: flex;
             flex-direction: column;
@@ -2331,7 +2461,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         .jumptable-ref {
             display: grid;
-            grid-template-columns: 120px minmax(0, 1fr);
+            grid-template-columns: 96px minmax(0, 1fr);
             gap: 1px;
             background: var(--border-dim);
         }
@@ -2343,20 +2473,21 @@ pub const HOME: &str = r#"<!doctype html>
         .jumptable-ref-meta,
         .jumptable-ref-body {
             background: var(--bg-panel);
-            padding: 8px 10px;
+            padding: 6px 8px;
             min-width: 0;
         }
 
         .jumptable-ref-meta {
             color: var(--text-dim);
             font-family: var(--font-mono);
-            font-size: 10px;
+            font-size: 9px;
+            line-height: 1.35;
         }
 
         .jumptable-ref-body {
             color: var(--text-secondary);
             font-family: var(--font-mono);
-            font-size: 12px;
+            font-size: 11px;
             overflow-wrap: anywhere;
         }
 
@@ -2384,11 +2515,45 @@ pub const HOME: &str = r#"<!doctype html>
 
         .jumptable-graph {
             border: 1px solid var(--border-subtle);
-            background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));
+            background: var(--bg-base);
             padding: 10px;
             display: flex;
             flex-direction: column;
             gap: 8px;
+        }
+
+        .jumptable-ref.linked,
+        .comment-item.linked {
+            box-shadow: inset 2px 0 0 rgba(0, 255, 136, 0.7);
+            background: rgba(0, 255, 136, 0.04);
+        }
+
+        .controlflow-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .switch-links {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .relation-summary {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .relation-detail {
+            color: var(--text-dim);
+            font-size: 10px;
+            line-height: 1.3;
         }
 
         .jumptable-graph-node {
@@ -2733,6 +2898,10 @@ pub const HOME: &str = r#"<!doctype html>
 
             .controlflow-grid,
             .jumptable-ref {
+                grid-template-columns: 1fr;
+            }
+
+            .controlflow-matrix-row {
                 grid-template-columns: 1fr;
             }
         }
@@ -3337,6 +3506,8 @@ pub const HOME: &str = r#"<!doctype html>
         let compareBaselineKey = null;
         let draggingCompareKey = null;
         const compareHydrating = new Set();
+        const expandedJumpTables = new Set();
+        const collapsedSwitchGroups = new Set();
         let compareShowAll = false;
         let compareMode = 'summary';
 
@@ -3957,6 +4128,49 @@ pub const HOME: &str = r#"<!doctype html>
                 return '<div class="metadata-empty">No switch or jumptable annotations</div>';
             }
 
+            function controlFlowId(kind, chunk, off) {
+                return 'cf-' + String(kind || '').toLowerCase() + '-' + chunk + '-' + off;
+            }
+
+            function summarizeRelation(ref) {
+                if (ref.source_role === 'default') return 'Default arm';
+                if (ref.source_role === 'case' && ref.case_labels && ref.case_labels.length) {
+                    return ref.case_labels.length + ' case bucket' + (ref.case_labels.length === 1 ? '' : 's');
+                }
+                return 'Entry site';
+            }
+
+            const switchLinks = switches.map(sw => {
+                let best = null;
+                tables.forEach(jt => {
+                    jt.refs.forEach(ref => {
+                        if (ref.fchunk_nr !== sw.fchunk_nr) return;
+                        const dist = Math.abs(Number(ref.fchunk_off) - Number(sw.fchunk_off));
+                        if (!best || dist < best.dist) {
+                            best = { addr: jt.addr, dist };
+                        }
+                    });
+                });
+                return best && best.dist <= 0x80 ? best.addr : null;
+            });
+
+            const tableSwitchCounts = new Map();
+            switchLinks.forEach(addr => {
+                if (!addr) return;
+                tableSwitchCounts.set(addr, (tableSwitchCounts.get(addr) || 0) + 1);
+            });
+
+            const groupedSwitches = new Map();
+            switches.forEach((sw, idx) => {
+                const addr = switchLinks[idx] || '__unlinked__';
+                if (!groupedSwitches.has(addr)) groupedSwitches.set(addr, []);
+                groupedSwitches.get(addr).push(sw);
+            });
+
+            function renderCopyButton(label, value) {
+                return '<button class="controlflow-toggle" onclick="copyText(\'' + esc(value) + '\')">' + esc(label) + '</button>';
+            }
+
             let html = '';
             if (cf.dominant) {
                 html += '<div class="controlflow-hero">';
@@ -3972,16 +4186,45 @@ pub const HOME: &str = r#"<!doctype html>
                 html += '</div></div></div>';
             }
 
+            if (groupedSwitches.size > 1 || tables.length > 1) {
+                html += '<div class="controlflow-matrix">';
+                html += '<div class="controlflow-matrix-row"><div class="controlflow-matrix-cell"><div class="controlflow-matrix-label">Switch Groups</div></div><div class="controlflow-matrix-cell"><div class="controlflow-matrix-value">' + esc(String(groupedSwitches.size)) + '</div></div></div>';
+                html += '<div class="controlflow-matrix-row"><div class="controlflow-matrix-cell"><div class="controlflow-matrix-label">Jump Tables</div></div><div class="controlflow-matrix-cell"><div class="controlflow-matrix-value">' + esc(String(tables.length)) + '</div></div></div>';
+                Array.from(groupedSwitches.entries()).forEach(([addr, group], idx) => {
+                    const label = addr === '__unlinked__' ? 'Unlinked switches' : ('Group ' + (idx + 1));
+                    const value = addr === '__unlinked__'
+                        ? (group.length + ' switch sites')
+                        : (addr + ' // ' + group.length + ' switch sites');
+                    html += '<div class="controlflow-matrix-row"><div class="controlflow-matrix-cell"><div class="controlflow-matrix-label">' + esc(label) + '</div></div><div class="controlflow-matrix-cell"><div class="controlflow-matrix-value">' + esc(value) + '</div></div></div>';
+                });
+                html += '</div>';
+            }
+
             html += '<div class="controlflow-grid">';
             html += '<div class="controlflow-panel"><div class="detail-label">Switch Sites</div><div class="controlflow-stack">';
             if (switches.length === 0) {
                 html += '<div class="metadata-empty">No explicit switch comments</div>';
             } else {
-                switches.forEach(sw => {
-                    html += '<div class="switch-card">';
-                    html += '<div class="switch-card-head"><span class="switch-title">' + esc(sw.kind) + ' switch</span><span class="switch-meta">chunk ' + esc(String(sw.fchunk_nr)) + ' @ ' + esc(fmtHex(sw.fchunk_off)) + '</span></div>';
-                    html += '<div class="switch-desc">' + esc(sw.description) + '</div>';
+                Array.from(groupedSwitches.entries()).forEach(([addr, group], groupIdx) => {
+                    const groupId = 'swgrp-' + groupIdx;
+                    const collapsed = collapsedSwitchGroups.has(groupId);
+                    html += '<div class="switch-group' + (collapsed ? ' collapsed' : '') + '">';
+                    html += '<div class="switch-group-head" onclick="toggleSwitchGroup(\'' + groupId + '\')">';
+                    html += '<span class="switch-group-title">' + (addr === '__unlinked__' ? 'Unlinked Switches' : ('Switch Cluster ' + (groupIdx + 1))) + '</span>';
+                    html += '<span class="switch-meta">' + esc(String(group.length)) + ' sites' + (addr !== '__unlinked__' ? (' // ' + addr) : '') + '</span>';
                     html += '</div>';
+                    html += '<div class="switch-group-body">';
+                    group.forEach(sw => {
+                        const linkAddr = addr === '__unlinked__' ? null : addr;
+                        html += '<div class="switch-card' + (linkAddr ? ' linked' : '') + '" onmouseenter="hoverControlFlowLink(\'' + controlFlowId(sw.kind, sw.fchunk_nr, sw.fchunk_off) + '\')" onmouseleave="clearControlFlowHover()">';
+                        html += '<div class="switch-card-head"><span class="switch-title">' + esc(sw.kind) + ' switch</span><span class="switch-meta">chunk ' + esc(String(sw.fchunk_nr)) + ' @ ' + esc(fmtHex(sw.fchunk_off)) + '</span></div>';
+                        html += '<div class="switch-desc">' + esc(sw.description) + '</div>';
+                        if (linkAddr) {
+                            html += '<div class="switch-links"><span class="frame-chip">table ' + esc(linkAddr) + '</span><button class="controlflow-toggle" onclick="jumpToControlFlowTable(\'' + esc(linkAddr) + '\')">Open Table</button></div>';
+                        }
+                        html += '</div>';
+                    });
+                    html += '</div></div>';
                 });
             }
             html += '</div></div>';
@@ -3991,34 +4234,60 @@ pub const HOME: &str = r#"<!doctype html>
                 html += '<div class="metadata-empty">No jumptable comments</div>';
             } else {
                 tables.forEach(jt => {
-                    html += '<div class="jumptable-card">';
+                    const expanded = expandedJumpTables.has(jt.addr);
+                    const visibleRefs = expanded ? jt.refs : jt.refs.slice(0, 6);
+                    html += '<div class="jumptable-card" id="jt-' + esc(jt.addr) + '">';
                     html += '<div class="jumptable-head">';
                     html += '<div class="jumptable-title">' + esc(jt.addr) + '</div>';
                     html += '<div class="jumptable-badges">';
                     html += '<span class="frame-chip">' + esc(String(jt.refs.length)) + ' refs</span>';
                     html += '<span class="frame-chip">' + esc(String(jt.case_count)) + ' cases</span>';
+                    if (tableSwitchCounts.get(jt.addr)) html += '<span class="frame-chip">' + esc(String(tableSwitchCounts.get(jt.addr))) + ' linked switches</span>';
+                    if (jt.sparse) html += '<span class="frame-chip warn">sparse</span>';
                     if (jt.has_default) html += '<span class="frame-chip warn">default case</span>';
                     html += '</div></div>';
+                    html += '<div class="controlflow-actions">' + renderCopyButton('Copy Addr', jt.addr) + renderCopyButton('Copy Cases', (jt.all_case_labels || []).join(', ')) + '<button class="controlflow-toggle" onclick="openAllJumpRefs(\'' + esc(jt.addr) + '\')">Open All Refs</button></div>';
+                    html += '<div class="jumptable-coverage">';
+                    html += '<div class="detail-label" style="margin:0;">Case Coverage</div>';
+                    if (jt.coverage_runs && jt.coverage_runs.length > 0) {
+                        html += '<div class="coverage-meta">' + jt.coverage_runs.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
+                        html += '<div class="jumptable-coverage-strip">';
+                        const bins = jt.coverage_runs.slice(0, 24);
+                        bins.forEach(label => {
+                            html += '<div class="coverage-bin fill' + (label === 'default' ? ' default' : '') + '" title="' + esc(label) + '"></div>';
+                        });
+                        for (let i = bins.length; i < 24; i++) {
+                            html += '<div class="coverage-bin"></div>';
+                        }
+                        html += '</div>';
+                    } else {
+                        html += '<div class="metadata-empty">No parsed case intervals</div>';
+                    }
+                    html += '</div>';
                     if (jt.all_case_labels && jt.all_case_labels.length > 0) {
                         html += '<div class="jumptable-cluster-note">Cluster cases</div>';
                         html += '<div class="jumptable-case-strip" style="padding:0 12px 8px;">' + jt.all_case_labels.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
                     }
                     html += '<div class="jumptable-ref-list">';
-                    jt.refs.forEach(ref => {
-                        const rowId = 'cf-' + ref.kind.toLowerCase() + '-' + ref.fchunk_nr + '-' + ref.fchunk_off;
-                        html += '<div class="jumptable-ref">';
+                    visibleRefs.forEach(ref => {
+                        const rowId = controlFlowId(ref.kind, ref.fchunk_nr, ref.fchunk_off);
+                        html += '<div class="jumptable-ref" data-controlflow-id="' + rowId + '" onmouseenter="hoverControlFlowLink(\'' + rowId + '\')" onmouseleave="clearControlFlowHover()">';
                         html += '<div class="jumptable-ref-meta">' + esc(ref.kind) + '<br>chunk ' + esc(String(ref.fchunk_nr)) + '<br>@ <a href="javascript:void(0)" onclick="focusCommentRow(&quot;' + rowId + '&quot;, null, true);jumpToDetailSection(&quot;section-comments&quot;);setActiveDetailNav(&quot;section-comments&quot;);" style="color:var(--accent);text-decoration:none;">' + esc(fmtHex(ref.fchunk_off)) + '</a></div>';
-                        html += '<div class="jumptable-ref-body">' + esc(ref.relation || 'entry');
+                        html += '<div class="jumptable-ref-body"><div class="relation-summary"><span class="frame-chip">' + esc(ref.source_role) + '</span><span class="frame-chip">' + esc(summarizeRelation(ref)) + '</span></div>';
                         if (ref.case_labels && ref.case_labels.length > 0) {
                             html += '<div class="jumptable-case-strip">' + ref.case_labels.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
                         }
                         if (ref.lane_size && ref.lane_size > 1) {
                             html += '<div class="jumptable-cluster-note">cluster lane x' + esc(String(ref.lane_size)) + '</div>';
                         }
+                        html += '<div class="relation-detail">' + esc(ref.kind) + ' source at chunk ' + esc(String(ref.fchunk_nr)) + ' offset ' + esc(fmtHex(ref.fchunk_off)) + '</div>';
                         html += '</div>';
                         html += '</div>';
                     });
                     html += '</div>';
+                    if (jt.refs.length > 6) {
+                        html += '<div class="jumptable-more"><button class="controlflow-toggle" onclick="toggleJumpTableExpand(&quot;' + esc(jt.addr) + '&quot;)">' + (expanded ? 'Show Less' : ('Show All ' + jt.refs.length + ' Refs')) + '</button></div>';
+                    }
                     html += '<div class="jumptable-graph">';
                     html += '<div class="jumptable-graph-node root"><div class="jumptable-graph-label">Jump Table</div><div class="jumptable-graph-value">' + esc(jt.addr) + '</div></div>';
                     html += '<div class="jumptable-graph-edge">';
@@ -4670,7 +4939,7 @@ pub const HOME: &str = r#"<!doctype html>
 
                 html += '<div class="comment-list">';
                 list.forEach(ev => {
-                    html += '<div class="comment-item" id="' + ev.rowId + '" data-controlflow-id="' + ev.controlFlowRowId + '" onmouseenter="pulseCommentMarker(\'' + ev.markerId + '\')" onclick="focusCommentRow(\'' + ev.rowId + '\', \'' + ev.markerId + '\', false)">';
+                    html += '<div class="comment-item" id="' + ev.rowId + '" data-controlflow-id="' + ev.controlFlowRowId + '" onmouseenter="pulseCommentMarker(\'' + ev.markerId + '\');hoverControlFlowLink(\'' + ev.controlFlowRowId + '\')" onmouseleave="clearControlFlowHover()" onclick="focusCommentRow(\'' + ev.rowId + '\', \'' + ev.markerId + '\', false)">';
                     html += '<div class="comment-item-head">';
                     html += '<span class="comment-kind' + (ev.kind === 'rpt' ? ' repeatable' : '') + '">' + (ev.kind === 'rpt' ? 'RPT' : 'REG') + '</span>';
                     html += '<span>' + fmtHex(ev.off) + '</span>';
@@ -4766,6 +5035,40 @@ pub const HOME: &str = r#"<!doctype html>
             if (collapsedCommentChunks.has(chunkId)) collapsedCommentChunks.delete(chunkId);
             else collapsedCommentChunks.add(chunkId);
             if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function toggleJumpTableExpand(addr) {
+            if (expandedJumpTables.has(addr)) expandedJumpTables.delete(addr);
+            else expandedJumpTables.add(addr);
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function toggleSwitchGroup(groupId) {
+            if (collapsedSwitchGroups.has(groupId)) collapsedSwitchGroups.delete(groupId);
+            else collapsedSwitchGroups.add(groupId);
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function jumpToControlFlowTable(addr) {
+            const node = document.getElementById('jt-' + addr);
+            if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function openAllJumpRefs(addr) {
+            expandedJumpTables.add(addr);
+            if (currentDetailData) {
+                renderFunctionDetail(currentDetailData);
+                setTimeout(() => jumpToControlFlowTable(addr), 0);
+            }
+        }
+
+        function hoverControlFlowLink(controlId) {
+            clearControlFlowHover();
+            document.querySelectorAll('[data-controlflow-id="' + controlId + '"]').forEach(node => node.classList.add('linked'));
+        }
+
+        function clearControlFlowHover() {
+            document.querySelectorAll('.linked').forEach(node => node.classList.remove('linked'));
         }
 
         function parseHash() {

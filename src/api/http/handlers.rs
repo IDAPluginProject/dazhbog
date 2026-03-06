@@ -146,6 +146,67 @@ fn normalize_case_labels(labels: &[String]) -> Vec<String> {
     out
 }
 
+fn expand_case_labels(labels: &[String]) -> Vec<i64> {
+    let mut out = Vec::new();
+    for label in labels {
+        if label == "default" {
+            continue;
+        }
+        if let Some((a, b)) = label.split_once('-') {
+            if let (Ok(a), Ok(b)) = (a.parse::<i64>(), b.parse::<i64>()) {
+                for v in a..=b {
+                    out.push(v);
+                }
+                continue;
+            }
+        }
+        if let Ok(v) = label.parse::<i64>() {
+            out.push(v);
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn compress_case_numbers(nums: &[i64]) -> Vec<String> {
+    if nums.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut start = nums[0];
+    let mut last = nums[0];
+    for &v in &nums[1..] {
+        if v == last + 1 {
+            last = v;
+        } else {
+            out.push(if start == last {
+                start.to_string()
+            } else {
+                format!("{start}-{last}")
+            });
+            start = v;
+            last = v;
+        }
+    }
+    out.push(if start == last {
+        start.to_string()
+    } else {
+        format!("{start}-{last}")
+    });
+    out
+}
+
+fn classify_source_role(relation: &str, labels: &[String]) -> &'static str {
+    if relation.contains("default case") {
+        return "default";
+    }
+    if relation.contains("case") || labels.iter().any(|l| l != "default") {
+        return "case";
+    }
+    "entry"
+}
+
 fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Option<ControlFlowJson> {
     let mut switches = Vec::new();
     let mut tables: std::collections::BTreeMap<String, JumpTableJson> = std::collections::BTreeMap::new();
@@ -168,6 +229,8 @@ fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Opti
                     case_count: 0,
                     has_default: false,
                     all_case_labels: Vec::new(),
+                    coverage_runs: Vec::new(),
+                    sparse: false,
                 });
                 let case_labels = normalize_case_labels(&extract_case_labels(relation));
                 entry.refs.push(JumpTableRefJson {
@@ -178,6 +241,7 @@ fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Opti
                     case_labels: case_labels.clone(),
                     is_default: relation.contains("default case"),
                     lane_size: 1,
+                    source_role: classify_source_role(relation, &case_labels).to_string(),
                 });
                 entry.case_count = entry.case_count.max(estimate_case_count(relation));
                 if relation.contains("default case") {
@@ -190,6 +254,16 @@ fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Opti
 
     for table in tables.values_mut() {
         table.all_case_labels = normalize_case_labels(&table.all_case_labels);
+        let expanded = expand_case_labels(&table.all_case_labels);
+        table.coverage_runs = compress_case_numbers(&expanded);
+        table.sparse = if expanded.len() >= 2 {
+            let min = *expanded.first().unwrap_or(&0);
+            let max = *expanded.last().unwrap_or(&0);
+            let span = (max - min + 1).max(1) as usize;
+            expanded.len() * 2 < span
+        } else {
+            false
+        };
         let mut grouped: std::collections::BTreeMap<(String, String), JumpTableRefJson> =
             std::collections::BTreeMap::new();
         for mut r in std::mem::take(&mut table.refs) {
@@ -299,6 +373,7 @@ pub struct JumpTableRefJson {
     pub case_labels: Vec<String>,
     pub is_default: bool,
     pub lane_size: usize,
+    pub source_role: String,
 }
 
 #[derive(Serialize)]
@@ -308,6 +383,8 @@ pub struct JumpTableJson {
     pub case_count: usize,
     pub has_default: bool,
     pub all_case_labels: Vec<String>,
+    pub coverage_runs: Vec<String>,
+    pub sparse: bool,
 }
 
 #[derive(Serialize)]
