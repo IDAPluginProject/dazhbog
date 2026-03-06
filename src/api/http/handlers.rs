@@ -447,6 +447,9 @@ pub struct FunctionDetailResponse {
 pub struct BinaryOverlapEdge {
     pub target: BinarySummary,
     pub shared_functions: u64,
+    pub shared_observations: u64,
+    pub known_overlap_pct: f32,
+    pub observed_overlap_pct: f32,
 }
 
 #[derive(Serialize)]
@@ -504,6 +507,7 @@ pub struct BinaryDetailResponse {
     pub facets: BinaryFacetSummary,
     pub related: Vec<BinaryOverlapEdge>,
     pub graph: BinaryGraphResponse,
+    pub timeline: Vec<BinaryTimelineItem>,
     pub functions: BinaryFunctionsPage,
 }
 
@@ -512,6 +516,16 @@ pub struct BinaryGraphConfigResponse {
     pub depth: usize,
     pub limit: usize,
     pub graph: BinaryGraphResponse,
+}
+
+#[derive(Serialize)]
+pub struct BinaryTimelineItem {
+    pub binary: BinarySummary,
+    pub shared_functions: u64,
+    pub shared_observations: u64,
+    pub known_overlap_pct: f32,
+    pub observed_overlap_pct: f32,
+    pub is_root: bool,
 }
 
 /// Metrics snapshot for JSON API.
@@ -850,13 +864,16 @@ pub async fn handle_binary_detail(db: Arc<Database>, md5_hex: &str) -> Response<
                 }
             };
             let related = db
-                .get_binary_overlap(md5, 8)
+                .get_binary_related(md5, 8)
                 .await
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(target, shared_functions)| BinaryOverlapEdge {
+                .map(|(target, shared_functions, shared_observations, known_overlap_pct, observed_overlap_pct)| BinaryOverlapEdge {
                     target,
                     shared_functions,
+                    shared_observations,
+                    known_overlap_pct,
+                    observed_overlap_pct,
                 })
                 .collect();
             let graph = match db.get_binary_graph(md5, 2, 6).await {
@@ -873,12 +890,27 @@ pub async fn handle_binary_detail(db: Arc<Database>, md5_hex: &str) -> Response<
                 },
                 Err(_) => BinaryGraphResponse { nodes: Vec::new(), edges: Vec::new() },
             };
+            let timeline = db
+                .get_binary_family_timeline(md5, 12)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(binary, shared_functions, shared_observations, known_overlap_pct, observed_overlap_pct, is_root)| BinaryTimelineItem {
+                    binary,
+                    shared_functions,
+                    shared_observations,
+                    known_overlap_pct,
+                    observed_overlap_pct,
+                    is_root,
+                })
+                .collect();
             json_response(
                 &BinaryDetailResponse {
                     binary,
                     facets,
                     related,
                     graph,
+                    timeline,
                     functions: BinaryFunctionsPage {
                         results: functions,
                         total,
@@ -970,13 +1002,16 @@ pub async fn handle_binary_overlap(
         .and_then(|s| s.parse().ok())
         .unwrap_or(8)
         .clamp(1, 32);
-    match db.get_binary_overlap(md5, limit * depth).await {
+    match db.get_binary_related(md5, limit * depth).await {
         Ok(edges) => json_response(
             &edges
                 .into_iter()
-                .map(|(target, shared_functions)| BinaryOverlapEdge {
+                .map(|(target, shared_functions, shared_observations, known_overlap_pct, observed_overlap_pct)| BinaryOverlapEdge {
                     target,
                     shared_functions,
+                    shared_observations,
+                    known_overlap_pct,
+                    observed_overlap_pct,
                 })
                 .collect::<Vec<_>>(),
             StatusCode::OK,

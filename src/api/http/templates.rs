@@ -1134,6 +1134,48 @@ pub const HOME: &str = r#"<!doctype html>
             overflow: hidden;
         }
 
+        .binary-graph-stage {
+            position: absolute;
+            inset: 0;
+            transform-origin: center center;
+            transition: transform 140ms ease;
+        }
+
+        .binary-graph-controls {
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+            margin-left: auto;
+            flex: 0 0 auto;
+        }
+
+        .binary-graph-toolbar {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(120px, 260px)) auto 1fr;
+            gap: 12px 16px;
+            align-items: end;
+            margin-bottom: var(--space-md);
+        }
+
+        .binary-graph-field {
+            display: grid;
+            gap: 6px;
+        }
+
+        .binary-graph-hint {
+            grid-column: 1 / -1;
+            color: var(--text-dim);
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .binary-graph-view-switch {
+            display: inline-flex;
+            gap: 8px;
+            margin-left: 12px;
+        }
+
         .binary-graph svg {
             position: absolute;
             inset: 0;
@@ -1143,11 +1185,11 @@ pub const HOME: &str = r#"<!doctype html>
 
         .binary-graph-node {
             position: absolute;
-            width: 168px;
+            width: 132px;
             transform: translate(-50%, -50%);
             border: 1px solid var(--border-dim);
             background: rgba(12, 16, 18, 0.92);
-            padding: 10px 12px;
+            padding: 8px 10px;
             cursor: pointer;
             box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
             transition: transform 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
@@ -1165,6 +1207,19 @@ pub const HOME: &str = r#"<!doctype html>
         .binary-graph-node.highlighted {
             transform: translate(-50%, -50%) scale(1.03);
             border-color: rgba(0,255,136,0.55);
+            z-index: 3;
+        }
+
+        .binary-graph-node.compact {
+            width: 92px;
+            padding: 6px 8px;
+            background: rgba(10, 12, 14, 0.82);
+            z-index: 1;
+        }
+
+        .binary-graph-node.compact .binary-graph-node-actions,
+        .binary-graph-node.compact .coverage-strip {
+            display: none;
         }
 
         .binary-graph-node-actions {
@@ -1186,13 +1241,15 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         .binary-graph-node .name {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-primary);
             margin-bottom: 4px;
+            line-height: 1.25;
+            word-break: break-word;
         }
 
         .binary-graph-node .meta {
-            font-size: 10px;
+            font-size: 9px;
             color: var(--text-dim);
             letter-spacing: 0.08em;
         }
@@ -1247,6 +1304,78 @@ pub const HOME: &str = r#"<!doctype html>
             margin-bottom: var(--space-md);
         }
 
+        .compare-toolbar {
+            display: grid;
+            gap: var(--space-md);
+            margin-bottom: var(--space-md);
+        }
+
+        .compare-toolbar-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: end;
+        }
+
+        .compare-field {
+            display: grid;
+            gap: 6px;
+            min-width: 140px;
+        }
+
+        .compare-field input {
+            width: 100%;
+        }
+
+        .compare-search-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: end;
+            margin-bottom: var(--space-md);
+        }
+
+        .compare-item-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: start;
+            padding: 10px 12px;
+            border-top: 1px solid var(--border-subtle);
+            cursor: pointer;
+        }
+
+        .compare-item-row:first-of-type {
+            border-top: 0;
+        }
+
+        .compare-item-main {
+            min-width: 0;
+            display: grid;
+            gap: 6px;
+        }
+
+        .compare-item-name {
+            color: var(--text-primary);
+            line-height: 1.45;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .compare-item-meta {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+        }
+
+        .compare-item-age {
+            color: var(--text-tertiary);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            white-space: nowrap;
+            padding-top: 2px;
+        }
+
         .preset-note {
             margin-top: 6px;
             font-size: 10px;
@@ -1283,7 +1412,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         .coverage-strip-row {
             display: grid;
-            grid-template-columns: 28px 1fr 44px;
+            grid-template-columns: 88px 1fr 44px;
             gap: 8px;
             align-items: center;
             font-size: 10px;
@@ -1301,7 +1430,181 @@ pub const HOME: &str = r#"<!doctype html>
         .coverage-strip-fill {
             position: absolute;
             inset: 0 auto 0 0;
-            background: linear-gradient(90deg, rgba(0,255,136,0.35), rgba(0,255,136,0.8));
+            background: rgba(0,255,136,0.82);
+        }
+
+        .detail-note {
+            margin-top: 8px;
+            color: var(--text-dim);
+            font-size: 11px;
+            line-height: 1.5;
+            max-width: 78ch;
+        }
+
+        .timeline-stack {
+            display: grid;
+            gap: var(--space-sm);
+        }
+
+        .timeline-row,
+        .related-binary-row {
+            display: grid;
+            grid-template-columns: minmax(280px, 1fr) minmax(320px, 520px) 180px;
+            gap: var(--space-md);
+            align-items: center;
+            border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.02);
+            padding: 12px 14px;
+            transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out), transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+        }
+
+        .timeline-row.clickable,
+        .related-binary-row.clickable {
+            cursor: pointer;
+        }
+
+        .timeline-row.clickable:hover,
+        .related-binary-row.clickable:hover {
+            background: rgba(0,255,136,0.05);
+            border-color: rgba(0,255,136,0.35);
+            box-shadow: inset 0 0 0 1px rgba(0,255,136,0.12);
+            transform: translateX(2px);
+        }
+
+        .timeline-row.clickable:hover .detail-value,
+        .related-binary-row.clickable:hover .detail-value {
+            color: var(--text-bright);
+            text-shadow: 0 0 14px rgba(0,255,136,0.18);
+        }
+
+        .timeline-row.clickable:hover .timeline-metric-label,
+        .related-binary-row.clickable:hover .related-binary-meta,
+        .related-binary-row.clickable:hover .related-binary-stat,
+        .related-binary-row.clickable:hover .related-overlap-label {
+            color: var(--text-secondary);
+        }
+
+        .timeline-metrics {
+            display: grid;
+            gap: 8px;
+            align-content: center;
+        }
+
+        .timeline-metric-row {
+            display: grid;
+            grid-template-columns: 220px 1fr;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .timeline-metric-label {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .timeline-meta {
+            display: grid;
+            justify-items: end;
+            align-content: center;
+            gap: 8px;
+        }
+
+        .related-binary-main {
+            min-width: 0;
+            display: grid;
+            align-content: center;
+            gap: 6px;
+        }
+
+        .binary-name-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .binary-title {
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .binary-short-id {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border: 1px solid rgba(0, 255, 136, 0.28);
+            background: rgba(0, 255, 136, 0.08);
+            color: var(--accent);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            line-height: 1;
+            text-transform: uppercase;
+        }
+
+        .related-binary-meta {
+            color: var(--text-dim);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+        }
+
+        .related-binary-side {
+            display: grid;
+            justify-items: end;
+            gap: 8px;
+        }
+
+        .related-binary-stat {
+            display: grid;
+            justify-items: end;
+            gap: 4px;
+            color: var(--text-dim);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+        }
+
+        .related-overlap-grid {
+            width: 100%;
+            display: grid;
+            gap: 8px;
+        }
+
+        .related-overlap-row {
+            display: grid;
+            grid-template-columns: 190px minmax(0, 1fr);
+            gap: 10px;
+            align-items: center;
+        }
+
+        .related-overlap-label {
+            color: var(--text-dim);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .binary-overlap-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .timeline-bar {
+            position: relative;
+            height: 8px;
+            border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.03);
+            overflow: hidden;
+        }
+
+        .timeline-bar-fill {
+            position: absolute;
+            inset: 0 auto 0 0;
+            background: rgba(0,255,136,0.82);
         }
         
         .result-meta {
@@ -3321,6 +3624,14 @@ pub const HOME: &str = r#"<!doctype html>
             .workbench-side {
                 position: static;
             }
+
+            .binary-graph-toolbar {
+                grid-template-columns: 1fr;
+            }
+
+            .binary-graph-controls {
+                margin-left: 0;
+            }
         }
 
         @media (max-width: 480px) {
@@ -3961,6 +4272,8 @@ pub const HOME: &str = r#"<!doctype html>
         let currentBinaryComparePage = 1;
         const BINARY_COMPARE_PAGE_SIZE = 12;
         let currentBinaryWorkbench = false;
+        let currentBinaryGraphZoom = 1;
+        let currentBinaryGraphView = 'list';
 
         const pinnedKeys = new Set();
         const compareKeys = [];
@@ -5963,11 +6276,12 @@ pub const HOME: &str = r#"<!doctype html>
 
         function syncHashWithUi() {
             const functionKey = el.detailModal.classList.contains('active') && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
-            const binaryMd5 = el.detailModal.classList.contains('active') && currentDetailKind === 'binary' && currentBinaryMd5 ? currentBinaryMd5 : '';
+            const hashMode = functionKey ? 'functions' : currentSearchMode;
+            const binaryMd5 = !functionKey && currentSearchMode === 'binaries' && currentBinaryMd5 ? currentBinaryMd5 : '';
             const sectionId = functionKey ? (currentDetailSection || pendingDetailSection || '') : '';
-            const compareRightMd5 = el.binaryCompareModal.classList.contains('active') && currentBinaryCompareData && currentBinaryCompareData.right ? currentBinaryCompareData.right.md5_hex : '';
+            const compareRightMd5 = !functionKey && currentBinaryCompareData && currentBinaryCompareData.right && (el.binaryCompareModal.classList.contains('active') || currentBinaryWorkbench) ? currentBinaryCompareData.right.md5_hex : '';
             const workbench = currentBinaryWorkbench ? 'compare' : '';
-            updateHash(currentSearchMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId, compareRightMd5, currentBinaryCompareMode, currentBinaryComparePage, currentBinaryCompareQuery, workbench);
+            updateHash(hashMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId, compareRightMd5, currentBinaryCompareMode, currentBinaryComparePage, currentBinaryCompareQuery, workbench);
         }
 
         function applyHashState(state) {
@@ -5983,7 +6297,8 @@ pub const HOME: &str = r#"<!doctype html>
             const bcq = (state && state.bcq) ? state.bcq : '';
             const bw = (state && state.bw) ? state.bw : '';
 
-            setSearchMode(mode, false, false);
+            const effectiveMode = f ? 'functions' : mode;
+            setSearchMode(effectiveMode, false, false);
             el.q.value = q;
             if (q) {
                 runSearch(q, page, false).then(() => {
@@ -6241,13 +6556,12 @@ pub const HOME: &str = r#"<!doctype html>
             el.resultsList.innerHTML = hits.map((h, i) => {
                 const scoreRatio = normalizeScore(Number(h.score || 0), minScore, maxScore);
                 const selected = h.md5_hex === currentBinaryMd5;
-                const host = h.hostname ? '<span class="version-badge age">HOST ' + esc(h.hostname) + '</span>' : '';
                 return '<div class="result-item clickable' + (selected ? ' selected' : '') + '" onclick="showBinaryDetail(\'' + esc(h.md5_hex) + '\')">'
                     + '<div class="result-index">' + String(startIdx + i + 1).padStart(2, '0') + '</div>'
                     + '<div class="result-main"><div class="result-func">' + esc(h.display_name) + '</div>'
                     + '<div class="result-key"><span class="result-key-copy" onclick="event.stopPropagation();copyText(\'' + esc(h.md5_hex) + '\')">MD5 ' + esc(h.md5_hex) + '</span><span class="result-age">' + esc(fmtRelativeTs(h.last_seen_ts)) + '</span></div>'
-                    + '<div class="result-bins"><span class="bin-tag">FN ' + fmt(h.function_count || 0) + '</span><span class="bin-tag">VER ' + fmt(h.version_count || 0) + '</span><span class="bin-tag">OBS ' + fmt(h.obs_count || 0) + '</span><span class="bin-tag">HOSTS ' + fmt(h.host_count || 0) + '</span></div></div>'
-                    + '<div class="result-meta">' + host + '<span class="score-badge">SCORE ' + Number(h.score || 0).toFixed(2) + '</span><div class="score-meter"><div class="score-meter-fill" style="width:' + (scoreRatio * 100).toFixed(1) + '%;"></div></div></div>'
+                    + '<div class="result-bins"><span class="bin-tag">FUNCTIONS ' + fmt(h.function_count || 0) + '</span><span class="bin-tag">TYPED FUNCTIONS ' + fmt(h.typed_functions || 0) + '</span><span class="bin-tag">OBSERVATIONS ' + fmt(h.obs_count || 0) + '</span></div></div>'
+                    + '<div class="result-meta"><span class="score-badge">SCORE ' + Number(h.score || 0).toFixed(2) + '</span><div class="score-meter"><div class="score-meter-fill" style="width:' + (scoreRatio * 100).toFixed(1) + '%;"></div></div></div>'
                     + '</div>';
             }).join('');
         }
@@ -6374,10 +6688,20 @@ pub const HOME: &str = r#"<!doctype html>
         // ═══════════════════════════════════════════════════════════════
 
         function showFunctionDetail(keyHex, sectionId = null, updateUrl = true) {
+            setSearchMode('functions', false, false);
+            if (el.binaryCompareModal.classList.contains('active')) el.binaryCompareModal.classList.remove('active');
+            if (currentBinaryWorkbench) {
+                currentBinaryWorkbench = false;
+                el.binaryWorkbench.classList.add('hidden');
+                el.binaryWorkbenchBody.innerHTML = '';
+            }
             currentDetailKind = 'function';
             currentDetailData = null;
             currentDetailKeyHex = keyHex;
             currentBinaryMd5 = null;
+            currentBinaryCompareData = null;
+            currentGraphHoverMd5 = null;
+            currentGraphFocusMd5 = null;
             currentCompareRecords = [];
             pendingDetailSection = sectionId;
             selectedControlFlowGroup = null;
@@ -6386,11 +6710,11 @@ pub const HOME: &str = r#"<!doctype html>
             controlFlowFocusMode = false;
             currentDetailSection = sectionId || null;
             el.modalTitle.innerHTML = 'FUNCTION DETAIL // <span id="modal-key"></span>';
-            if (updateUrl) syncHashWithUi();
-            el.modalKey.textContent = keyHex;
-            el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
             el.detailModal.classList.add('active');
             document.body.style.overflow = 'hidden';
+            el.modalKey.textContent = keyHex;
+            el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
+            if (updateUrl) syncHashWithUi();
 
             fetch('/api/function/' + encodeURIComponent(keyHex))
                 .then(r => {
@@ -6428,6 +6752,7 @@ pub const HOME: &str = r#"<!doctype html>
             currentBinaryComparePage = 1;
             currentGraphHoverMd5 = null;
             currentGraphFocusMd5 = null;
+            currentBinaryGraphZoom = 1;
             currentCompareRecords = [];
             pendingDetailSection = null;
             currentDetailSection = null;
@@ -6455,8 +6780,10 @@ pub const HOME: &str = r#"<!doctype html>
             currentDetailData = null;
             currentDetailKind = 'function';
             currentDetailKeyHex = null;
-            currentBinaryMd5 = null;
-            currentBinaryCompareData = null;
+            if (currentSearchMode !== 'binaries') {
+                currentBinaryMd5 = null;
+                currentBinaryCompareData = null;
+            }
             currentCompareRecords = [];
             pendingDetailSection = null;
             selectedControlFlowGroup = null;
@@ -6622,6 +6949,11 @@ pub const HOME: &str = r#"<!doctype html>
             if (currentDetailKind === 'binary' && currentDetailData) renderBinaryDetail(currentDetailData);
         }
 
+        function setBinaryGraphZoom(delta) {
+            currentBinaryGraphZoom = Math.max(0.75, Math.min(1.8, Number(currentBinaryGraphZoom || 1) + Number(delta || 0)));
+            if (currentDetailKind === 'binary' && currentDetailData) renderBinaryDetail(currentDetailData);
+        }
+
         function setBinaryCompareQuery(value) {
             currentBinaryCompareQuery = value || '';
             currentBinaryComparePage = 1;
@@ -6640,6 +6972,64 @@ pub const HOME: &str = r#"<!doctype html>
             const a = document.createElement('a');
             a.href = url;
             a.download = 'binary-compare-' + (currentBinaryCompareData.left && currentBinaryCompareData.left.short_id ? currentBinaryCompareData.left.short_id : 'left') + '-' + (currentBinaryCompareData.right && currentBinaryCompareData.right.short_id ? currentBinaryCompareData.right.short_id : 'right') + '.json';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function exportBinaryCompareMarkdown() {
+            if (!currentBinaryCompareData) return;
+            const compare = currentBinaryCompareData;
+            const lines = [];
+            lines.push('# Binary Compare');
+            lines.push('');
+            lines.push('- Left: ' + (compare.left.display_name || compare.left.basename));
+            lines.push('- Right: ' + (compare.right.display_name || compare.right.basename));
+            lines.push('- Shared: ' + fmt(compare.shared_count || 0));
+            lines.push('- Left Only: ' + fmt(compare.left_only_count || 0));
+            lines.push('- Right Only: ' + fmt(compare.right_only_count || 0));
+            lines.push('');
+            lines.push('## Active Bucket');
+            lines.push('');
+            lines.push('- Bucket: ' + (compare.active_bucket || 'All'));
+            lines.push('- Query: ' + (compare.active_bucket_query || '-'));
+            lines.push('- Page: ' + fmt(compare.active_bucket_page || 1) + ' / ' + fmt(compare.active_bucket_total_pages || 1));
+            lines.push('');
+            (compare.active_bucket_items || []).forEach(item => {
+                lines.push('- `' + item.key_hex + '` ' + item.name + ' (rarity ' + fmt(item.rarity_score || 0) + ', cover ' + fmt(item.richness_score || 0) + ', ' + fmtRelativeTs(item.ts) + ')');
+            });
+            const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'binary-compare-' + (compare.left.short_id || 'left') + '-' + (compare.right.short_id || 'right') + '.md';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function exportBinaryCompareCsv() {
+            if (!currentBinaryCompareData) return;
+            const compare = currentBinaryCompareData;
+            const rows = [['bucket','key_hex','name','rarity_score','richness_score','ts']];
+            (compare.active_bucket_items || []).forEach(item => {
+                rows.push([
+                    compare.active_bucket || 'All',
+                    item.key_hex || '',
+                    item.name || '',
+                    String(item.rarity_score || 0),
+                    String(item.richness_score || 0),
+                    String(item.ts || 0),
+                ]);
+            });
+            const csv = rows.map(row => row.map(value => '"' + String(value).replace(/"/g, '""') + '"').join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'binary-compare-' + (compare.left.short_id || 'left') + '-' + (compare.right.short_id || 'right') + '.csv';
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -6670,13 +7060,87 @@ pub const HOME: &str = r#"<!doctype html>
             const commented = Number((facetsOverride && facetsOverride.commented_functions) || binary.commented_functions || 0);
             const switchy = Number((facetsOverride && facetsOverride.switch_functions) || binary.switch_functions || 0);
             const rows = [
-                ['T', typed],
-                ['C', commented],
-                ['S', switchy],
+                ['Typed', typed],
+                ['Comments', commented],
+                ['Switches', switchy],
             ];
             return '<div class="coverage-strip">' + rows.map(([label, value]) => {
                 const pct = Math.round((Number(value) / total) * 100);
                 return '<div class="coverage-strip-row"><span>' + esc(label) + '</span><div class="coverage-strip-bar"><div class="coverage-strip-fill" style="width:' + pct + '%"></div></div><span>' + pct + '%</span></div>';
+            }).join('') + '</div>';
+        }
+
+        function shortenBinaryName(name) {
+            const text = basenameOnly(name);
+            if (text.length <= 28) return text;
+            return text.slice(0, 25) + '...';
+        }
+
+        function basenameOnly(name) {
+            const text = String(name || '');
+            const normalized = text.replace(/\\/g, '/');
+            const idx = normalized.lastIndexOf('/');
+            return idx >= 0 ? normalized.slice(idx + 1) : normalized;
+        }
+
+        function renderBinaryName(binary) {
+            const base = basenameOnly((binary && (binary.basename || binary.display_name)) || '');
+            const short = binary && binary.short_id ? binary.short_id : '';
+            return short ? (base + ' · ' + short) : base;
+        }
+
+        function renderBinaryTitle(binary) {
+            const base = basenameOnly((binary && (binary.basename || binary.display_name)) || '');
+            const short = binary && binary.short_id ? binary.short_id : '';
+            return '<div class="binary-name-row"><div class="detail-value accent binary-title">' + esc(base) + '</div>'
+                + (short ? '<span class="binary-short-id">' + esc(short) + '</span>' : '')
+                + '</div>';
+        }
+
+        function renderBinaryOverlapMetrics(sharedFunctions, knownPct, sharedObservations, observedPct, maxSharedFunctions, maxSharedObservations) {
+            const fnWidth = maxSharedFunctions > 0 ? (Number(sharedFunctions || 0) / maxSharedFunctions) * 100 : 0;
+            const obsWidth = maxSharedObservations > 0 ? (Number(sharedObservations || 0) / maxSharedObservations) * 100 : 0;
+            return '<div class="timeline-metrics">'
+                + '<div class="timeline-metric-row"><span class="timeline-metric-label">Known ' + fmt(sharedFunctions || 0) + ' // ' + Number(knownPct || 0).toFixed(1) + '%</span><div class="timeline-bar"><div class="timeline-bar-fill" style="width:' + fnWidth.toFixed(1) + '%"></div></div></div>'
+                + '<div class="timeline-metric-row"><span class="timeline-metric-label">Observed ' + fmt(sharedObservations || 0) + ' // ' + Number(observedPct || 0).toFixed(1) + '%</span><div class="timeline-bar"><div class="timeline-bar-fill" style="width:' + obsWidth.toFixed(1) + '%"></div></div></div>'
+                + '</div>';
+        }
+
+        function renderBinaryRelationshipRow(binary, options) {
+            const opts = options || {};
+            const label = opts.label || 'Related';
+            const meta = opts.meta || (binary && binary.md5_hex ? binary.md5_hex : '');
+            const actionHtml = opts.actionHtml || '<button class="result-action">open</button>';
+            return '<div class="related-binary-row clickable" onclick="showBinaryDetail(\'' + esc(binary.md5_hex || '') + '\')">'
+                + '<div class="related-binary-main"><div class="detail-label">' + esc(label) + '</div>' + renderBinaryTitle(binary) + '<div class="related-binary-meta">' + esc(meta) + '</div></div>'
+                + renderBinaryOverlapMetrics(opts.sharedFunctions || 0, opts.knownPct || 0, opts.sharedObservations || 0, opts.observedPct || 0, opts.maxSharedFunctions || 1, opts.maxSharedObservations || 1)
+                + '<div class="timeline-meta"><div class="detail-label">last seen ' + esc(fmtRelativeTs(binary.last_seen_ts)) + '</div><div class="binary-overlap-actions">' + actionHtml + '</div></div>'
+                + '</div>';
+        }
+
+        function setBinaryGraphView(view) {
+            currentBinaryGraphView = view === 'list' ? 'list' : 'graph';
+            if (currentDetailKind === 'binary' && currentDetailData) renderBinaryDetail(currentDetailData);
+        }
+
+        function renderBinaryTimeline(items) {
+            const rows = items || [];
+            if (!rows.length) return '<div class="state-message"><div class="icon">::</div><h3>NO FAMILY TIMELINE</h3><p>Recency overlap data is not available yet.</p></div>';
+            const maxSharedFunctions = Math.max(...rows.map(item => Number(item.shared_functions || 0)), 1);
+            const maxSharedObservations = Math.max(...rows.map(item => Number(item.shared_observations || 0)), 1);
+            return '<div class="timeline-stack">' + rows.map(item => {
+                const binary = item.binary || {};
+                return renderBinaryRelationshipRow(binary, {
+                    label: item.is_root ? 'Root' : 'Related',
+                    meta: binary.md5_hex || '',
+                    sharedFunctions: item.shared_functions || 0,
+                    knownPct: item.known_overlap_pct || 0,
+                    sharedObservations: item.shared_observations || 0,
+                    observedPct: item.observed_overlap_pct || 0,
+                    maxSharedFunctions,
+                    maxSharedObservations,
+                    actionHtml: '<button class="result-action" onclick="event.stopPropagation();showBinaryDetail(\'' + esc(binary.md5_hex || '') + '\')">open</button>'
+                });
             }).join('') + '</div>';
         }
 
@@ -6714,10 +7178,12 @@ pub const HOME: &str = r#"<!doctype html>
                 if (!layers.has(depth)) layers.set(depth, []);
                 layers.get(depth).push(node);
             });
-            let html = '<div class="binary-graph">';
+            let html = '<div class="binary-graph"><div class="binary-graph-stage" style="transform:scale(' + currentBinaryGraphZoom.toFixed(2) + ')">';
             html += '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none">';
             const positions = new Map();
-            const activeFocus = currentGraphFocusMd5 || currentGraphHoverMd5 || '';
+            const activeFocus = currentGraphFocusMd5 || '';
+            const activeHover = currentGraphHoverMd5 || '';
+            const activeNode = activeFocus || activeHover || '';
             const connected = new Set(activeFocus ? [activeFocus] : []);
             if (activeFocus) {
                 edges.forEach(edge => {
@@ -6729,11 +7195,13 @@ pub const HOME: &str = r#"<!doctype html>
             [...layers.keys()].sort((a, b) => a - b).forEach(depth => {
                 const layer = layers.get(depth) || [];
                 layer.sort((a, b) => Number(b.binary.function_count || 0) - Number(a.binary.function_count || 0));
-                const x = depth === 0 ? width * 0.5 : 120 + ((width - 240) * (depth / Math.max(1, currentBinaryGraphDepth || 2)));
+                const columns = Math.max(2, (currentBinaryGraphDepth || 2) + 2);
+                const baseX = 120 + ((width - 240) * ((depth + 1) / columns));
                 layer.forEach((node, idx) => {
                     const slot = idx + 1;
                     const y = (height / (layer.length + 1)) * slot;
-                    positions.set(node.binary.md5_hex, { x, y });
+                    const laneOffset = layer.length > 6 ? ((idx % 2) === 0 ? -42 : 42) : 0;
+                    positions.set(node.binary.md5_hex, { x: baseX + laneOffset, y });
                 });
             });
             edges.forEach(edge => {
@@ -6741,29 +7209,51 @@ pub const HOME: &str = r#"<!doctype html>
                 const b = positions.get(edge.target_md5);
                 if (!a || !b) return;
                 const alpha = Math.max(0.2, Math.min(0.85, Number(edge.shared_functions || 0) / 12));
-                const highlighted = activeFocus && (edge.source_md5 === activeFocus || edge.target_md5 === activeFocus);
-                const dimmed = activeFocus && !highlighted;
+                const highlighted = activeNode && (edge.source_md5 === activeNode || edge.target_md5 === activeNode);
+                const dimmed = activeNode && !highlighted;
                 html += '<line class="' + (highlighted ? 'highlighted' : (dimmed ? 'dimmed' : '')) + '" x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1) + '" stroke="rgba(0,255,136,' + alpha.toFixed(2) + ')" stroke-width="' + Math.max(1, Math.min(5, Number(edge.shared_functions || 0) / 4)).toFixed(1) + '" />';
-                const mx = ((a.x + b.x) / 2).toFixed(1);
-                const my = ((a.y + b.y) / 2).toFixed(1);
-                html += '<text x="' + mx + '" y="' + my + '" fill="rgba(210,230,220,0.72)" font-size="10" text-anchor="middle">' + esc(String(edge.shared_functions || 0)) + '</text>';
+                if (activeFocus && highlighted) {
+                    const mx = ((a.x + b.x) / 2).toFixed(1);
+                    const my = ((a.y + b.y) / 2).toFixed(1);
+                    html += '<text x="' + mx + '" y="' + my + '" fill="rgba(210,230,220,0.72)" font-size="10" text-anchor="middle">' + esc(String(edge.shared_functions || 0)) + '</text>';
+                }
             });
             html += '</svg>';
             nodes.forEach(node => {
                 const pos = positions.get(node.binary.md5_hex);
                 if (!pos) return;
-                const isHighlighted = activeFocus && connected.has(node.binary.md5_hex);
-                const isDimmed = activeFocus && !connected.has(node.binary.md5_hex);
-                html += '<div class="binary-graph-node' + (node.binary.md5_hex === rootMd5 ? ' root' : '') + (isHighlighted ? ' highlighted' : '') + (isDimmed ? ' dimmed' : '') + '" style="left:' + ((pos.x / width) * 100).toFixed(2) + '%; top:' + ((pos.y / height) * 100).toFixed(2) + '%" onmouseenter="setGraphHover(\'' + esc(node.binary.md5_hex) + '\')" onmouseleave="setGraphHover('')" onclick="setGraphFocus(\'' + esc(node.binary.md5_hex) + '\')">'
-                    + '<div class="name">' + esc(node.binary.display_name || node.binary.basename) + '</div>'
-                    + '<div class="meta">FN ' + fmt(node.binary.function_count || 0) + ' // VER ' + fmt(node.binary.version_count || 0) + '</div>'
-                    + '<div class="meta">OBS ' + fmt(node.binary.obs_count || 0) + ' // ID ' + esc(node.binary.short_id || '') + '</div>'
-                    + renderCoverageStrip(node.binary)
-                    + (node.binary.md5_hex !== rootMd5 ? '<div class="binary-graph-node-actions"><button class="pagination-btn" onclick="event.stopPropagation();showBinaryDetail(\'' + esc(node.binary.md5_hex) + '\')">open</button><button class="pagination-btn" onclick="event.stopPropagation();loadBinaryCompare(\'' + esc(node.binary.md5_hex) + '\')">diff</button></div>' : '')
+                const isHighlighted = activeNode && (node.binary.md5_hex === activeNode || connected.has(node.binary.md5_hex));
+                const isDimmed = activeNode && !connected.has(node.binary.md5_hex);
+                const isExpanded = node.binary.md5_hex === rootMd5 || node.binary.md5_hex === activeNode || (activeFocus && connected.has(node.binary.md5_hex));
+                const isCompact = !isExpanded;
+                html += '<div class="binary-graph-node' + (node.binary.md5_hex === rootMd5 ? ' root' : '') + (isHighlighted ? ' highlighted' : '') + (isDimmed ? ' dimmed' : '') + (isCompact ? ' compact' : '') + '" style="left:' + ((pos.x / width) * 100).toFixed(2) + '%; top:' + ((pos.y / height) * 100).toFixed(2) + '%" onmouseenter="setGraphHover(\'' + esc(node.binary.md5_hex) + '\')" onmouseleave="setGraphHover(\'\')" onclick="setGraphFocus(\'' + esc(node.binary.md5_hex) + '\')">'
+                    + '<div class="name">' + esc(isCompact ? ('#' + (node.binary.short_id || '')) : shortenBinaryName(node.binary.basename || node.binary.display_name)) + '</div>'
+                    + '<div class="meta">#' + esc(node.binary.short_id || '') + (isCompact ? '' : ' // ' + fmt(node.binary.function_count || 0) + ' fn') + '</div>'
+                    + (isCompact ? '' : '<div class="meta">' + fmt(node.binary.obs_count || 0) + ' obs</div>')
+                    + (isCompact ? '' : renderCoverageStrip(node.binary))
+                    + (node.binary.md5_hex !== rootMd5 && !isCompact ? '<div class="binary-graph-node-actions"><button class="pagination-btn" onclick="event.stopPropagation();showBinaryDetail(\'' + esc(node.binary.md5_hex) + '\')">open</button></div>' : '')
                     + '</div>';
             });
-            html += '</div>';
+            html += '</div></div>';
             return html;
+        }
+
+        function renderBinaryOverlapList(items, currentMd5) {
+            const rows = items || [];
+            if (!rows.length) return '<div class="state-message"><div class="icon">::</div><h3>NO RANKED OVERLAP</h3><p>No related binaries were derived from shared functions.</p></div>';
+            const maxSharedFunctions = Math.max(...rows.map(edge => Number(edge.shared_functions || 0)), 1);
+            const maxSharedObservations = Math.max(...rows.map(edge => Number(edge.shared_observations || 0)), 1);
+            return '<div class="timeline-stack">' + rows.map(edge => renderBinaryRelationshipRow(edge.target || {}, {
+                label: 'Related',
+                meta: ((edge.target && edge.target.md5_hex) || ''),
+                sharedFunctions: edge.shared_functions || 0,
+                knownPct: edge.known_overlap_pct || 0,
+                sharedObservations: edge.shared_observations || 0,
+                observedPct: edge.observed_overlap_pct || 0,
+                maxSharedFunctions,
+                maxSharedObservations,
+                actionHtml: '<button class="result-action" onclick="event.stopPropagation();loadBinaryCompare(\'' + esc((edge.target && edge.target.md5_hex) || '') + '\')">diff</button>'
+            })).join('') + '</div>';
         }
 
         function renderBinaryComparePanel(compare) {
@@ -6775,9 +7265,12 @@ pub const HOME: &str = r#"<!doctype html>
             html += '<div class="detail-stat"><div class="label">Left Only</div><div class="value">' + fmt(compare.left_only_count || 0) + '</div></div>';
             html += '<div class="detail-stat"><div class="label">Right Only</div><div class="value">' + fmt(compare.right_only_count || 0) + '</div></div>';
             html += '</div>';
-            html += '<div class="compare-panel-actions" style="margin-bottom: var(--space-md);">';
-            html += '<label class="detail-label">Sample <input class="comment-search" style="width:88px; margin-left:8px;" type="number" min="1" max="100" value="' + esc(String(compare.sample_limit || currentBinaryCompareLimit || 18)) + '" onchange="setBinaryCompareLimit(this.value)"></label>';
+            html += '<div class="compare-toolbar">';
+            html += '<div class="compare-toolbar-row">';
+            html += '<label class="compare-field"><span class="detail-label">Sample Size</span><input class="comment-search" type="number" min="1" max="100" value="' + esc(String(compare.sample_limit || currentBinaryCompareLimit || 18)) + '" onchange="setBinaryCompareLimit(this.value)"></label>';
             html += '<button class="pagination-btn" onclick="exportBinaryCompareReport()">Export JSON</button>';
+            html += '<button class="pagination-btn" onclick="exportBinaryCompareMarkdown()">Export MD</button>';
+            html += '<button class="pagination-btn" onclick="exportBinaryCompareCsv()">Export CSV</button>';
             html += '<button class="pagination-btn" onclick="openBinaryWorkbench()">Open Workbench</button>';
             html += '</div>';
             html += '<div class="compare-mode-switch">';
@@ -6788,12 +7281,13 @@ pub const HOME: &str = r#"<!doctype html>
             });
             html += '</div>';
             html += '<div class="preset-note">' + esc(comparePresetDescription(activeLabel === 'All' ? 'all' : activeLabel)) + '</div>';
-            html += '<div class="compare-panel-actions" style="margin-bottom: var(--space-md);">';
-            html += '<label class="detail-label">Filter <input class="comment-search" style="width:220px; margin-left:8px;" type="text" value="' + esc(currentBinaryCompareQuery || '') + '" oninput="setBinaryCompareQuery(this.value)" placeholder="search compare buckets"></label>';
+            html += '<div class="compare-search-row">';
+            html += '<label class="compare-field" style="min-width:240px;"><span class="detail-label">Filter Bucket</span><input class="comment-search" type="text" value="' + esc(currentBinaryCompareQuery || '') + '" oninput="setBinaryCompareQuery(this.value)" placeholder="search compare buckets"></label>';
+            html += '</div>';
             html += '</div>';
             html += '<div class="binary-compare-grid">';
-            html += '<div class="coverage-card"><div class="label">LEFT</div><div class="value">' + esc(compare.left.display_name || compare.left.basename) + '</div></div>';
-            html += '<div class="coverage-card"><div class="label">RIGHT</div><div class="value">' + esc(compare.right.display_name || compare.right.basename) + '</div></div>';
+            html += '<div class="coverage-card"><div class="label">LEFT</div><div class="value">' + esc(renderBinaryName(compare.left)) + '</div></div>';
+            html += '<div class="coverage-card"><div class="label">RIGHT</div><div class="value">' + esc(renderBinaryName(compare.right)) + '</div></div>';
             html += '</div>';
             html += '<div class="compare-list-grid">';
             const groups = currentBinaryCompareMode === 'all'
@@ -6806,7 +7300,7 @@ pub const HOME: &str = r#"<!doctype html>
                     html += '<div class="detail-value">-</div>';
                 } else {
                     pageItems.forEach(item => {
-                        html += '<div class="compare-row clickable" onclick="showFunctionDetail(\'' + esc(item.key_hex) + '\')"><div>' + esc(item.name) + '<div class="detail-label">RARITY ' + fmt(item.rarity_score || 0) + ' // COVER ' + fmt(item.richness_score || 0) + '</div></div><div class="compare-cell">' + esc(fmtRelativeTs(item.ts)) + '</div></div>';
+                        html += '<div class="compare-item-row" onclick="showFunctionDetail(\'' + esc(item.key_hex) + '\')"><div class="compare-item-main"><div class="compare-item-name">' + esc(item.name) + '</div><div class="compare-item-meta">RARITY ' + fmt(item.rarity_score || 0) + ' // COVER ' + fmt(item.richness_score || 0) + '</div></div><div class="compare-item-age">' + esc(fmtRelativeTs(item.ts)) + '</div></div>';
                     });
                     const totalPages = Number(compare.active_bucket_total_pages || 1);
                     const page = Number(compare.active_bucket_page || 1);
@@ -6839,12 +7333,12 @@ pub const HOME: &str = r#"<!doctype html>
             if (currentBinaryWorkbench) {
                 el.binaryWorkbench.classList.remove('hidden');
                 el.binaryWorkbenchBody.innerHTML = '<div class="workbench-layout">'
-                    + '<aside class="workbench-side"><div class="detail-label">LEFT BINARY</div><div class="detail-value accent">' + esc(compare.left.display_name || compare.left.basename) + '</div>'
-                    + '<div class="detail-grid"><div class="detail-stat"><div class="label">Functions</div><div class="value">' + fmt(compare.left.function_count || 0) + '</div></div><div class="detail-stat"><div class="label">Versions</div><div class="value">' + fmt(compare.left.version_count || 0) + '</div></div></div>'
+                    + '<aside class="workbench-side"><div class="detail-label">LEFT BINARY</div><div class="detail-value accent">' + esc(renderBinaryName(compare.left)) + '</div>'
+                    + '<div class="detail-grid"><div class="detail-stat"><div class="label">Functions</div><div class="value">' + fmt(compare.left.function_count || 0) + '</div></div><div class="detail-stat"><div class="label">Observed Function Versions</div><div class="value">' + fmt(compare.left.version_count || 0) + '</div></div><div class="detail-stat"><div class="label">Observations</div><div class="value">' + fmt(compare.left.obs_count || 0) + '</div></div></div>'
                     + renderCoverageStrip(compare.left, compare.left_facets) + '</aside>'
                     + '<section class="workbench-center">' + renderBinaryComparePanel(compare) + '</section>'
-                    + '<aside class="workbench-side"><div class="detail-label">RIGHT BINARY</div><div class="detail-value accent">' + esc(compare.right.display_name || compare.right.basename) + '</div>'
-                    + '<div class="detail-grid"><div class="detail-stat"><div class="label">Functions</div><div class="value">' + fmt(compare.right.function_count || 0) + '</div></div><div class="detail-stat"><div class="label">Versions</div><div class="value">' + fmt(compare.right.version_count || 0) + '</div></div></div>'
+                    + '<aside class="workbench-side"><div class="detail-label">RIGHT BINARY</div><div class="detail-value accent">' + esc(renderBinaryName(compare.right)) + '</div>'
+                    + '<div class="detail-grid"><div class="detail-stat"><div class="label">Functions</div><div class="value">' + fmt(compare.right.function_count || 0) + '</div></div><div class="detail-stat"><div class="label">Observed Function Versions</div><div class="value">' + fmt(compare.right.version_count || 0) + '</div></div><div class="detail-stat"><div class="label">Observations</div><div class="value">' + fmt(compare.right.obs_count || 0) + '</div></div></div>'
                     + renderCoverageStrip(compare.right, compare.right_facets) + '</aside>'
                     + '</div>';
             }
@@ -6866,22 +7360,20 @@ pub const HOME: &str = r#"<!doctype html>
             const binary = data.binary || {};
             const facets = data.facets || {};
             const graph = data.graph || { nodes: [], edges: [] };
+            const timeline = data.timeline || [];
             const fnPage = data.functions || { results: [], total: 0, page: 1, total_pages: 1 };
             let html = '<div class="detail-layout"><div class="detail-main">';
-            html += '<div class="detail-section"><div class="detail-label">Binary</div><div class="detail-value accent">' + esc(binary.display_name || binary.basename || currentBinaryMd5 || '') + '</div></div>';
+            html += '<div class="detail-section"><div class="detail-label">Binary</div><div class="detail-value accent">' + esc(renderBinaryName(binary) || currentBinaryMd5 || '') + '</div></div>';
             html += '<div class="detail-section"><div class="detail-label">MD5</div><div class="detail-value mono">' + esc(binary.md5_hex || '') + '</div></div>';
             html += '<div class="detail-grid">';
             html += '<div class="detail-stat"><div class="label">Functions</div><div class="value">' + fmt(binary.function_count || 0) + '</div></div>';
-            html += '<div class="detail-stat"><div class="label">Versions</div><div class="value">' + fmt(binary.version_count || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Typed Functions</div><div class="value">' + fmt(binary.typed_functions || facets.typed_functions || 0) + '</div></div>';
             html += '<div class="detail-stat"><div class="label">Observations</div><div class="value">' + fmt(binary.obs_count || 0) + '</div></div>';
-            html += '<div class="detail-stat"><div class="label">Hosts</div><div class="value">' + fmt(binary.host_count || 0) + '</div></div>';
             html += '<div class="detail-stat"><div class="label">First Seen</div><div class="value">' + esc(fmtRelativeTs(binary.first_seen_ts)) + '</div></div>';
             html += '<div class="detail-stat"><div class="label">Last Seen</div><div class="value">' + esc(fmtRelativeTs(binary.last_seen_ts)) + '</div></div>';
             html += '</div>';
 
-            if (binary.hostname) {
-                html += '<div class="detail-section"><div class="detail-label">Primary Host</div><div class="detail-value">' + esc(binary.hostname) + '</div></div>';
-            }
+            html += '<div class="detail-section"><div class="detail-label">Observed Function Versions</div><div class="detail-value">' + fmt(binary.version_count || 0) + '</div><div class="detail-note">Distinct function-metadata version ids seen inside this binary; this is not a binary release count.</div></div>';
 
             html += '<div class="metadata-section"><div class="metadata-header"><span>Coverage Profile</span><span class="badge nominal">FACETS</span></div><div class="metadata-content"><div class="binary-coverage-grid">';
             html += renderBinaryFacetCard('Typed', facets.typed_functions || 0, facets.function_count || binary.function_count || 0);
@@ -6892,28 +7384,22 @@ pub const HOME: &str = r#"<!doctype html>
             html += renderBinaryFacetCard('Demangled', facets.demangled_functions || 0, facets.function_count || binary.function_count || 0);
             html += '</div></div></div>';
 
-            html += '<div class="metadata-section"><div class="metadata-header"><span>Overlap Graph</span><span class="badge nominal">DEPTH ' + currentBinaryGraphDepth + '</span></div><div class="metadata-content">';
-            html += '<div class="compare-panel-actions" style="margin-bottom: var(--space-md);">';
-            html += '<label class="detail-label">Depth <input class="comment-search" style="width:72px; margin-left:8px;" type="number" min="1" max="3" value="' + esc(String(currentBinaryGraphDepth)) + '" onchange="loadBinaryGraph(this.value, ' + currentBinaryGraphLimit + ')"></label>';
-            html += '<label class="detail-label">Branch <input class="comment-search" style="width:72px; margin-left:8px;" type="number" min="1" max="16" value="' + esc(String(currentBinaryGraphLimit)) + '" onchange="loadBinaryGraph(' + currentBinaryGraphDepth + ', this.value)"></label>';
-            html += '<span class="detail-label">Edge weight: shared function count, thicker means stronger overlap.</span>';
+            html += '<div class="metadata-section"><div class="metadata-header"><span>Related Binaries</span><span class="badge nominal">OVERLAP</span></div><div class="metadata-content">';
+            html += '<div class="binary-graph-toolbar">';
+            html += '<label class="binary-graph-field"><span class="detail-label">Depth</span><input class="comment-search" type="number" min="1" max="3" value="' + esc(String(currentBinaryGraphDepth)) + '" onchange="loadBinaryGraph(this.value, ' + currentBinaryGraphLimit + ')"></label>';
+            html += '<label class="binary-graph-field"><span class="detail-label">Branch</span><input class="comment-search" type="number" min="1" max="16" value="' + esc(String(currentBinaryGraphLimit)) + '" onchange="loadBinaryGraph(' + currentBinaryGraphDepth + ', this.value)"></label>';
+            html += '<div class="binary-graph-hint">Known = shared recognized functions. Observed = shared observed hashes/signals. Graph view is temporarily disabled.</div>';
             html += '</div>';
-            html += renderBinaryGraph(graph, binary.md5_hex || currentBinaryMd5 || '');
+            // Graph view is temporarily disabled until the interaction model is improved.
+            html += renderBinaryOverlapList(data.related || [], binary.md5_hex || currentBinaryMd5 || '');
             html += '</div></div>';
 
-            if (data.related && data.related.length > 0) {
-                html += '<div class="metadata-section"><div class="metadata-header"><span>Related Binaries</span><span class="badge nominal">OVERLAP</span></div><div class="metadata-content">';
-                data.related.forEach(edge => {
-                    html += '<div class="compare-row clickable" onclick="showBinaryDetail(\'' + esc(edge.target.md5_hex) + '\')">'
-                        + '<div><div class="detail-value accent">' + esc(edge.target.display_name || edge.target.basename) + '</div><div class="detail-label">' + esc(fmtRelativeTs(edge.target.last_seen_ts)) + ' // ' + esc(edge.target.md5_hex) + '</div></div>'
-                        + '<div class="compare-cell"><span class="frame-chip">SHARED ' + fmt(edge.shared_functions || 0) + '</span><button class="result-action" onclick="event.stopPropagation();loadBinaryCompare(\'' + esc(edge.target.md5_hex) + '\')">diff</button></div>'
-                        + '</div>';
-                });
-                html += '</div></div>';
-            }
+            html += '<div class="metadata-section"><div class="metadata-header"><span>Family Timeline</span><span class="badge nominal">RECENCY</span></div><div class="metadata-content">';
+            html += renderBinaryTimeline(timeline);
+            html += '</div></div>';
 
             if (currentBinaryCompareData && currentBinaryCompareData.right) {
-                html += '<div class="metadata-section"><div class="metadata-header"><span>Active Compare</span><span class="badge nominal">FULL VIEW</span></div><div class="metadata-content"><div class="compare-row clickable" onclick="openBinaryCompareModal();renderBinaryCompareView();"><div><div class="detail-value accent">' + esc(currentBinaryCompareData.right.display_name || currentBinaryCompareData.right.basename) + '</div><div class="detail-label">Open dedicated compare surface</div></div><div class="compare-cell"><span class="frame-chip">SHARED ' + fmt(currentBinaryCompareData.shared_count || 0) + '</span></div></div></div></div>';
+                html += '<div class="metadata-section"><div class="metadata-header"><span>Active Compare</span><span class="badge nominal">FULL VIEW</span></div><div class="metadata-content"><div class="compare-row clickable" onclick="openBinaryCompareModal();renderBinaryCompareView();"><div><div class="detail-value accent">' + esc(renderBinaryName(currentBinaryCompareData.right)) + '</div><div class="detail-label">Open dedicated compare surface</div></div><div class="compare-cell"><span class="frame-chip">SHARED ' + fmt(currentBinaryCompareData.shared_count || 0) + '</span></div></div></div></div>';
             }
 
             html += '<div class="metadata-section"><div class="metadata-header"><span>Functions In Binary</span><span class="badge">' + fmt(fnPage.total || 0) + ' TOTAL</span></div><div class="metadata-content">';
