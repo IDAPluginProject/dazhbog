@@ -801,6 +801,10 @@ pub const HOME: &str = r#"<!doctype html>
             padding: var(--space-md);
         }
 
+        .compare-panel.hidden {
+            display: none;
+        }
+
         .compare-panel.compact {
             padding: 10px 12px;
         }
@@ -2247,6 +2251,12 @@ pub const HOME: &str = r#"<!doctype html>
             align-items: center;
         }
 
+        .controlflow-active-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
         .controlflow-focus-note {
             color: var(--text-dim);
             font-size: 11px;
@@ -3199,7 +3209,7 @@ pub const HOME: &str = r#"<!doctype html>
             </div>
         </section>
 
-        <section class="compare-panel compact" id="compare-panel">
+        <section class="compare-panel compact hidden" id="compare-panel">
             <div class="compare-panel-head">
                 <span class="compare-title">Compare Panel</span>
                 <span class="compare-panel-summary" id="compare-summary">No functions queued</span>
@@ -3489,11 +3499,6 @@ pub const HOME: &str = r#"<!doctype html>
                     <div class="metric-rate" id="rate-totalrec"></div>
                 </div>
                 <div class="metric-mini">
-                    <div class="label">Started</div>
-                    <div class="value" id="m-start">-</div>
-                    <div class="metric-rate" id="rate-start"></div>
-                </div>
-                <div class="metric-mini">
                     <div class="label">Versions Scored</div>
                     <div class="value" id="m-vconsidered">0</div>
                     <div class="metric-rate" id="rate-vconsidered"></div>
@@ -3644,11 +3649,9 @@ pub const HOME: &str = r#"<!doctype html>
             mOverflow: document.getElementById('m-overflow'),
             mUpErr: document.getElementById('m-uperr'),
             mTotalRec: document.getElementById('m-totalrec'),
-            mStart: document.getElementById('m-start'),
             mVconsidered: document.getElementById('m-vconsidered'),
             mFallback: document.getElementById('m-fallback'),
             rateTotalRec: document.getElementById('rate-totalrec'),
-            rateStart: document.getElementById('rate-start'),
             rateVconsidered: document.getElementById('rate-vconsidered'),
             rateFallback: document.getElementById('rate-fallback'),
             sparkErrors: document.getElementById('spark-errors'),
@@ -3748,6 +3751,72 @@ pub const HOME: &str = r#"<!doctype html>
             if (!ts) return '-';
             const d = new Date(ts * 1000);
             return d.toISOString().replace('T', ' ').slice(0, 19) + 'Z';
+        }
+
+        function easeOutExpo(t) {
+            return t >= 1 ? 1 : 1 - Math.pow(2, -10 * t);
+        }
+
+        function counterDuration(from, to, baseDuration) {
+            const delta = Math.abs(to - from);
+            const magnitude = Math.max(Math.abs(from), Math.abs(to), 1);
+            const scaleBoost = Math.min(1.45, 1 + (Math.log10(magnitude + 1) * 0.08));
+            const deltaBoost = Math.min(1.35, 1 + (Math.log10(delta + 1) * 0.06));
+            return Math.max(420, Math.min(1650, baseDuration * scaleBoost * deltaBoost));
+        }
+
+        function snapAnimatedValue(value, delta) {
+            if (delta < 25) return Math.round(value);
+            if (delta < 1000) return Math.round(value / 5) * 5;
+            if (delta < 100000) return Math.round(value / 25) * 25;
+            if (delta < 10000000) return Math.round(value / 250) * 250;
+            return Math.round(value / 1000) * 1000;
+        }
+
+        function animateMetricValue(node, nextValue, formatter = fmt, duration = 900) {
+            if (!node) return;
+            const id = node.id || String(Math.random());
+            const prev = metricAnimationState.get(id);
+            const to = Number(nextValue || 0);
+            const from = prev && Number.isFinite(prev.current) ? prev.current : to;
+            const tunedDuration = counterDuration(from, to, duration);
+            const delta = Math.abs(to - from);
+            if (!Number.isFinite(to)) {
+                node.textContent = formatter(nextValue);
+                return;
+            }
+            if (Math.abs(to - from) < 0.000001) {
+                node.textContent = formatter(to);
+                metricAnimationState.set(id, { current: to, raf: null });
+                return;
+            }
+            if (prev && prev.raf) cancelAnimationFrame(prev.raf);
+            const start = performance.now();
+            const state = { current: from, raf: null };
+            const tick = now => {
+                const p = Math.min(1, (now - start) / tunedDuration);
+                const eased = easeOutExpo(p);
+                const value = from + ((to - from) * eased);
+                const snapped = snapAnimatedValue(value, delta);
+                state.current = value;
+                node.textContent = formatter(snapped);
+                if (p < 1) state.raf = requestAnimationFrame(tick);
+                else {
+                    state.current = to;
+                    state.raf = null;
+                    node.textContent = formatter(to);
+                }
+            };
+            metricAnimationState.set(id, state);
+            state.raf = requestAnimationFrame(tick);
+        }
+
+        function fmtWholeAnimated(n) {
+            return fmt(Math.round(Number(n || 0)));
+        }
+
+        function fmtBytesAnimated(n) {
+            return fmtBytes(Math.max(0, Math.round(Number(n || 0))));
         }
 
         function detectQueryIntent(query) {
@@ -4257,8 +4326,10 @@ pub const HOME: &str = r#"<!doctype html>
         function openCompareModal() {
             if (compareKeys.length < 2) return;
             currentDetailData = null;
+            currentDetailKeyHex = null;
             currentCompareRecords = [];
             pendingDetailSection = null;
+            syncHashWithUi();
             el.modalKey.textContent = compareKeys.length + ' FUNCTIONS';
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING COMPARISON...</div>';
             el.detailModal.classList.add('active');
@@ -4349,10 +4420,40 @@ pub const HOME: &str = r#"<!doctype html>
             if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
-        function setActiveDetailNav(id) {
+        function setActiveDetailNav(id, updateUrl = true) {
+            currentDetailSection = id || null;
             document.querySelectorAll('.detail-nav button').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.target === id);
             });
+            if (updateUrl) syncHashWithUi();
+        }
+
+        function activateDetailSection(id, updateUrl = true, smooth = true) {
+            if (!id) return;
+            const node = document.getElementById(id);
+            if (node) {
+                node.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+            }
+            setActiveDetailNav(id, updateUrl);
+        }
+
+        function syncDetailSectionFromScroll() {
+            if (!el.detailModal.classList.contains('active') || !currentDetailKeyHex) return;
+            const anchors = Array.from(el.modalBody.querySelectorAll('.detail-anchor[id]'));
+            if (!anchors.length) return;
+            const containerTop = el.modalBody.getBoundingClientRect().top;
+            let bestId = anchors[0].id;
+            let bestDist = Number.POSITIVE_INFINITY;
+            anchors.forEach(node => {
+                const dist = Math.abs(node.getBoundingClientRect().top - containerTop - 18);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestId = node.id;
+                }
+            });
+            if (bestId && bestId !== currentDetailSection) {
+                setActiveDetailNav(bestId, true);
+            }
         }
 
         function analyzeFrame(fd) {
@@ -4428,6 +4529,7 @@ pub const HOME: &str = r#"<!doctype html>
             html += '<span class="frame-chip">' + esc(String(switches.length)) + ' switch sites</span>';
             html += '<span class="frame-chip">' + esc(String(tables.length)) + ' jump tables</span>';
             if (selectedControlFlowGroup) html += '<span class="controlflow-focus-note">selection ' + esc(selectedControlFlowGroup.replace(/^grp:/, '')) + '</span>';
+            if (selectedControlFlowCase) html += '<span class="controlflow-active-filter">' + renderCaseChip(selectedControlFlowCase, selectedControlFlowGroup) + '<button class="controlflow-toggle" onclick="event.stopPropagation();clearControlFlowCase()">Clear Case</button></span>';
             html += '</div>';
             html += '<div class="controlflow-toolbar-actions">';
             html += '<button class="controlflow-toggle" onclick="event.stopPropagation();toggleControlFlowFocusMode()">' + (controlFlowFocusMode ? 'Exit Focus Mode' : 'Focus Selection') + '</button>';
@@ -4558,7 +4660,7 @@ pub const HOME: &str = r#"<!doctype html>
                     visibleRefs.forEach(ref => {
                         const rowId = controlFlowId(ref.kind, ref.fchunk_nr, ref.fchunk_off);
                         html += '<div class="jumptable-ref' + (selectedControlFlowRow === rowId ? ' active' : '') + '" data-controlflow-id="' + rowId + '" onmouseenter="hoverControlFlowLink(\'' + rowId + '\')" onmouseleave="clearControlFlowHover()" onclick="selectControlFlowRow(\'' + rowId + '\', \'' + ('grp:' + jt.addr) + '\')">';
-                        html += '<div class="jumptable-ref-meta">' + esc(ref.kind) + '<br>chunk ' + esc(String(ref.fchunk_nr)) + '<br>@ <a href="javascript:void(0)" onclick="event.stopPropagation();focusCommentRow(&quot;' + rowId + '&quot;, null, true);jumpToDetailSection(&quot;section-comments&quot;);setActiveDetailNav(&quot;section-comments&quot;);" style="color:var(--accent);text-decoration:none;">' + esc(fmtHex(ref.fchunk_off)) + '</a></div>';
+                        html += '<div class="jumptable-ref-meta">' + esc(ref.kind) + '<br>chunk ' + esc(String(ref.fchunk_nr)) + '<br>@ <a href="javascript:void(0)" onclick="event.stopPropagation();focusCommentRow(&quot;' + rowId + '&quot;, null, true);activateDetailSection(&quot;section-comments&quot;);" style="color:var(--accent);text-decoration:none;">' + esc(fmtHex(ref.fchunk_off)) + '</a></div>';
                         html += '<div class="jumptable-ref-body"><div class="relation-summary"><span class="frame-chip">' + esc(ref.source_role) + '</span><span class="frame-chip">' + esc(summarizeRelation(ref)) + '</span></div>';
                         if (ref.case_labels && ref.case_labels.length > 0) {
                             html += '<div class="jumptable-case-strip">' + ref.case_labels.map(label => renderCaseChip(label, 'grp:' + jt.addr)).join('') + '</div>';
@@ -5263,10 +5365,15 @@ pub const HOME: &str = r#"<!doctype html>
         let activeCommentMarker = null;
         let activeCommentMarkerTimer = null;
         let currentDetailData = null;
+        let currentDetailKeyHex = null;
+        let currentDetailSection = null;
+        let detailScrollSyncRaf = null;
         let copiedKeyHex = null;
         let copiedKeyTimer = null;
         let pendingDetailSection = null;
         let currentCompareRecords = [];
+        let suppressHashHandler = false;
+        const metricAnimationState = new Map();
 
         function pulseCommentMarker(markerId) {
             if (!markerId) return;
@@ -5400,6 +5507,11 @@ pub const HOME: &str = r#"<!doctype html>
             if (currentDetailData) renderFunctionDetail(currentDetailData);
         }
 
+        function clearControlFlowCase() {
+            selectedControlFlowCase = null;
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
         function toggleControlFlowFocusMode() {
             if (!selectedControlFlowGroup) return;
             controlFlowFocusMode = !controlFlowFocusMode;
@@ -5474,17 +5586,60 @@ pub const HOME: &str = r#"<!doctype html>
             const params = new URLSearchParams(window.location.hash.slice(1));
             return {
                 q: params.get('q') || '',
-                page: parseInt(params.get('page') || '1', 10) || 1
+                page: parseInt(params.get('page') || '1', 10) || 1,
+                f: params.get('f') || '',
+                s: params.get('s') || ''
             };
         }
 
-        function updateHash(query, page = 1) {
-            if (query) {
-                let hash = 'q=' + encodeURIComponent(query);
-                if (page > 1) hash += '&page=' + page;
-                window.location.hash = hash;
-            } else {
+        function updateHash(query, page = 1, functionKey = '', sectionId = '') {
+            const params = new URLSearchParams();
+            if (query) params.set('q', query);
+            if (query && page > 1) params.set('page', String(page));
+            if (functionKey) params.set('f', functionKey);
+            if (functionKey && sectionId) params.set('s', sectionId);
+            const nextHash = params.toString();
+            if (!nextHash) {
                 history.replaceState(null, '', window.location.pathname);
+                return;
+            }
+            const currentHash = window.location.hash.replace(/^#/, '');
+            if (currentHash === nextHash) return;
+            suppressHashHandler = true;
+            window.location.hash = nextHash;
+            setTimeout(() => { suppressHashHandler = false; }, 0);
+        }
+
+        function syncHashWithUi() {
+            const functionKey = el.detailModal.classList.contains('active') && currentDetailKeyHex ? currentDetailKeyHex : '';
+            const sectionId = functionKey ? (currentDetailSection || pendingDetailSection || '') : '';
+            updateHash(currentQuery, currentPage, functionKey, sectionId);
+        }
+
+        function applyHashState(state) {
+            const q = (state && state.q) ? state.q : '';
+            const page = state && state.page ? state.page : 1;
+            const f = (state && state.f) ? state.f : '';
+            const s = (state && state.s) ? state.s : null;
+
+            el.q.value = q;
+            if (q) {
+                runSearch(q, page, false).then(() => {
+                    const needsOpen = f && (!el.detailModal.classList.contains('active') || currentDetailKeyHex !== f || currentCompareRecords.length > 0);
+                    if (needsOpen) showFunctionDetail(f, s, false);
+                    else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) activateDetailSection(s, false, false);
+                    else if (!f && el.detailModal.classList.contains('active') && !currentCompareRecords.length) closeDetailModal(false);
+                });
+                return;
+            }
+
+            showDashboard(false);
+            if (f && (!el.detailModal.classList.contains('active') || currentDetailKeyHex !== f || currentCompareRecords.length > 0)) {
+                showFunctionDetail(f, s, false);
+            } else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) {
+                activateDetailSection(s, false, false);
+            } else if (!f && el.detailModal.classList.contains('active') && !currentCompareRecords.length) {
+                closeDetailModal(false);
             }
         }
 
@@ -5504,31 +5659,30 @@ pub const HOME: &str = r#"<!doctype html>
                 const prev = metricsPrevSnapshot;
                 const dtSec = metricsPrevTsMs > 0 ? Math.max(0.001, (nowMs - metricsPrevTsMs) / 1000) : 0;
 
-                el.mIndexed.textContent = fmt(d.indexed_funcs || 0);
-                el.mStorage.textContent = fmtBytes(d.storage_bytes || 0);
-                el.mSearchDocs.textContent = fmt(d.search_docs || 0);
-                el.mBinaries.textContent = fmt(d.unique_binaries || 0);
-                el.mQueried.textContent = fmt(d.queried_funcs || 0);
-                el.mRpc.textContent = fmt(d.active_connections || 0);
-                el.mUpstream.textContent = fmt(d.upstream_requests || 0);
-                el.mFetched.textContent = fmt(d.upstream_fetched || 0);
-                el.mNew.textContent = fmt(d.new_funcs || 0);
-                el.mPulls.textContent = fmt(d.pulls || 0);
-                el.mPushes.textContent = fmt(d.pushes || 0);
-                el.mScoring.textContent = fmt(d.scoring_batches || 0);
-                el.mErrors.textContent = fmt(d.errors || 0);
-                el.mTimeouts.textContent = fmt(d.timeouts || 0);
-                el.mRejects.textContent = fmt(d.decoder_rejects || 0);
-                el.mAppend.textContent = fmt(d.append_failures || 0);
-                el.mOverflow.textContent = fmt(d.index_overflows || 0);
-                el.mUpErr.textContent = fmt(d.upstream_errors || 0);
-                el.mTotalRec.textContent = fmt(d.total_records || 0);
-                el.mStart.textContent = fmtStartTime(d.start_time || 0);
-                el.mVconsidered.textContent = fmt(d.scoring_versions_considered || 0);
-                el.mFallback.textContent = fmt(d.scoring_fallback_latest || 0);
+                animateMetricValue(el.mIndexed, d.indexed_funcs || 0, fmtWholeAnimated, 1050);
+                animateMetricValue(el.mStorage, d.storage_bytes || 0, fmtBytesAnimated, 1100);
+                animateMetricValue(el.mSearchDocs, d.search_docs || 0, fmtWholeAnimated, 1000);
+                animateMetricValue(el.mBinaries, d.unique_binaries || 0, fmtWholeAnimated, 950);
+                animateMetricValue(el.mQueried, d.queried_funcs || 0, fmtWholeAnimated, 1000);
+                animateMetricValue(el.mRpc, d.active_connections || 0, fmtWholeAnimated, 650);
+                animateMetricValue(el.mUpstream, d.upstream_requests || 0, fmtWholeAnimated, 900);
+                animateMetricValue(el.mFetched, d.upstream_fetched || 0, fmtWholeAnimated, 900);
+                animateMetricValue(el.mNew, d.new_funcs || 0, fmtWholeAnimated, 850);
+                animateMetricValue(el.mPulls, d.pulls || 0, fmtWholeAnimated, 850);
+                animateMetricValue(el.mPushes, d.pushes || 0, fmtWholeAnimated, 850);
+                animateMetricValue(el.mScoring, d.scoring_batches || 0, fmtWholeAnimated, 900);
+                animateMetricValue(el.mErrors, d.errors || 0, fmtWholeAnimated, 700);
+                animateMetricValue(el.mTimeouts, d.timeouts || 0, fmtWholeAnimated, 700);
+                animateMetricValue(el.mRejects, d.decoder_rejects || 0, fmtWholeAnimated, 700);
+                animateMetricValue(el.mAppend, d.append_failures || 0, fmtWholeAnimated, 700);
+                animateMetricValue(el.mOverflow, d.index_overflows || 0, fmtWholeAnimated, 700);
+                animateMetricValue(el.mUpErr, d.upstream_errors || 0, fmtWholeAnimated, 700);
+                animateMetricValue(el.mTotalRec, d.total_records || 0, fmtWholeAnimated, 1100);
+                animateMetricValue(el.mVconsidered, d.scoring_versions_considered || 0, fmtWholeAnimated, 1000);
+                animateMetricValue(el.mFallback, d.scoring_fallback_latest || 0, fmtWholeAnimated, 900);
 
-                el.protoV5.textContent = fmt(d.lumina_v5p || 0);
-                el.protoV0.textContent = fmt(d.lumina_v0_4 || 0);
+                animateMetricValue(el.protoV5, d.lumina_v5p || 0, fmtWholeAnimated, 650);
+                animateMetricValue(el.protoV0, d.lumina_v0_4 || 0, fmtWholeAnimated, 650);
 
                 setRateText(el.rateQps, d.queried_funcs, prev && prev.queried_funcs, dtSec);
                 setRateText(el.ratePulls, d.pulls, prev && prev.pulls, dtSec);
@@ -5536,7 +5690,6 @@ pub const HOME: &str = r#"<!doctype html>
                 setRateText(el.rateTotalRec, d.total_records, prev && prev.total_records, dtSec);
                 setRateText(el.rateVconsidered, d.scoring_versions_considered, prev && prev.scoring_versions_considered, dtSec);
                 setRateText(el.rateFallback, d.scoring_fallback_latest, prev && prev.scoring_fallback_latest, dtSec);
-                el.rateStart.textContent = 'uptime ' + fmtUptime(d.uptime_secs || 0);
 
                 pushSparklinePoint('errors', d.errors || 0);
                 pushSparklinePoint('timeouts', d.timeouts || 0);
@@ -5592,22 +5745,23 @@ pub const HOME: &str = r#"<!doctype html>
             }
         }
 
-        function showDashboard() {
+        function showDashboard(updateUrl = true) {
             el.dashboard.classList.remove('hidden');
             el.secondary.classList.remove('hidden');
             el.results.classList.remove('active');
+            el.comparePanel.classList.add('hidden');
             el.pagination.innerHTML = '';
             currentPage = 1;
             currentQuery = '';
             currentHits = [];
             selectedResultIndex = -1;
             openPreviewKey = null;
-            updateHash('');
+            if (updateUrl) syncHashWithUi();
         }
 
         async function runSearch(query, page = 1, updateUrl = true) {
             query = query.trim();
-            if (!query) { showDashboard(); return; }
+            if (!query) { showDashboard(updateUrl); return; }
 
             currentQuery = query;
             currentPage = page;
@@ -5615,11 +5769,12 @@ pub const HOME: &str = r#"<!doctype html>
             el.dashboard.classList.add('hidden');
             el.secondary.classList.add('hidden');
             el.results.classList.add('active');
+            el.comparePanel.classList.remove('hidden');
             el.resultsQuery.textContent = query;
             el.resultsList.innerHTML = '<div class="state-message"><div class="icon">&gt;&gt;&gt;</div><h3>QUERYING INDEX</h3><p>Processing request...</p></div>';
             el.pagination.innerHTML = '';
 
-            if (updateUrl) updateHash(query, page);
+            if (updateUrl) updateHash(query, page, currentDetailKeyHex || '');
 
             const t0 = performance.now();
             try {
@@ -5798,9 +5953,8 @@ pub const HOME: &str = r#"<!doctype html>
             }
         });
         window.addEventListener('hashchange', () => {
-            const { q, page } = parseHash();
-            el.q.value = q;
-            if (q) runSearch(q, page, false); else showDashboard();
+            if (suppressHashHandler) return;
+            applyHashState(parseHash());
         });
 
         updateTime();
@@ -5813,21 +5967,23 @@ pub const HOME: &str = r#"<!doctype html>
         refreshCompareLoadOptions();
         el.resultsSort.value = currentSort;
 
-        const init = parseHash();
-        if (init.q) { el.q.value = init.q; runSearch(init.q, init.page, false); }
+        applyHashState(parseHash());
 
         // ═══════════════════════════════════════════════════════════════
         // FUNCTION DETAIL MODAL
         // ═══════════════════════════════════════════════════════════════
 
-        function showFunctionDetail(keyHex, sectionId = null) {
+        function showFunctionDetail(keyHex, sectionId = null, updateUrl = true) {
             currentDetailData = null;
+            currentDetailKeyHex = keyHex;
             currentCompareRecords = [];
             pendingDetailSection = sectionId;
             selectedControlFlowGroup = null;
             selectedControlFlowRow = null;
             selectedControlFlowCase = null;
             controlFlowFocusMode = false;
+            currentDetailSection = sectionId || null;
+            if (updateUrl) syncHashWithUi();
             el.modalKey.textContent = keyHex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
             el.detailModal.classList.add('active');
@@ -5844,16 +6000,19 @@ pub const HOME: &str = r#"<!doctype html>
                 });
         }
 
-        function closeDetailModal() {
+        function closeDetailModal(updateUrl = true) {
             el.detailModal.classList.remove('active');
             document.body.style.overflow = '';
             currentDetailData = null;
+            currentDetailKeyHex = null;
             currentCompareRecords = [];
             pendingDetailSection = null;
             selectedControlFlowGroup = null;
             selectedControlFlowRow = null;
             selectedControlFlowCase = null;
             controlFlowFocusMode = false;
+            currentDetailSection = null;
+            if (updateUrl) syncHashWithUi();
             if (activeCommentRow) {
                 activeCommentRow.classList.remove('active');
                 activeCommentRow = null;
@@ -5876,6 +6035,14 @@ pub const HOME: &str = r#"<!doctype html>
             if (e.target === el.detailModal) closeDetailModal();
         });
 
+        el.modalBody.addEventListener('scroll', () => {
+            if (detailScrollSyncRaf) cancelAnimationFrame(detailScrollSyncRaf);
+            detailScrollSyncRaf = requestAnimationFrame(() => {
+                detailScrollSyncRaf = null;
+                syncDetailSectionFromScroll();
+            });
+        });
+
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape' && el.detailModal.classList.contains('active')) {
                 closeDetailModal();
@@ -5889,6 +6056,7 @@ pub const HOME: &str = r#"<!doctype html>
             }
 
             currentDetailData = data;
+            currentDetailKeyHex = data.key_hex || currentDetailKeyHex;
 
             const m = data.metadata || {};
             const parseBadge = (m.errors && m.errors.length > 0) ? 'PARTIAL' : 'PARSED';
@@ -5905,8 +6073,9 @@ pub const HOME: &str = r#"<!doctype html>
 
             let html = '<div class="detail-layout">';
             html += '<div class="detail-nav">';
+            const activeSectionId = pendingDetailSection || currentDetailSection || sections[0].id;
             sections.forEach((s, i) => {
-                html += '<button data-target="' + s.id + '" class="' + (i === 0 ? 'active' : '') + '" onclick="jumpToDetailSection(\'' + s.id + '\');setActiveDetailNav(\'' + s.id + '\');">' + esc(s.label) + '</button>';
+                html += '<button data-target="' + s.id + '" class="' + (s.id === activeSectionId || (i === 0 && !activeSectionId) ? 'active' : '') + '" onclick="activateDetailSection(\'' + s.id + '\');">' + esc(s.label) + '</button>';
             });
             html += '</div><div class="detail-main">';
 
@@ -6003,9 +6172,13 @@ pub const HOME: &str = r#"<!doctype html>
             html += '</div></div>';
             el.modalBody.innerHTML = html;
             if (pendingDetailSection) {
-                jumpToDetailSection(pendingDetailSection);
-                setActiveDetailNav(pendingDetailSection);
+                activateDetailSection(pendingDetailSection, false, false);
                 pendingDetailSection = null;
+            } else if (!currentDetailSection) {
+                currentDetailSection = 'section-overview';
+                setActiveDetailNav(currentDetailSection, false);
+            } else {
+                setActiveDetailNav(currentDetailSection, false);
             }
         }
     </script>
