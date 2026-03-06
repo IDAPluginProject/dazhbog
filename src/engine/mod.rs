@@ -4,9 +4,9 @@ mod index;
 pub mod search;
 mod segment;
 
-pub use context_index::ContextIndex;
+pub use context_index::{BinaryMeta, ContextIndex};
 pub use index::{migrate_legacy_index_files, IndexError, ShardedIndex, UpsertResult};
-pub use search::{rebuild_from_engine, SearchDocument, SearchHit, SearchIndex};
+pub use search::{rebuild_from_engine, BinaryRefHit, SearchDocument, SearchHit, SearchIndex};
 pub use segment::{OpenSegments, Record};
 
 use crate::config::{Engine, Scoring};

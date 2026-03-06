@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::api::metrics::METRICS;
-use crate::db::Database;
+use crate::db::{BinaryCompareItem, BinaryFacetSummary, BinarySummary, Database};
 use crate::engine::SearchHit;
 use crate::protocol::lumina::metadata::{parse_metadata, InsnCmt};
 
@@ -309,8 +309,20 @@ fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Opti
 /// Search response structure with pagination.
 #[derive(Serialize)]
 pub struct SearchResponse {
+    mode: &'static str,
     query: String,
     results: Vec<SearchHit>,
+    total: usize,
+    page: usize,
+    per_page: usize,
+    total_pages: usize,
+}
+
+#[derive(Serialize)]
+pub struct BinarySearchResponse {
+    mode: &'static str,
+    query: String,
+    results: Vec<BinarySummary>,
     total: usize,
     page: usize,
     per_page: usize,
@@ -428,6 +440,71 @@ pub struct FunctionDetailResponse {
     pub data_size: usize,
     pub metadata: Option<ParsedMetadataJson>,
     pub binary_names: Vec<String>,
+    pub binaries: Vec<crate::engine::BinaryRefHit>,
+}
+
+#[derive(Serialize)]
+pub struct BinaryOverlapEdge {
+    pub target: BinarySummary,
+    pub shared_functions: u64,
+}
+
+#[derive(Serialize)]
+pub struct BinaryGraphNode {
+    pub binary: BinarySummary,
+}
+
+#[derive(Serialize)]
+pub struct BinaryGraphEdge {
+    pub source_md5: String,
+    pub target_md5: String,
+    pub shared_functions: u64,
+}
+
+#[derive(Serialize)]
+pub struct BinaryGraphResponse {
+    pub nodes: Vec<BinaryGraphNode>,
+    pub edges: Vec<BinaryGraphEdge>,
+}
+
+#[derive(Serialize)]
+pub struct BinaryCompareResponse {
+    pub left: BinarySummary,
+    pub right: BinarySummary,
+    pub left_facets: BinaryFacetSummary,
+    pub right_facets: BinaryFacetSummary,
+    pub shared_count: usize,
+    pub left_only_count: usize,
+    pub right_only_count: usize,
+    pub sample_limit: usize,
+    pub shared: Vec<BinaryCompareItem>,
+    pub left_only: Vec<BinaryCompareItem>,
+    pub right_only: Vec<BinaryCompareItem>,
+}
+
+#[derive(Serialize)]
+pub struct BinaryFunctionsPage {
+    pub results: Vec<SearchHit>,
+    pub total: usize,
+    pub page: usize,
+    pub per_page: usize,
+    pub total_pages: usize,
+}
+
+#[derive(Serialize)]
+pub struct BinaryDetailResponse {
+    pub binary: BinarySummary,
+    pub facets: BinaryFacetSummary,
+    pub related: Vec<BinaryOverlapEdge>,
+    pub graph: BinaryGraphResponse,
+    pub functions: BinaryFunctionsPage,
+}
+
+#[derive(Serialize)]
+pub struct BinaryGraphConfigResponse {
+    pub depth: usize,
+    pub limit: usize,
+    pub graph: BinaryGraphResponse,
 }
 
 /// Metrics snapshot for JSON API.
@@ -631,6 +708,7 @@ pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Respons
 
             // Get binary names from context index
             let binary_names = db.get_basenames_for_key(key).unwrap_or_default();
+            let binaries = db.get_binary_refs_for_key(key, 12).unwrap_or_default();
 
             json_response(
                 &FunctionDetailResponse {
@@ -641,6 +719,7 @@ pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Respons
                     data_size: func.data.len(),
                     metadata,
                     binary_names,
+                    binaries,
                 },
                 StatusCode::OK,
             )
@@ -683,12 +762,41 @@ pub async fn handle_search(db: Arc<Database>, req: Request<Incoming>) -> Respons
         .clamp(1, MAX_PER_PAGE);
 
     let offset = (page - 1) * per_page;
+    let mode = parse_query_param(&req, "mode").unwrap_or_else(|| "functions".to_string());
+
+    if mode == "binaries" {
+        match db.search_binaries_paginated(&q, offset, per_page).await {
+            Ok((results, total)) => {
+                let total_pages = (total + per_page - 1) / per_page;
+                return json_response(
+                    &BinarySearchResponse {
+                        mode: "binaries",
+                        query: q,
+                        results,
+                        total,
+                        page,
+                        per_page,
+                        total_pages,
+                    },
+                    StatusCode::OK,
+                );
+            }
+            Err(e) => {
+                error!("binary search failed: {}", e);
+                return json_response(
+                    &serde_json::json!({"error": "binary search failed"}),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                );
+            }
+        }
+    }
 
     match db.search_functions_paginated(&q, offset, per_page).await {
         Ok((results, total)) => {
             let total_pages = (total + per_page - 1) / per_page;
             json_response(
                 &SearchResponse {
+                    mode: "functions",
                     query: q,
                     results,
                     total,
@@ -707,4 +815,277 @@ pub async fn handle_search(db: Arc<Database>, req: Request<Incoming>) -> Respons
             )
         }
     }
+}
+
+pub async fn handle_binary_detail(db: Arc<Database>, md5_hex: &str) -> Response<Full<Bytes>> {
+    let md5 = match parse_md5_hex(md5_hex) {
+        Some(md5) => md5,
+        None => {
+            return json_response(
+                &serde_json::json!({"error": "invalid md5 format"}),
+                StatusCode::BAD_REQUEST,
+            )
+        }
+    };
+
+    match db.get_binary_summary(md5).await {
+        Ok(Some(binary)) => {
+            let per_page = 25usize;
+            let facets = db.get_binary_facets(md5, 8192).await.unwrap_or_default();
+            let (functions, total) = match db.get_binary_function_hits(md5, 0, per_page).await {
+                Ok(res) => res,
+                Err(e) => {
+                    error!("binary functions failed: {}", e);
+                    return json_response(
+                        &serde_json::json!({"error": "binary functions failed"}),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    );
+                }
+            };
+            let related = db
+                .get_binary_overlap(md5, 8)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(target, shared_functions)| BinaryOverlapEdge {
+                    target,
+                    shared_functions,
+                })
+                .collect();
+            let graph = match db.get_binary_graph(md5, 2, 6).await {
+                Ok((nodes, edges)) => BinaryGraphResponse {
+                    nodes: nodes.into_iter().map(|binary| BinaryGraphNode { binary }).collect(),
+                    edges: edges
+                        .into_iter()
+                        .map(|(source_md5, target_md5, shared_functions)| BinaryGraphEdge {
+                            source_md5,
+                            target_md5,
+                            shared_functions,
+                        })
+                        .collect(),
+                },
+                Err(_) => BinaryGraphResponse { nodes: Vec::new(), edges: Vec::new() },
+            };
+            json_response(
+                &BinaryDetailResponse {
+                    binary,
+                    facets,
+                    related,
+                    graph,
+                    functions: BinaryFunctionsPage {
+                        results: functions,
+                        total,
+                        page: 1,
+                        per_page,
+                        total_pages: (total + per_page - 1) / per_page,
+                    },
+                },
+                StatusCode::OK,
+            )
+        }
+        Ok(None) => json_response(
+            &serde_json::json!({"error": "binary not found"}),
+            StatusCode::NOT_FOUND,
+        ),
+        Err(e) => {
+            error!("get binary failed for {}: {}", md5_hex, e);
+            json_response(
+                &serde_json::json!({"error": "database error"}),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    }
+}
+
+pub async fn handle_binary_functions(
+    db: Arc<Database>,
+    md5_hex: &str,
+    req: Request<Incoming>,
+) -> Response<Full<Bytes>> {
+    let md5 = match parse_md5_hex(md5_hex) {
+        Some(md5) => md5,
+        None => {
+            return json_response(
+                &serde_json::json!({"error": "invalid md5 format"}),
+                StatusCode::BAD_REQUEST,
+            )
+        }
+    };
+    let page: usize = parse_query_param(&req, "page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+    let per_page: usize = parse_query_param(&req, "per_page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(25)
+        .clamp(1, 100);
+    let offset = (page - 1) * per_page;
+    match db.get_binary_function_hits(md5, offset, per_page).await {
+        Ok((results, total)) => json_response(
+            &BinaryFunctionsPage {
+                results,
+                total,
+                page,
+                per_page,
+                total_pages: (total + per_page - 1) / per_page,
+            },
+            StatusCode::OK,
+        ),
+        Err(e) => {
+            error!("binary functions failed for {}: {}", md5_hex, e);
+            json_response(
+                &serde_json::json!({"error": "binary functions failed"}),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    }
+}
+
+pub async fn handle_binary_overlap(
+    db: Arc<Database>,
+    md5_hex: &str,
+    req: Request<Incoming>,
+) -> Response<Full<Bytes>> {
+    let md5 = match parse_md5_hex(md5_hex) {
+        Some(md5) => md5,
+        None => {
+            return json_response(
+                &serde_json::json!({"error": "invalid md5 format"}),
+                StatusCode::BAD_REQUEST,
+            )
+        }
+    };
+    let depth: usize = parse_query_param(&req, "depth")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
+        .clamp(1, 3);
+    let limit: usize = parse_query_param(&req, "limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8)
+        .clamp(1, 32);
+    match db.get_binary_overlap(md5, limit * depth).await {
+        Ok(edges) => json_response(
+            &edges
+                .into_iter()
+                .map(|(target, shared_functions)| BinaryOverlapEdge {
+                    target,
+                    shared_functions,
+                })
+                .collect::<Vec<_>>(),
+            StatusCode::OK,
+        ),
+        Err(e) => {
+            error!("binary overlap failed for {}: {}", md5_hex, e);
+            json_response(
+                &serde_json::json!({"error": "binary overlap failed"}),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    }
+}
+
+pub async fn handle_binary_graph(
+    db: Arc<Database>,
+    md5_hex: &str,
+    req: Request<Incoming>,
+) -> Response<Full<Bytes>> {
+    let md5 = match parse_md5_hex(md5_hex) {
+        Some(md5) => md5,
+        None => {
+            return json_response(
+                &serde_json::json!({"error": "invalid md5 format"}),
+                StatusCode::BAD_REQUEST,
+            )
+        }
+    };
+    let depth: usize = parse_query_param(&req, "depth")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2)
+        .clamp(1, 3);
+    let limit: usize = parse_query_param(&req, "limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(6)
+        .clamp(1, 16);
+    match db.get_binary_graph(md5, depth, limit).await {
+        Ok((nodes, edges)) => json_response(
+            &BinaryGraphConfigResponse {
+                depth,
+                limit,
+                graph: BinaryGraphResponse {
+                    nodes: nodes.into_iter().map(|binary| BinaryGraphNode { binary }).collect(),
+                    edges: edges
+                        .into_iter()
+                        .map(|(source_md5, target_md5, shared_functions)| BinaryGraphEdge {
+                            source_md5,
+                            target_md5,
+                            shared_functions,
+                        })
+                        .collect(),
+                },
+            },
+            StatusCode::OK,
+        ),
+        Err(e) => {
+            error!("binary graph failed for {}: {}", md5_hex, e);
+            json_response(&serde_json::json!({"error": "binary graph failed"}), StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+pub async fn handle_binary_compare(
+    db: Arc<Database>,
+    left_md5_hex: &str,
+    right_md5_hex: &str,
+    req: Request<Incoming>,
+) -> Response<Full<Bytes>> {
+    let Some(left) = parse_md5_hex(left_md5_hex) else {
+        return json_response(&serde_json::json!({"error": "invalid left md5 format"}), StatusCode::BAD_REQUEST);
+    };
+    let Some(right) = parse_md5_hex(right_md5_hex) else {
+        return json_response(&serde_json::json!({"error": "invalid right md5 format"}), StatusCode::BAD_REQUEST);
+    };
+    let Ok(Some(left_summary)) = db.get_binary_summary(left).await else {
+        return json_response(&serde_json::json!({"error": "left binary not found"}), StatusCode::NOT_FOUND);
+    };
+    let Ok(Some(right_summary)) = db.get_binary_summary(right).await else {
+        return json_response(&serde_json::json!({"error": "right binary not found"}), StatusCode::NOT_FOUND);
+    };
+    let sample_limit: usize = parse_query_param(&req, "limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(18)
+        .clamp(1, 100);
+    match db.compare_binaries(left, right, sample_limit).await {
+        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only)) => json_response(
+            &BinaryCompareResponse {
+                left: left_summary,
+                right: right_summary,
+                left_facets,
+                right_facets,
+                shared_count,
+                left_only_count,
+                right_only_count,
+                sample_limit,
+                shared,
+                left_only,
+                right_only,
+            },
+            StatusCode::OK,
+        ),
+        Err(e) => {
+            error!("binary compare failed for {} vs {}: {}", left_md5_hex, right_md5_hex, e);
+            json_response(&serde_json::json!({"error": "binary compare failed"}), StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+fn parse_md5_hex(md5_hex: &str) -> Option<[u8; 16]> {
+    if md5_hex.len() != 32 {
+        return None;
+    }
+    let mut out = [0u8; 16];
+    for (idx, chunk) in md5_hex.as_bytes().chunks(2).enumerate() {
+        let text = std::str::from_utf8(chunk).ok()?;
+        out[idx] = u8::from_str_radix(text, 16).ok()?;
+    }
+    Some(out)
 }

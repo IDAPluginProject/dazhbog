@@ -13,4 +13,4 @@ pub mod upstream;
 
 pub use database::Database;
 pub use failure_cache::FailureCache;
-pub use types::{FuncLatest, PushContext, QueryContext};
+pub use types::{BinaryCompareItem, BinaryFacetSummary, BinarySummary, FuncLatest, PushContext, QueryContext};

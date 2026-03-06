@@ -1,6 +1,8 @@
 use log::*;
 use std::{io, path::Path};
 
+use crate::db::BinaryFacetSummary;
+
 #[derive(Clone, Debug)]
 pub struct BinaryMeta {
     pub md5: [u8; 16],
@@ -9,6 +11,17 @@ pub struct BinaryMeta {
     pub first_seen_ts: u64,
     pub last_seen_ts: u64,
     pub obs_count: u64,
+    pub function_count: u64,
+    pub version_count: u64,
+    pub host_count: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct BinaryFunctionEntry {
+    pub key: u128,
+    pub obs_count: u32,
+    pub last_ts_sec: u64,
+    pub last_version_id: [u8; 32],
 }
 
 #[derive(Clone, Debug)]
@@ -36,13 +49,18 @@ pub struct VersionStats {
 pub struct ContextIndex {
     #[allow(dead_code)]
     db: sled::Db, // Keep db handle alive
-    t_key_md5: sled::Tree,       // key||md5 -> KeyMd5Stats
-    t_key_bins: sled::Tree,      // key -> Vec<KeyMd5Entry>
-    t_version_stats: sled::Tree, // version_id -> VersionStats
-    t_binary_meta: sled::Tree,   // md5 -> BinaryMeta
-    t_key_basenames: sled::Tree, // key -> Vec<String>
-    t_pop_val: sled::Tree,       // key -> u32 (popularity)
-    t_pop_rank: sled::Tree,      // [u32::MAX - pop][key] -> []
+    t_key_md5: sled::Tree,           // key||md5 -> KeyMd5Stats
+    t_key_bins: sled::Tree,          // key -> Vec<KeyMd5Entry>
+    t_version_stats: sled::Tree,     // version_id -> VersionStats
+    t_binary_meta: sled::Tree,       // md5 -> BinaryMeta
+    t_binary_functions: sled::Tree,  // md5||key -> KeyMd5Stats
+    t_binary_versions: sled::Tree,   // md5||version_id -> last_ts_sec
+    t_binary_name_index: sled::Tree, // normalized basename -> Vec<md5>
+    t_binary_hosts: sled::Tree,      // md5||normalized host -> last_ts_sec
+    t_binary_facets: sled::Tree,     // md5 -> cached BinaryFacetSummary
+    t_key_basenames: sled::Tree,     // key -> Vec<String>
+    t_pop_val: sled::Tree,           // key -> u32 (popularity)
+    t_pop_rank: sled::Tree,          // [u32::MAX - pop][key] -> []
 }
 
 const MAX_MD5_PER_KEY: usize = 16;
@@ -101,6 +119,21 @@ impl ContextIndex {
         let t_binary_meta = db
             .open_tree("binary_meta")
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")));
+        let t_binary_functions = db
+            .open_tree("binary_functions")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")));
+        let t_binary_versions = db
+            .open_tree("binary_versions")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")));
+        let t_binary_name_index = db
+            .open_tree("binary_name_index")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")));
+        let t_binary_hosts = db
+            .open_tree("binary_hosts")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")));
+        let t_binary_facets = db
+            .open_tree("binary_facets")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")));
         let t_key_basenames = db
             .open_tree("key_basenames")
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")))?;
@@ -111,20 +144,110 @@ impl ContextIndex {
             .open_tree("pop_rank")
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")))?;
         info!("context index initialized successfully");
-        Ok(Self {
+        let out = Self {
             db,
             t_key_md5: t_key_md5?,
             t_key_bins: t_key_bins?,
             t_version_stats: t_version_stats?,
             t_binary_meta: t_binary_meta?,
+            t_binary_functions: t_binary_functions?,
+            t_binary_versions: t_binary_versions?,
+            t_binary_name_index: t_binary_name_index?,
+            t_binary_hosts: t_binary_hosts?,
+            t_binary_facets: t_binary_facets?,
             t_key_basenames,
             t_pop_val,
             t_pop_rank,
-        })
+        };
+        out.ensure_binary_indexes()?;
+        Ok(out)
     }
 
     pub fn approx_is_empty(&self) -> bool {
         self.t_key_md5.is_empty() && self.t_version_stats.is_empty()
+    }
+
+    fn ensure_binary_indexes(&self) -> io::Result<()> {
+        if !self.t_binary_functions.is_empty() && !self.t_binary_name_index.is_empty() {
+            return Ok(());
+        }
+
+        info!("rebuilding binary-centric context indexes");
+
+        if self.t_binary_functions.is_empty() {
+            for item in self.t_key_md5.iter() {
+                let (raw_key, raw_val) = item
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+                if raw_key.len() != 32 {
+                    continue;
+                }
+                let mut md5 = [0u8; 16];
+                md5.copy_from_slice(&raw_key[16..32]);
+                let stats = match decode_key_md5_stats(&raw_val) {
+                    Some(stats) => stats,
+                    None => continue,
+                };
+                let bf_key = binary_function_key(
+                    &md5,
+                    u128::from_le_bytes(raw_key[0..16].try_into().unwrap()),
+                );
+                let _ = self
+                    .t_binary_functions
+                    .insert(bf_key, encode_key_md5_stats(&stats));
+                if stats.last_version_id != [0u8; 32] {
+                    let _ = self.t_binary_versions.insert(
+                        binary_version_key(&md5, &stats.last_version_id),
+                        &stats.last_ts_sec.to_le_bytes(),
+                    );
+                }
+            }
+        }
+
+        if self.t_binary_name_index.is_empty() || self.t_binary_hosts.is_empty() {
+            for item in self.t_binary_meta.iter() {
+                let (raw_key, raw_val) = item
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+                if raw_key.len() != 16 {
+                    continue;
+                }
+                let meta = match decode_binary_meta(&raw_val) {
+                    Some(meta) => meta,
+                    None => continue,
+                };
+                self.record_binary_name_alias(meta.md5, &meta.basename)?;
+                self.record_binary_host(meta.md5, &meta.hostname, meta.last_seen_ts)?;
+            }
+        }
+
+        for item in self.t_binary_meta.iter() {
+            let (raw_key, raw_val) =
+                item.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+            if raw_key.len() != 16 {
+                continue;
+            }
+            let mut meta = match decode_binary_meta(&raw_val) {
+                Some(meta) => meta,
+                None => continue,
+            };
+            let function_count = self.count_binary_functions(&meta.md5)?;
+            let version_count = self.count_binary_versions(&meta.md5)?;
+            let host_count = self.count_binary_hosts(&meta.md5)?;
+            if meta.function_count != function_count
+                || meta.version_count != version_count
+                || meta.host_count != host_count
+            {
+                meta.function_count = function_count;
+                meta.version_count = version_count;
+                meta.host_count = host_count;
+                self.t_binary_meta
+                    .insert(meta.md5, encode_binary_meta(&meta))
+                    .map_err(|e| {
+                        io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}"))
+                    })?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Retrieve the top N most popular keys and their scores
@@ -164,6 +287,9 @@ impl ContextIndex {
                 first_seen_ts: ts_sec,
                 last_seen_ts: ts_sec,
                 obs_count: 0,
+                function_count: 0,
+                version_count: 0,
+                host_count: 0,
             })
         } else {
             BinaryMeta {
@@ -173,16 +299,22 @@ impl ContextIndex {
                 first_seen_ts: ts_sec,
                 last_seen_ts: ts_sec,
                 obs_count: 0,
+                function_count: 0,
+                version_count: 0,
+                host_count: 0,
             }
         };
         meta.last_seen_ts = meta.last_seen_ts.max(ts_sec);
         meta.obs_count = meta.obs_count.saturating_add(1);
         if meta.basename.is_empty() && !clean_basename.is_empty() {
-            meta.basename = clean_basename;
+            meta.basename = clean_basename.clone();
         }
         if meta.hostname.is_empty() {
             meta.hostname = hostname.to_string();
         }
+        self.record_binary_name_alias(md5, &clean_basename)?;
+        self.record_binary_host(md5, hostname, ts_sec)?;
+        meta.host_count = self.count_binary_hosts(&md5)?;
         let enc = encode_binary_meta(&meta);
         self.t_binary_meta
             .insert(key, enc)
@@ -285,6 +417,55 @@ impl ContextIndex {
 
         if let Some(bn) = basename {
             self.record_basename_for_key(key, bn)?;
+        }
+
+        let bin_key = binary_function_key(&md5, key);
+        let existing_bin = self
+            .t_binary_functions
+            .get(&bin_key)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled get: {e}")))?;
+        let mut inc_function_count = 0u64;
+        let mut bstats = if let Some(v) = existing_bin {
+            decode_key_md5_stats(&v).unwrap_or(KeyMd5Stats {
+                obs_count: 0,
+                last_ts_sec: 0,
+                last_version_id: [0u8; 32],
+            })
+        } else {
+            inc_function_count = 1;
+            KeyMd5Stats {
+                obs_count: 0,
+                last_ts_sec: 0,
+                last_version_id: [0u8; 32],
+            }
+        };
+        bstats.obs_count = bstats.obs_count.saturating_add(1);
+        bstats.last_ts_sec = ts_sec;
+        if let Some(vid) = version_id {
+            bstats.last_version_id = vid;
+        }
+        self.t_binary_functions
+            .insert(&bin_key, encode_key_md5_stats(&bstats))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+
+        let mut inc_version_count = 0u64;
+        if let Some(vid) = version_id {
+            let version_key = binary_version_key(&md5, &vid);
+            let seen = self
+                .t_binary_versions
+                .contains_key(&version_key)
+                .map_err(|e| {
+                    io::Error::new(io::ErrorKind::Other, format!("sled contains_key: {e}"))
+                })?;
+            if !seen {
+                inc_version_count = 1;
+            }
+            self.t_binary_versions
+                .insert(version_key, &ts_sec.to_le_bytes())
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+        }
+        if inc_function_count > 0 || inc_version_count > 0 {
+            self.bump_binary_meta_counts(&md5, inc_function_count, inc_version_count)?;
         }
 
         // version stats (if provided)
@@ -435,6 +616,192 @@ impl ContextIndex {
         Ok(names)
     }
 
+    pub fn get_binary_refs_for_key(&self, key: u128, limit: usize) -> io::Result<Vec<BinaryMeta>> {
+        let prefix = key.to_le_bytes();
+        let mut out = Vec::new();
+        for item in self.t_key_md5.scan_prefix(prefix) {
+            let (raw_key, _) =
+                item.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+            if raw_key.len() != 32 {
+                continue;
+            }
+            let mut md5 = [0u8; 16];
+            md5.copy_from_slice(&raw_key[16..32]);
+            if let Some(meta) = self.get_binary_meta(&md5)? {
+                out.push(meta);
+            }
+            if out.len() >= limit {
+                break;
+            }
+        }
+        out.sort_by(|a, b| {
+            b.obs_count
+                .cmp(&a.obs_count)
+                .then_with(|| b.last_seen_ts.cmp(&a.last_seen_ts))
+                .then_with(|| a.basename.cmp(&b.basename))
+        });
+        Ok(out)
+    }
+
+    pub fn get_binary_function_entries(
+        &self,
+        md5: &[u8; 16],
+        offset: usize,
+        limit: usize,
+    ) -> io::Result<(Vec<BinaryFunctionEntry>, usize)> {
+        let mut all_entries = Vec::new();
+        for item in self.t_binary_functions.scan_prefix(md5) {
+            let (raw_key, raw_val) =
+                item.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+            if raw_key.len() != 32 {
+                continue;
+            }
+            let key = u128::from_le_bytes(raw_key[16..32].try_into().unwrap());
+            if let Some(stats) = decode_key_md5_stats(&raw_val) {
+                all_entries.push(BinaryFunctionEntry {
+                    key,
+                    obs_count: stats.obs_count,
+                    last_ts_sec: stats.last_ts_sec,
+                    last_version_id: stats.last_version_id,
+                });
+            }
+        }
+        all_entries.sort_by(|a, b| {
+            b.obs_count
+                .cmp(&a.obs_count)
+                .then_with(|| b.last_ts_sec.cmp(&a.last_ts_sec))
+                .then_with(|| a.key.cmp(&b.key))
+        });
+        let total = all_entries.len();
+        let entries = all_entries.into_iter().skip(offset).take(limit).collect();
+        Ok((entries, total))
+    }
+
+    pub fn get_binary_function_keys(&self, md5: &[u8; 16], limit: usize) -> io::Result<Vec<u128>> {
+        let mut keys = Vec::new();
+        for item in self.t_binary_functions.scan_prefix(md5).take(limit) {
+            let (raw_key, _) =
+                item.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+            if raw_key.len() != 32 {
+                continue;
+            }
+            keys.push(u128::from_le_bytes(raw_key[16..32].try_into().unwrap()));
+        }
+        Ok(keys)
+    }
+
+    pub fn search_binary_meta(&self, query: &str) -> io::Result<Vec<BinaryMeta>> {
+        let q = normalize_lookup(query);
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut matches = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for item in self.t_binary_name_index.iter() {
+            let (raw_name, raw_md5s) =
+                item.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+            let name = match std::str::from_utf8(&raw_name) {
+                Ok(name) => name,
+                Err(_) => continue,
+            };
+            if !name.contains(&q) {
+                continue;
+            }
+            for md5 in decode_md5_list(&raw_md5s).unwrap_or_default() {
+                if !seen.insert(md5) {
+                    continue;
+                }
+                if let Some(meta) = self.get_binary_meta(&md5)? {
+                    matches.push(meta);
+                }
+            }
+        }
+        Ok(matches)
+    }
+
+    pub fn get_binary_facets(&self, md5: &[u8; 16]) -> io::Result<Option<BinaryFacetSummary>> {
+        match self.t_binary_facets.get(md5) {
+            Ok(Some(v)) => Ok(decode_binary_facets(&v)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("sled get: {e}"),
+            )),
+        }
+    }
+
+    pub fn set_binary_facets(&self, md5: &[u8; 16], facets: &BinaryFacetSummary) -> io::Result<()> {
+        self.t_binary_facets
+            .insert(md5, encode_binary_facets(facets))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+        Ok(())
+    }
+
+    fn record_binary_name_alias(&self, md5: [u8; 16], basename: &str) -> io::Result<()> {
+        let clean = sanitize_basename(basename);
+        let normalized = normalize_lookup(&clean);
+        if normalized.is_empty() {
+            return Ok(());
+        }
+        let current = self
+            .t_binary_name_index
+            .get(normalized.as_bytes())
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled get: {e}")))?;
+        let mut md5s = current
+            .as_deref()
+            .and_then(decode_md5_list)
+            .unwrap_or_default();
+        if !md5s.iter().any(|entry| entry == &md5) {
+            md5s.push(md5);
+            self.t_binary_name_index
+                .insert(normalized.as_bytes(), encode_md5_list(&md5s))
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn record_binary_host(&self, md5: [u8; 16], hostname: &str, ts_sec: u64) -> io::Result<()> {
+        let host = normalize_lookup(hostname);
+        if host.is_empty() {
+            return Ok(());
+        }
+        self.t_binary_hosts
+            .insert(binary_host_key(&md5, &host), &ts_sec.to_le_bytes())
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+        Ok(())
+    }
+
+    fn count_binary_functions(&self, md5: &[u8; 16]) -> io::Result<u64> {
+        Ok(self.t_binary_functions.scan_prefix(md5).count() as u64)
+    }
+
+    fn count_binary_versions(&self, md5: &[u8; 16]) -> io::Result<u64> {
+        Ok(self.t_binary_versions.scan_prefix(md5).count() as u64)
+    }
+
+    fn count_binary_hosts(&self, md5: &[u8; 16]) -> io::Result<u64> {
+        Ok(self.t_binary_hosts.scan_prefix(md5).count() as u64)
+    }
+
+    fn bump_binary_meta_counts(
+        &self,
+        md5: &[u8; 16],
+        function_inc: u64,
+        version_inc: u64,
+    ) -> io::Result<()> {
+        let Some(mut meta) = self.get_binary_meta(md5)? else {
+            return Ok(());
+        };
+        meta.function_count = meta.function_count.saturating_add(function_inc);
+        meta.version_count = meta.version_count.saturating_add(version_inc);
+        meta.host_count = self.count_binary_hosts(md5)?;
+        self.t_binary_meta
+            .insert(md5, encode_binary_meta(&meta))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+        Ok(())
+    }
+
     fn record_basename_for_key(&self, key: u128, basename: &str) -> io::Result<()> {
         let clean = sanitize_basename(basename);
         if clean.is_empty() {
@@ -530,14 +897,93 @@ fn get_str(src: &mut &[u8]) -> Option<String> {
     std::str::from_utf8(b).ok().map(|s| s.to_string())
 }
 
+fn normalize_lookup(input: &str) -> String {
+    sanitize_basename(input).to_ascii_lowercase()
+}
+
+fn binary_function_key(md5: &[u8; 16], key: u128) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    out[0..16].copy_from_slice(md5);
+    out[16..32].copy_from_slice(&key.to_le_bytes());
+    out
+}
+
+fn binary_version_key(md5: &[u8; 16], version_id: &[u8; 32]) -> [u8; 48] {
+    let mut out = [0u8; 48];
+    out[0..16].copy_from_slice(md5);
+    out[16..48].copy_from_slice(version_id);
+    out
+}
+
+fn binary_host_key(md5: &[u8; 16], host: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(16 + host.len());
+    out.extend_from_slice(md5);
+    out.extend_from_slice(host.as_bytes());
+    out
+}
+
+fn encode_md5_list(values: &[[u8; 16]]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(1 + values.len() * 16);
+    out.push(values.len().min(255) as u8);
+    for value in values.iter().take(255) {
+        out.extend_from_slice(value);
+    }
+    out
+}
+
+fn decode_md5_list(mut bytes: &[u8]) -> Option<Vec<[u8; 16]>> {
+    if bytes.is_empty() {
+        return Some(Vec::new());
+    }
+    let count = bytes[0] as usize;
+    bytes = &bytes[1..];
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        let raw = get_bytes(&mut bytes, 16)?;
+        let mut md5 = [0u8; 16];
+        md5.copy_from_slice(raw);
+        out.push(md5);
+    }
+    Some(out)
+}
+
+fn encode_binary_facets(facets: &BinaryFacetSummary) -> Vec<u8> {
+    let mut v = Vec::with_capacity(8 * 8);
+    put_u64_le(facets.function_count, &mut v);
+    put_u64_le(facets.typed_functions, &mut v);
+    put_u64_le(facets.framed_functions, &mut v);
+    put_u64_le(facets.commented_functions, &mut v);
+    put_u64_le(facets.switch_functions, &mut v);
+    put_u64_le(facets.parse_partial_functions, &mut v);
+    put_u64_le(facets.demangled_functions, &mut v);
+    put_u64_le(facets.cached_at_ts, &mut v);
+    v
+}
+
+fn decode_binary_facets(mut bytes: &[u8]) -> Option<BinaryFacetSummary> {
+    Some(BinaryFacetSummary {
+        function_count: get_u64_le(&mut bytes)?,
+        typed_functions: get_u64_le(&mut bytes)?,
+        framed_functions: get_u64_le(&mut bytes)?,
+        commented_functions: get_u64_le(&mut bytes)?,
+        switch_functions: get_u64_le(&mut bytes)?,
+        parse_partial_functions: get_u64_le(&mut bytes)?,
+        demangled_functions: get_u64_le(&mut bytes)?,
+        cached_at_ts: get_u64_le(&mut bytes)?,
+    })
+}
+
 fn encode_binary_meta(m: &BinaryMeta) -> Vec<u8> {
-    let mut v = Vec::with_capacity(64 + m.basename.len() + m.hostname.len());
+    let mut v = Vec::with_capacity(88 + m.basename.len() + m.hostname.len());
     v.extend_from_slice(&m.md5);
     put_u64_le(m.first_seen_ts, &mut v);
     put_u64_le(m.last_seen_ts, &mut v);
     put_u64_le(m.obs_count, &mut v);
     put_str(&mut v, &m.basename);
     put_str(&mut v, &m.hostname);
+    put_u64_le(m.function_count, &mut v);
+    put_u64_le(m.version_count, &mut v);
+    put_u64_le(m.host_count, &mut v);
     v
 }
 fn decode_binary_meta(mut b: &[u8]) -> Option<BinaryMeta> {
@@ -554,6 +1000,9 @@ fn decode_binary_meta(mut b: &[u8]) -> Option<BinaryMeta> {
         obs_count: get_u64_le(&mut b)?,
         basename: get_str(&mut b)?,
         hostname: get_str(&mut b)?,
+        function_count: get_u64_le(&mut b).unwrap_or(0),
+        version_count: get_u64_le(&mut b).unwrap_or(0),
+        host_count: get_u64_le(&mut b).unwrap_or(0),
     })
 }
 

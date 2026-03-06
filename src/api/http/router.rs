@@ -20,7 +20,10 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::net::tls::NegotiatedProtocol;
 
-use super::handlers::{handle_function_detail, handle_search, json_response, metrics_snapshot};
+use super::handlers::{
+    handle_binary_compare, handle_binary_detail, handle_binary_functions, handle_binary_graph,
+    handle_binary_overlap, handle_function_detail, handle_search, json_response, metrics_snapshot,
+};
 use super::templates::HOME;
 use crate::api::metrics::METRICS;
 
@@ -29,10 +32,10 @@ async fn router(
     db: Arc<Database>,
     req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
-    let path = req.uri().path();
+    let path = req.uri().path().to_string();
     let method = req.method();
 
-    let resp = match (method, path) {
+    let resp = match (method, path.as_str()) {
         (&Method::GET, "/") => {
             let mut r = Response::new(Full::new(Bytes::from_static(HOME.as_bytes())));
             r.headers_mut().insert(
@@ -52,6 +55,33 @@ async fn router(
         (&Method::GET, p) if p.starts_with("/api/function/") => {
             let key_hex = &p["/api/function/".len()..];
             handle_function_detail(db.clone(), key_hex).await
+        }
+        (&Method::GET, p) if p.starts_with("/api/binary/") && p.ends_with("/functions") => {
+            let md5_hex = &p["/api/binary/".len()..p.len() - "/functions".len()];
+            handle_binary_functions(db.clone(), md5_hex, req).await
+        }
+        (&Method::GET, p) if p.starts_with("/api/binary/") && p.ends_with("/overlap") => {
+            let md5_hex = &p["/api/binary/".len()..p.len() - "/overlap".len()];
+            handle_binary_overlap(db.clone(), md5_hex, req).await
+        }
+        (&Method::GET, p) if p.starts_with("/api/binary/") && p.ends_with("/graph") => {
+            let md5_hex = &p["/api/binary/".len()..p.len() - "/graph".len()];
+            handle_binary_graph(db.clone(), md5_hex, req).await
+        }
+        (&Method::GET, p) if p.starts_with("/api/binary-compare/") => {
+            let rest = &p["/api/binary-compare/".len()..];
+            if let Some((left, right)) = rest.split_once('/') {
+                handle_binary_compare(db.clone(), left, right, req).await
+            } else {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(Bytes::from("invalid compare path")))
+                    .unwrap()
+            }
+        }
+        (&Method::GET, p) if p.starts_with("/api/binary/") => {
+            let md5_hex = &p["/api/binary/".len()..];
+            handle_binary_detail(db.clone(), md5_hex).await
         }
         _ => Response::builder()
             .status(StatusCode::NOT_FOUND)

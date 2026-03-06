@@ -2,6 +2,15 @@
 
 use serde::Serialize;
 
+/// Binary reference attached to a function hit.
+#[derive(Debug, Clone, Serialize)]
+pub struct BinaryRefHit {
+    pub md5_hex: String,
+    pub short_id: String,
+    pub basename: String,
+    pub display_name: String,
+}
+
 /// Document for search indexing.
 #[derive(Debug, Clone)]
 pub struct SearchDocument {
@@ -25,6 +34,8 @@ pub struct SearchHit {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
     pub binary_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub binaries: Vec<BinaryRefHit>,
     pub ts: u64,
     pub score: f32,
 }
@@ -55,6 +66,7 @@ impl SearchHit {
             func_name_demangled,
             lang,
             binary_names,
+            binaries: Vec::new(),
             ts,
             score,
         }

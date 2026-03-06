@@ -427,6 +427,30 @@ pub const HOME: &str = r#"<!doctype html>
             gap: var(--space-md);
             align-items: center;
         }
+
+        .search-mode-switch {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-dim);
+        }
+
+        .search-mode-btn {
+            background: transparent;
+            border: 0;
+            color: var(--text-dim);
+            padding: 10px 14px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+
+        .search-mode-btn.active {
+            color: var(--bg-base);
+            background: var(--accent);
+        }
         
         .search-prompt {
             font-size: 14px;
@@ -1089,6 +1113,103 @@ pub const HOME: &str = r#"<!doctype html>
             border: 1px solid rgba(0, 136, 255, 0.2);
             padding: 2px 8px;
             letter-spacing: 0.05em;
+        }
+
+        .bin-tag.clickable {
+            cursor: pointer;
+        }
+
+        .bin-tag.clickable:hover {
+            border-color: rgba(0, 255, 136, 0.45);
+            color: var(--text-primary);
+        }
+
+        .binary-graph {
+            position: relative;
+            min-height: 360px;
+            border: 1px solid var(--border-dim);
+            background:
+                radial-gradient(circle at top, rgba(0,255,136,0.06), transparent 42%),
+                linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+            overflow: hidden;
+        }
+
+        .binary-graph svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .binary-graph-node {
+            position: absolute;
+            width: 168px;
+            transform: translate(-50%, -50%);
+            border: 1px solid var(--border-dim);
+            background: rgba(12, 16, 18, 0.92);
+            padding: 10px 12px;
+            cursor: pointer;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .binary-graph-node.root {
+            border-color: rgba(0,255,136,0.45);
+            box-shadow: 0 0 0 1px rgba(0,255,136,0.25), 0 18px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .binary-graph-node .name {
+            font-size: 12px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .binary-graph-node .meta {
+            font-size: 10px;
+            color: var(--text-dim);
+            letter-spacing: 0.08em;
+        }
+
+        .binary-coverage-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: var(--space-sm);
+        }
+
+        .coverage-card {
+            border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.02);
+            padding: 10px 12px;
+        }
+
+        .coverage-card .label {
+            font-size: 10px;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+        }
+
+        .coverage-card .value {
+            font-size: 18px;
+            color: var(--text-primary);
+        }
+
+        .binary-compare-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: var(--space-md);
+            margin-bottom: var(--space-md);
+        }
+
+        .compare-list-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: var(--space-md);
+        }
+
+        .compare-list-column {
+            border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.02);
+            padding: 10px 12px;
         }
         
         .result-meta {
@@ -3195,14 +3316,18 @@ pub const HOME: &str = r#"<!doctype html>
         <!-- Search Terminal -->
         <section class="search-terminal">
             <div class="search-row">
+                <div class="search-mode-switch" id="search-mode-switch">
+                    <button class="search-mode-btn active" id="mode-functions" onclick="setSearchMode('functions')">Functions</button>
+                    <button class="search-mode-btn" id="mode-binaries" onclick="setSearchMode('binaries')">Binaries</button>
+                </div>
                 <span class="search-prompt">&gt;&gt;&gt;</span>
                 <div class="search-input-wrap">
-                    <input type="text" id="q" class="search-input" placeholder="ENTER QUERY: function name, binary, or address..." autocomplete="off" spellcheck="false">
+                    <input type="text" id="q" class="search-input" placeholder="ENTER FUNCTION QUERY: name, demangled symbol, or binary..." autocomplete="off" spellcheck="false">
                     <span class="search-kbd">LIVE</span>
                 </div>
             </div>
             <div class="search-meta">
-                <span>MODE: <span class="accent">FULL-TEXT</span></span>
+                <span>ENTITY: <span class="accent" id="search-entity-label">FUNCTIONS</span></span>
                 <span>INDEX: <span class="accent" id="index-status">READY</span></span>
                 <span>PER PAGE: <span class="accent">25</span></span>
                 <span>PRESS <span class="accent">/</span> TO FOCUS</span>
@@ -3548,7 +3673,7 @@ pub const HOME: &str = r#"<!doctype html>
         <div class="modal-overlay" id="detail-modal">
             <div class="modal-container">
                 <div class="modal-header">
-                    <span class="modal-title">FUNCTION DETAIL // <span id="modal-key"></span></span>
+                    <span class="modal-title" id="modal-title">FUNCTION DETAIL // <span id="modal-key"></span></span>
                     <button class="modal-close" onclick="closeDetailModal()">&times;</button>
                 </div>
                 <div class="modal-body" id="modal-body">
@@ -3602,6 +3727,9 @@ pub const HOME: &str = r#"<!doctype html>
 
         const el = {
             q: document.getElementById('q'),
+            searchEntityLabel: document.getElementById('search-entity-label'),
+            modeFunctions: document.getElementById('mode-functions'),
+            modeBinaries: document.getElementById('mode-binaries'),
             indexStatus: document.getElementById('index-status'),
             dashboard: document.getElementById('dashboard'),
             secondary: document.getElementById('metrics-secondary'),
@@ -3672,6 +3800,7 @@ pub const HOME: &str = r#"<!doctype html>
             protoMixDonut: document.getElementById('proto-mix-donut'),
             protoMixLabel: document.getElementById('proto-mix-label'),
             detailModal: document.getElementById('detail-modal'),
+            modalTitle: document.getElementById('modal-title'),
             modalKey: document.getElementById('modal-key'),
             modalBody: document.getElementById('modal-body'),
         };
@@ -3680,6 +3809,7 @@ pub const HOME: &str = r#"<!doctype html>
         const DEBOUNCE_MS = 300;
         let currentPage = 1;
         let currentQuery = '';
+        let currentSearchMode = 'functions';
         let currentHits = [];
         let currentTotalPages = 0;
         let currentPerPage = 25;
@@ -3687,6 +3817,12 @@ pub const HOME: &str = r#"<!doctype html>
         let currentSort = 'score';
         let selectedResultIndex = -1;
         let openPreviewKey = null;
+        let currentDetailKind = 'function';
+        let currentBinaryMd5 = null;
+        let currentBinaryCompareData = null;
+        let currentBinaryGraphDepth = 2;
+        let currentBinaryGraphLimit = 6;
+        let currentBinaryCompareLimit = 18;
 
         const pinnedKeys = new Set();
         const compareKeys = [];
@@ -3751,6 +3887,57 @@ pub const HOME: &str = r#"<!doctype html>
             if (!ts) return '-';
             const d = new Date(ts * 1000);
             return d.toISOString().replace('T', ' ').slice(0, 19) + 'Z';
+        }
+
+        function searchPlaceholderForMode(mode) {
+            return mode === 'binaries'
+                ? 'ENTER BINARY QUERY: basename, alias, or short id...'
+                : 'ENTER FUNCTION QUERY: name, demangled symbol, or binary...';
+        }
+
+        function renderSortOptions() {
+            if (currentSearchMode === 'binaries') {
+                el.resultsSort.innerHTML = ''
+                    + '<option value="score">Relevance</option>'
+                    + '<option value="name">Name A-Z</option>'
+                    + '<option value="functions">Function Count</option>'
+                    + '<option value="versions">Version Count</option>'
+                    + '<option value="recent">Most Recent</option>';
+            } else {
+                el.resultsSort.innerHTML = ''
+                    + '<option value="score">Score (Default)</option>'
+                    + '<option value="name">Name A-Z</option>'
+                    + '<option value="binaries">Binaries Count</option>'
+                    + '<option value="lang">Language</option>'
+                    + '<option value="recent">Most Recent</option>';
+            }
+            el.resultsSort.value = currentSort;
+        }
+
+        function applySearchModeUi() {
+            el.modeFunctions.classList.toggle('active', currentSearchMode === 'functions');
+            el.modeBinaries.classList.toggle('active', currentSearchMode === 'binaries');
+            el.searchEntityLabel.textContent = currentSearchMode.toUpperCase();
+            el.q.placeholder = searchPlaceholderForMode(currentSearchMode);
+            if (currentSearchMode === 'binaries' && currentSort === 'binaries') currentSort = 'score';
+            if (currentSearchMode === 'functions' && (currentSort === 'functions' || currentSort === 'versions')) currentSort = 'score';
+            renderSortOptions();
+        }
+
+        function setSearchMode(mode, rerun = true, updateUrl = true) {
+            if (mode !== 'functions' && mode !== 'binaries') mode = 'functions';
+            currentSearchMode = mode;
+            applySearchModeUi();
+            if (mode === 'binaries') {
+                el.comparePanel.classList.add('hidden');
+            } else if (currentQuery) {
+                el.comparePanel.classList.remove('hidden');
+            }
+            if (rerun && currentQuery) {
+                runSearch(currentQuery, 1, updateUrl);
+            } else if (updateUrl) {
+                syncHashWithUi();
+            }
         }
 
         function easeOutExpo(t) {
@@ -4139,10 +4326,16 @@ pub const HOME: &str = r#"<!doctype html>
             const out = [...hits];
             switch (mode) {
                 case 'name':
-                    out.sort((a, b) => (a.func_name_demangled || a.func_name).localeCompare(b.func_name_demangled || b.func_name));
+                    out.sort((a, b) => (a.display_name || a.func_name_demangled || a.func_name || '').localeCompare(b.display_name || b.func_name_demangled || b.func_name || ''));
                     break;
                 case 'binaries':
                     out.sort((a, b) => (b.binary_names || []).length - (a.binary_names || []).length || b.score - a.score);
+                    break;
+                case 'functions':
+                    out.sort((a, b) => Number(b.function_count || 0) - Number(a.function_count || 0) || b.score - a.score);
+                    break;
+                case 'versions':
+                    out.sort((a, b) => Number(b.version_count || 0) - Number(a.version_count || 0) || b.score - a.score);
                     break;
                 case 'lang':
                     out.sort((a, b) => (a.lang || 'zz').localeCompare(b.lang || 'zz') || b.score - a.score);
@@ -4157,6 +4350,7 @@ pub const HOME: &str = r#"<!doctype html>
             }
 
             // Pinning always wins over current sort
+            if (currentSearchMode !== 'functions') return out;
             out.sort((a, b) => {
                 const ap = pinnedKeys.has(a.key_hex) ? 1 : 0;
                 const bp = pinnedKeys.has(b.key_hex) ? 1 : 0;
@@ -4167,6 +4361,11 @@ pub const HOME: &str = r#"<!doctype html>
 
         function setResultsIntent(query) {
             const intent = detectQueryIntent(query);
+            if (currentSearchMode === 'binaries') {
+                el.resultsIntent.textContent = 'INTENT: BINARY LOOKUP';
+                el.resultsHint.textContent = 'Basename collisions stay grouped but individually addressable.';
+                return;
+            }
             el.resultsIntent.textContent = intent.label;
             el.resultsHint.textContent = intent.hint;
         }
@@ -5585,18 +5784,22 @@ pub const HOME: &str = r#"<!doctype html>
         function parseHash() {
             const params = new URLSearchParams(window.location.hash.slice(1));
             return {
+                m: params.get('m') || 'functions',
                 q: params.get('q') || '',
                 page: parseInt(params.get('page') || '1', 10) || 1,
                 f: params.get('f') || '',
+                b: params.get('b') || '',
                 s: params.get('s') || ''
             };
         }
 
-        function updateHash(query, page = 1, functionKey = '', sectionId = '') {
+        function updateHash(mode, query, page = 1, functionKey = '', binaryMd5 = '', sectionId = '') {
             const params = new URLSearchParams();
+            if (mode && mode !== 'functions') params.set('m', mode);
             if (query) params.set('q', query);
             if (query && page > 1) params.set('page', String(page));
             if (functionKey) params.set('f', functionKey);
+            if (binaryMd5) params.set('b', binaryMd5);
             if (functionKey && sectionId) params.set('s', sectionId);
             const nextHash = params.toString();
             if (!nextHash) {
@@ -5611,34 +5814,41 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function syncHashWithUi() {
-            const functionKey = el.detailModal.classList.contains('active') && currentDetailKeyHex ? currentDetailKeyHex : '';
+            const functionKey = el.detailModal.classList.contains('active') && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
+            const binaryMd5 = el.detailModal.classList.contains('active') && currentDetailKind === 'binary' && currentBinaryMd5 ? currentBinaryMd5 : '';
             const sectionId = functionKey ? (currentDetailSection || pendingDetailSection || '') : '';
-            updateHash(currentQuery, currentPage, functionKey, sectionId);
+            updateHash(currentSearchMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId);
         }
 
         function applyHashState(state) {
+            const mode = (state && state.m) ? state.m : 'functions';
             const q = (state && state.q) ? state.q : '';
             const page = state && state.page ? state.page : 1;
             const f = (state && state.f) ? state.f : '';
+            const b = (state && state.b) ? state.b : '';
             const s = (state && state.s) ? state.s : null;
 
+            setSearchMode(mode, false, false);
             el.q.value = q;
             if (q) {
                 runSearch(q, page, false).then(() => {
-                    const needsOpen = f && (!el.detailModal.classList.contains('active') || currentDetailKeyHex !== f || currentCompareRecords.length > 0);
+                    const needsOpen = f && (!el.detailModal.classList.contains('active') || currentDetailKeyHex !== f || currentCompareRecords.length > 0 || currentDetailKind !== 'function');
                     if (needsOpen) showFunctionDetail(f, s, false);
                     else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) activateDetailSection(s, false, false);
-                    else if (!f && el.detailModal.classList.contains('active') && !currentCompareRecords.length) closeDetailModal(false);
+                    else if (b && (!el.detailModal.classList.contains('active') || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) showBinaryDetail(b, false);
+                    else if (!f && !b && el.detailModal.classList.contains('active') && !currentCompareRecords.length) closeDetailModal(false);
                 });
                 return;
             }
 
             showDashboard(false);
-            if (f && (!el.detailModal.classList.contains('active') || currentDetailKeyHex !== f || currentCompareRecords.length > 0)) {
+            if (f && (!el.detailModal.classList.contains('active') || currentDetailKeyHex !== f || currentCompareRecords.length > 0 || currentDetailKind !== 'function')) {
                 showFunctionDetail(f, s, false);
             } else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) {
                 activateDetailSection(s, false, false);
-            } else if (!f && el.detailModal.classList.contains('active') && !currentCompareRecords.length) {
+            } else if (b && (!el.detailModal.classList.contains('active') || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) {
+                showBinaryDetail(b, false);
+            } else if (!f && !b && el.detailModal.classList.contains('active') && !currentCompareRecords.length) {
                 closeDetailModal(false);
             }
         }
@@ -5769,16 +5979,16 @@ pub const HOME: &str = r#"<!doctype html>
             el.dashboard.classList.add('hidden');
             el.secondary.classList.add('hidden');
             el.results.classList.add('active');
-            el.comparePanel.classList.remove('hidden');
+            el.comparePanel.classList.toggle('hidden', currentSearchMode !== 'functions');
             el.resultsQuery.textContent = query;
             el.resultsList.innerHTML = '<div class="state-message"><div class="icon">&gt;&gt;&gt;</div><h3>QUERYING INDEX</h3><p>Processing request...</p></div>';
             el.pagination.innerHTML = '';
 
-            if (updateUrl) updateHash(query, page, currentDetailKeyHex || '');
+            if (updateUrl) syncHashWithUi();
 
             const t0 = performance.now();
             try {
-                const r = await fetch('/api/search?q=' + encodeURIComponent(query) + '&page=' + page);
+                const r = await fetch('/api/search?mode=' + encodeURIComponent(currentSearchMode) + '&q=' + encodeURIComponent(query) + '&page=' + page);
                 if (!r.ok) throw new Error('Query failed: ' + r.status);
                 const d = await r.json();
                 renderResults(d, query, performance.now() - t0);
@@ -5823,12 +6033,16 @@ pub const HOME: &str = r#"<!doctype html>
                 el.resultsList.innerHTML = '';
                 return;
             }
+            if (currentSearchMode === 'binaries') {
+                renderBinaryResultsList(hits);
+                return;
+            }
             const minScore = Math.min(...hits.map(h => Number(h.score || 0)));
             const maxScore = Math.max(...hits.map(h => Number(h.score || 0)));
             const startIdx = (currentPage - 1) * currentPerPage;
 
             el.resultsList.innerHTML = hits.map((h, i) => {
-                const bins = (h.binary_names || []).map(b => '<span class="bin-tag">' + esc(b) + '</span>').join('');
+                const bins = (h.binaries || []).map(b => '<span class="bin-tag clickable" onclick="event.stopPropagation();openBinaryFromFunction(\'' + esc(b.md5_hex) + '\', \'' + encodeURIComponent(b.basename) + '\')">' + esc(b.basename) + '<span class="accent">#' + esc(b.short_id) + '</span></span>').join('');
                 const displayName = h.func_name_demangled || h.func_name;
                 const langBadge = h.lang ? '<span class="lang-badge">' + esc(h.lang.toUpperCase()) + '</span>' : '';
                 const mangledHint = h.func_name_demangled ? '<div class="result-mangled" title="Mangled name">' + esc(h.func_name) + '</div>' : '';
@@ -5849,6 +6063,24 @@ pub const HOME: &str = r#"<!doctype html>
                     + '<button class="result-action' + (isPreviewOpen ? ' active' : '') + '" onclick="event.stopPropagation();togglePreview(\'' + esc(h.key_hex) + '\')">peek</button>'
                     + '</div></div>'
                     + '<div class="result-preview' + (isPreviewOpen ? ' active' : '') + '">' + (isPreviewOpen ? previewHtmlForKey(h.key_hex) : '') + '</div>'
+                    + '</div>';
+            }).join('');
+        }
+
+        function renderBinaryResultsList(hits) {
+            const minScore = Math.min(...hits.map(h => Number(h.score || 0)));
+            const maxScore = Math.max(...hits.map(h => Number(h.score || 0)));
+            const startIdx = (currentPage - 1) * currentPerPage;
+            el.resultsList.innerHTML = hits.map((h, i) => {
+                const scoreRatio = normalizeScore(Number(h.score || 0), minScore, maxScore);
+                const selected = h.md5_hex === currentBinaryMd5;
+                const host = h.hostname ? '<span class="version-badge age">HOST ' + esc(h.hostname) + '</span>' : '';
+                return '<div class="result-item clickable' + (selected ? ' selected' : '') + '" onclick="showBinaryDetail(\'' + esc(h.md5_hex) + '\')">'
+                    + '<div class="result-index">' + String(startIdx + i + 1).padStart(2, '0') + '</div>'
+                    + '<div class="result-main"><div class="result-func">' + esc(h.display_name) + '</div>'
+                    + '<div class="result-key"><span class="result-key-copy" onclick="event.stopPropagation();copyText(\'' + esc(h.md5_hex) + '\')">MD5 ' + esc(h.md5_hex) + '</span><span class="result-age">' + esc(fmtRelativeTs(h.last_seen_ts)) + '</span></div>'
+                    + '<div class="result-bins"><span class="bin-tag">FN ' + fmt(h.function_count || 0) + '</span><span class="bin-tag">VER ' + fmt(h.version_count || 0) + '</span><span class="bin-tag">OBS ' + fmt(h.obs_count || 0) + '</span><span class="bin-tag">HOSTS ' + fmt(h.host_count || 0) + '</span></div></div>'
+                    + '<div class="result-meta">' + host + '<span class="score-badge">SCORE ' + Number(h.score || 0).toFixed(2) + '</span><div class="score-meter"><div class="score-meter-fill" style="width:' + (scoreRatio * 100).toFixed(1) + '%;"></div></div></div>'
                     + '</div>';
             }).join('');
         }
@@ -5898,16 +6130,17 @@ pub const HOME: &str = r#"<!doctype html>
                 setSelectedResultIndex(selectedResultIndex < 0 ? 0 : selectedResultIndex - 1);
             } else if (e.key === 'Enter' && selectedResultIndex >= 0) {
                 e.preventDefault();
-                showFunctionDetail(hits[selectedResultIndex].key_hex);
-            } else if (e.key === ' ') {
+                if (currentSearchMode === 'binaries') showBinaryDetail(hits[selectedResultIndex].md5_hex);
+                else showFunctionDetail(hits[selectedResultIndex].key_hex);
+            } else if (e.key === ' ' && currentSearchMode === 'functions') {
                 if (selectedResultIndex >= 0) {
                     e.preventDefault();
                     togglePreview(hits[selectedResultIndex].key_hex);
                 }
-            } else if (e.key === 'c' && selectedResultIndex >= 0) {
+            } else if (e.key === 'c' && currentSearchMode === 'functions' && selectedResultIndex >= 0) {
                 e.preventDefault();
                 toggleCompareKey(hits[selectedResultIndex].key_hex);
-            } else if (e.key === 'p' && selectedResultIndex >= 0) {
+            } else if (e.key === 'p' && currentSearchMode === 'functions' && selectedResultIndex >= 0) {
                 e.preventDefault();
                 togglePin(hits[selectedResultIndex].key_hex);
             }
@@ -5965,7 +6198,7 @@ pub const HOME: &str = r#"<!doctype html>
         updateCompareTray();
         hydrateCompareItems(compareKeys);
         refreshCompareLoadOptions();
-        el.resultsSort.value = currentSort;
+        applySearchModeUi();
 
         applyHashState(parseHash());
 
@@ -5974,8 +6207,10 @@ pub const HOME: &str = r#"<!doctype html>
         // ═══════════════════════════════════════════════════════════════
 
         function showFunctionDetail(keyHex, sectionId = null, updateUrl = true) {
+            currentDetailKind = 'function';
             currentDetailData = null;
             currentDetailKeyHex = keyHex;
+            currentBinaryMd5 = null;
             currentCompareRecords = [];
             pendingDetailSection = sectionId;
             selectedControlFlowGroup = null;
@@ -5983,6 +6218,7 @@ pub const HOME: &str = r#"<!doctype html>
             selectedControlFlowCase = null;
             controlFlowFocusMode = false;
             currentDetailSection = sectionId || null;
+            el.modalTitle.innerHTML = 'FUNCTION DETAIL // <span id="modal-key"></span>';
             if (updateUrl) syncHashWithUi();
             el.modalKey.textContent = keyHex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
@@ -6000,11 +6236,55 @@ pub const HOME: &str = r#"<!doctype html>
                 });
         }
 
+        function openBinaryFromFunction(md5Hex, basenameEncoded) {
+            const basename = basenameEncoded ? decodeURIComponent(basenameEncoded) : '';
+            setSearchMode('binaries', false, false);
+            if (basename) {
+                el.q.value = basename;
+                runSearch(basename, 1, false).then(() => showBinaryDetail(md5Hex));
+            } else {
+                showBinaryDetail(md5Hex);
+            }
+        }
+
+        function showBinaryDetail(md5Hex, updateUrl = true) {
+            currentDetailKind = 'binary';
+            currentDetailData = null;
+            currentDetailKeyHex = null;
+            currentBinaryMd5 = md5Hex;
+            currentBinaryCompareData = null;
+            currentBinaryGraphDepth = 2;
+            currentBinaryGraphLimit = 6;
+            currentBinaryCompareLimit = 18;
+            currentCompareRecords = [];
+            pendingDetailSection = null;
+            currentDetailSection = null;
+            el.modalTitle.innerHTML = 'BINARY DETAIL // <span id="modal-key"></span>';
+            if (updateUrl) syncHashWithUi();
+            el.modalKey.textContent = md5Hex;
+            el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING BINARY PROFILE...</div>';
+            el.detailModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            fetch('/api/binary/' + encodeURIComponent(md5Hex))
+                .then(r => {
+                    if (!r.ok) throw new Error('Failed to fetch: ' + r.status);
+                    return r.json();
+                })
+                .then(data => renderBinaryDetail(data))
+                .catch(err => {
+                    el.modalBody.innerHTML = '<div class="state-message"><div class="icon">!</div><h3>FETCH ERROR</h3><p>' + esc(err.message) + '</p></div>';
+                });
+        }
+
         function closeDetailModal(updateUrl = true) {
             el.detailModal.classList.remove('active');
             document.body.style.overflow = '';
             currentDetailData = null;
+            currentDetailKind = 'function';
             currentDetailKeyHex = null;
+            currentBinaryMd5 = null;
+            currentBinaryCompareData = null;
             currentCompareRecords = [];
             pendingDetailSection = null;
             selectedControlFlowGroup = null;
@@ -6036,6 +6316,7 @@ pub const HOME: &str = r#"<!doctype html>
         });
 
         el.modalBody.addEventListener('scroll', () => {
+            if (currentDetailKind !== 'function') return;
             if (detailScrollSyncRaf) cancelAnimationFrame(detailScrollSyncRaf);
             detailScrollSyncRaf = requestAnimationFrame(() => {
                 detailScrollSyncRaf = null;
@@ -6048,6 +6329,235 @@ pub const HOME: &str = r#"<!doctype html>
                 closeDetailModal();
             }
         });
+
+        async function loadBinaryFunctionsPage(md5Hex, page) {
+            if (!md5Hex) return;
+            try {
+                const r = await fetch('/api/binary/' + encodeURIComponent(md5Hex) + '/functions?page=' + page);
+                if (!r.ok) throw new Error('Failed to fetch: ' + r.status);
+                const functions = await r.json();
+                if (currentDetailKind === 'binary' && currentBinaryMd5 === md5Hex && currentDetailData) {
+                    currentDetailData.functions = functions;
+                    renderBinaryDetail(currentDetailData);
+                }
+            } catch (err) {
+                alert('Failed to load binary functions: ' + (err.message || String(err)));
+            }
+        }
+
+        async function loadBinaryCompare(otherMd5Hex) {
+            if (!currentBinaryMd5 || !otherMd5Hex) return;
+            try {
+                const r = await fetch('/api/binary-compare/' + encodeURIComponent(currentBinaryMd5) + '/' + encodeURIComponent(otherMd5Hex) + '?limit=' + currentBinaryCompareLimit);
+                if (!r.ok) throw new Error('Failed to fetch: ' + r.status);
+                currentBinaryCompareData = await r.json();
+                if (currentDetailKind === 'binary' && currentDetailData) renderBinaryDetail(currentDetailData);
+            } catch (err) {
+                alert('Failed to compare binaries: ' + (err.message || String(err)));
+            }
+        }
+
+        async function loadBinaryGraph(depth, limit) {
+            if (!currentBinaryMd5) return;
+            currentBinaryGraphDepth = Math.max(1, Math.min(3, Number(depth || currentBinaryGraphDepth || 2)));
+            currentBinaryGraphLimit = Math.max(1, Math.min(16, Number(limit || currentBinaryGraphLimit || 6)));
+            try {
+                const r = await fetch('/api/binary/' + encodeURIComponent(currentBinaryMd5) + '/graph?depth=' + currentBinaryGraphDepth + '&limit=' + currentBinaryGraphLimit);
+                if (!r.ok) throw new Error('Failed to fetch: ' + r.status);
+                const graphPayload = await r.json();
+                if (currentDetailKind === 'binary' && currentDetailData) {
+                    currentDetailData.graph = graphPayload.graph || { nodes: [], edges: [] };
+                    renderBinaryDetail(currentDetailData);
+                }
+            } catch (err) {
+                alert('Failed to load overlap graph: ' + (err.message || String(err)));
+            }
+        }
+
+        function setBinaryCompareLimit(limit) {
+            currentBinaryCompareLimit = Math.max(1, Math.min(100, Number(limit || currentBinaryCompareLimit || 18)));
+            if (currentBinaryCompareData && currentBinaryCompareData.right && currentBinaryCompareData.right.md5_hex) {
+                loadBinaryCompare(currentBinaryCompareData.right.md5_hex);
+            }
+        }
+
+        function exportBinaryCompareReport() {
+            if (!currentBinaryCompareData) return;
+            const blob = new Blob([JSON.stringify(currentBinaryCompareData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'binary-compare-' + (currentBinaryCompareData.left && currentBinaryCompareData.left.short_id ? currentBinaryCompareData.left.short_id : 'left') + '-' + (currentBinaryCompareData.right && currentBinaryCompareData.right.short_id ? currentBinaryCompareData.right.short_id : 'right') + '.json';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function renderBinaryFacetCard(label, value, total) {
+            const pct = total > 0 ? Math.round((Number(value || 0) / Number(total || 1)) * 100) : 0;
+            return '<div class="coverage-card"><div class="label">' + esc(label) + '</div><div class="value">' + fmt(value || 0) + '<span class="detail-label"> // ' + pct + '%</span></div></div>';
+        }
+
+        function renderBinaryGraph(graph, rootMd5) {
+            const nodes = (graph && graph.nodes) ? graph.nodes : [];
+            const edges = (graph && graph.edges) ? graph.edges : [];
+            if (!nodes.length) return '<div class="state-message"><div class="icon">::</div><h3>NO GRAPH SIGNAL</h3><p>Overlap expansion did not surface related binaries yet.</p></div>';
+            const width = 900;
+            const height = 360;
+            const rootIndex = nodes.findIndex(n => n.binary && n.binary.md5_hex === rootMd5);
+            const rootNode = rootIndex >= 0 ? nodes[rootIndex] : nodes[0];
+            const others = nodes.filter(n => n !== rootNode);
+            let html = '<div class="binary-graph">';
+            html += '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none">';
+            const positions = new Map();
+            positions.set(rootNode.binary.md5_hex, { x: width * 0.5, y: height * 0.5 });
+            others.forEach((node, idx) => {
+                const angle = (Math.PI * 2 * idx) / Math.max(1, others.length);
+                positions.set(node.binary.md5_hex, {
+                    x: width * 0.5 + Math.cos(angle) * (width * 0.32),
+                    y: height * 0.5 + Math.sin(angle) * (height * 0.32),
+                });
+            });
+            edges.forEach(edge => {
+                const a = positions.get(edge.source_md5);
+                const b = positions.get(edge.target_md5);
+                if (!a || !b) return;
+                const alpha = Math.max(0.2, Math.min(0.85, Number(edge.shared_functions || 0) / 12));
+                html += '<line x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1) + '" stroke="rgba(0,255,136,' + alpha.toFixed(2) + ')" stroke-width="' + Math.max(1, Math.min(5, Number(edge.shared_functions || 0) / 4)).toFixed(1) + '" />';
+            });
+            html += '</svg>';
+            nodes.forEach(node => {
+                const pos = positions.get(node.binary.md5_hex);
+                if (!pos) return;
+                html += '<div class="binary-graph-node' + (node.binary.md5_hex === rootMd5 ? ' root' : '') + '" style="left:' + ((pos.x / width) * 100).toFixed(2) + '%; top:' + ((pos.y / height) * 100).toFixed(2) + '%" onclick="showBinaryDetail(\'' + esc(node.binary.md5_hex) + '\')">'
+                    + '<div class="name">' + esc(node.binary.display_name || node.binary.basename) + '</div>'
+                    + '<div class="meta">FN ' + fmt(node.binary.function_count || 0) + ' // VER ' + fmt(node.binary.version_count || 0) + '</div>'
+                    + '</div>';
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function renderBinaryComparePanel(compare) {
+            if (!compare) return '';
+            let html = '<div class="metadata-section"><div class="metadata-header"><span>Binary Diff</span><span class="badge nominal">COMPARE</span></div><div class="metadata-content">';
+            html += '<div class="detail-grid" style="margin-bottom: var(--space-md);">';
+            html += '<div class="detail-stat"><div class="label">Shared</div><div class="value">' + fmt(compare.shared_count || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Left Only</div><div class="value">' + fmt(compare.left_only_count || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Right Only</div><div class="value">' + fmt(compare.right_only_count || 0) + '</div></div>';
+            html += '</div>';
+            html += '<div class="compare-panel-actions" style="margin-bottom: var(--space-md);">';
+            html += '<label class="detail-label">Sample <input class="comment-search" style="width:88px; margin-left:8px;" type="number" min="1" max="100" value="' + esc(String(compare.sample_limit || currentBinaryCompareLimit || 18)) + '" onchange="setBinaryCompareLimit(this.value)"></label>';
+            html += '<button class="pagination-btn" onclick="exportBinaryCompareReport()">Export JSON</button>';
+            html += '</div>';
+            html += '<div class="binary-compare-grid">';
+            html += '<div class="coverage-card"><div class="label">LEFT</div><div class="value">' + esc(compare.left.display_name || compare.left.basename) + '</div></div>';
+            html += '<div class="coverage-card"><div class="label">RIGHT</div><div class="value">' + esc(compare.right.display_name || compare.right.basename) + '</div></div>';
+            html += '</div>';
+            html += '<div class="compare-list-grid">';
+            [['Shared', compare.shared], ['Left Only', compare.left_only], ['Right Only', compare.right_only]].forEach(group => {
+                html += '<div class="compare-list-column"><div class="detail-label">' + esc(group[0]) + '</div>';
+                if (!group[1] || !group[1].length) {
+                    html += '<div class="detail-value">-</div>';
+                } else {
+                    group[1].forEach(item => {
+                        html += '<div class="compare-row clickable" onclick="showFunctionDetail(\'' + esc(item.key_hex) + '\')"><div>' + esc(item.name) + '</div><div class="compare-cell">' + esc(fmtRelativeTs(item.ts)) + '</div></div>';
+                    });
+                }
+                html += '</div>';
+            });
+            html += '</div></div></div>';
+            return html;
+        }
+
+        function renderBinaryDetail(data) {
+            if (data.error) {
+                el.modalBody.innerHTML = '<div class="state-message"><div class="icon">!</div><h3>ERROR</h3><p>' + esc(data.error) + '</p></div>';
+                return;
+            }
+
+            currentDetailData = data;
+            currentBinaryMd5 = data.binary && data.binary.md5_hex ? data.binary.md5_hex : currentBinaryMd5;
+            el.modalKey.textContent = currentBinaryMd5 || '';
+            if (currentBinaryCompareData && (!currentBinaryCompareData.left || currentBinaryCompareData.left.md5_hex !== currentBinaryMd5)) {
+                currentBinaryCompareData = null;
+            }
+
+            const binary = data.binary || {};
+            const facets = data.facets || {};
+            const graph = data.graph || { nodes: [], edges: [] };
+            const fnPage = data.functions || { results: [], total: 0, page: 1, total_pages: 1 };
+            let html = '<div class="detail-layout"><div class="detail-main">';
+            html += '<div class="detail-section"><div class="detail-label">Binary</div><div class="detail-value accent">' + esc(binary.display_name || binary.basename || currentBinaryMd5 || '') + '</div></div>';
+            html += '<div class="detail-section"><div class="detail-label">MD5</div><div class="detail-value mono">' + esc(binary.md5_hex || '') + '</div></div>';
+            html += '<div class="detail-grid">';
+            html += '<div class="detail-stat"><div class="label">Functions</div><div class="value">' + fmt(binary.function_count || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Versions</div><div class="value">' + fmt(binary.version_count || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Observations</div><div class="value">' + fmt(binary.obs_count || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Hosts</div><div class="value">' + fmt(binary.host_count || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">First Seen</div><div class="value">' + esc(fmtRelativeTs(binary.first_seen_ts)) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Last Seen</div><div class="value">' + esc(fmtRelativeTs(binary.last_seen_ts)) + '</div></div>';
+            html += '</div>';
+
+            if (binary.hostname) {
+                html += '<div class="detail-section"><div class="detail-label">Primary Host</div><div class="detail-value">' + esc(binary.hostname) + '</div></div>';
+            }
+
+            html += '<div class="metadata-section"><div class="metadata-header"><span>Coverage Profile</span><span class="badge nominal">FACETS</span></div><div class="metadata-content"><div class="binary-coverage-grid">';
+            html += renderBinaryFacetCard('Typed', facets.typed_functions || 0, facets.function_count || binary.function_count || 0);
+            html += renderBinaryFacetCard('Frames', facets.framed_functions || 0, facets.function_count || binary.function_count || 0);
+            html += renderBinaryFacetCard('Comments', facets.commented_functions || 0, facets.function_count || binary.function_count || 0);
+            html += renderBinaryFacetCard('Switches', facets.switch_functions || 0, facets.function_count || binary.function_count || 0);
+            html += renderBinaryFacetCard('Partial Parse', facets.parse_partial_functions || 0, facets.function_count || binary.function_count || 0);
+            html += renderBinaryFacetCard('Demangled', facets.demangled_functions || 0, facets.function_count || binary.function_count || 0);
+            html += '</div></div></div>';
+
+            html += '<div class="metadata-section"><div class="metadata-header"><span>Overlap Graph</span><span class="badge nominal">DEPTH ' + currentBinaryGraphDepth + '</span></div><div class="metadata-content">';
+            html += '<div class="compare-panel-actions" style="margin-bottom: var(--space-md);">';
+            html += '<label class="detail-label">Depth <input class="comment-search" style="width:72px; margin-left:8px;" type="number" min="1" max="3" value="' + esc(String(currentBinaryGraphDepth)) + '" onchange="loadBinaryGraph(this.value, ' + currentBinaryGraphLimit + ')"></label>';
+            html += '<label class="detail-label">Branch <input class="comment-search" style="width:72px; margin-left:8px;" type="number" min="1" max="16" value="' + esc(String(currentBinaryGraphLimit)) + '" onchange="loadBinaryGraph(' + currentBinaryGraphDepth + ', this.value)"></label>';
+            html += '<span class="detail-label">Edge weight: shared function count, thicker means stronger overlap.</span>';
+            html += '</div>';
+            html += renderBinaryGraph(graph, binary.md5_hex || currentBinaryMd5 || '');
+            html += '</div></div>';
+
+            if (data.related && data.related.length > 0) {
+                html += '<div class="metadata-section"><div class="metadata-header"><span>Related Binaries</span><span class="badge nominal">OVERLAP</span></div><div class="metadata-content">';
+                data.related.forEach(edge => {
+                    html += '<div class="compare-row clickable" onclick="showBinaryDetail(\'' + esc(edge.target.md5_hex) + '\')">'
+                        + '<div><div class="detail-value accent">' + esc(edge.target.display_name || edge.target.basename) + '</div><div class="detail-label">' + esc(fmtRelativeTs(edge.target.last_seen_ts)) + ' // ' + esc(edge.target.md5_hex) + '</div></div>'
+                        + '<div class="compare-cell"><span class="frame-chip">SHARED ' + fmt(edge.shared_functions || 0) + '</span><button class="result-action" onclick="event.stopPropagation();loadBinaryCompare(\'' + esc(edge.target.md5_hex) + '\')">diff</button></div>'
+                        + '</div>';
+                });
+                html += '</div></div>';
+            }
+
+            html += renderBinaryComparePanel(currentBinaryCompareData);
+
+            html += '<div class="metadata-section"><div class="metadata-header"><span>Functions In Binary</span><span class="badge">' + fmt(fnPage.total || 0) + ' TOTAL</span></div><div class="metadata-content">';
+            if (!fnPage.results || fnPage.results.length === 0) {
+                html += '<div class="state-message"><div class="icon">[ ]</div><h3>NO FUNCTIONS INDEXED</h3><p>No associated functions were recovered for this binary.</p></div>';
+            } else {
+                fnPage.results.forEach(hit => {
+                    const bins = (hit.binaries || []).map(b => '<span class="bin-tag clickable" onclick="event.stopPropagation();showBinaryDetail(\'' + esc(b.md5_hex) + '\')">' + esc(b.basename) + '<span class="accent">#' + esc(b.short_id) + '</span></span>').join('');
+                    html += '<div class="result-item clickable" onclick="showFunctionDetail(\'' + esc(hit.key_hex) + '\')">'
+                        + '<div class="result-main"><div class="result-func">' + esc(hit.func_name_demangled || hit.func_name) + '</div><div class="result-key"><span class="result-key-copy" onclick="event.stopPropagation();copyResultKey(\'' + esc(hit.key_hex) + '\')">KEY ' + esc(hit.key_hex) + '</span><span class="result-age">' + esc(fmtRelativeTs(hit.ts)) + '</span></div><div class="result-bins">' + bins + '</div></div>'
+                        + '<div class="result-meta"><span class="score-badge">OBS ' + fmt(hit.score || 0) + '</span></div>'
+                        + '</div>';
+                });
+                if ((fnPage.total_pages || 1) > 1) {
+                    html += '<div class="pagination">';
+                    html += '<button class="pagination-btn" onclick="loadBinaryFunctionsPage(\'' + esc(binary.md5_hex || currentBinaryMd5 || '') + '\',' + ((fnPage.page || 1) - 1) + ')"' + ((fnPage.page || 1) <= 1 ? ' disabled' : '') + '>&lt;&lt; PREV</button>';
+                    html += '<span class="pagination-info">PAGE <span class="accent">' + (fnPage.page || 1) + '</span> OF <span class="accent">' + (fnPage.total_pages || 1) + '</span></span>';
+                    html += '<button class="pagination-btn" onclick="loadBinaryFunctionsPage(\'' + esc(binary.md5_hex || currentBinaryMd5 || '') + '\',' + ((fnPage.page || 1) + 1) + ')"' + ((fnPage.page || 1) >= (fnPage.total_pages || 1) ? ' disabled' : '') + '>NEXT &gt;&gt;</button>';
+                    html += '</div>';
+                }
+            }
+            html += '</div></div>';
+            html += '</div></div>';
+            el.modalBody.innerHTML = html;
+        }
 
         function renderFunctionDetail(data) {
             if (data.error) {
@@ -6093,7 +6603,11 @@ pub const HOME: &str = r#"<!doctype html>
             html += '</div>';
 
             // Binary names
-            if (data.binary_names && data.binary_names.length > 0) {
+            if (data.binaries && data.binaries.length > 0) {
+                html += '<div class="detail-section"><div class="detail-label">Associated Binaries</div><div class="result-bins">';
+                data.binaries.forEach(b => { html += '<span class="bin-tag clickable" onclick="openBinaryFromFunction(\'' + esc(b.md5_hex) + '\', \'' + encodeURIComponent(b.basename) + '\')">' + esc(b.basename) + '<span class="accent">#' + esc(b.short_id) + '</span></span>'; });
+                html += '</div></div>';
+            } else if (data.binary_names && data.binary_names.length > 0) {
                 html += '<div class="detail-section"><div class="detail-label">Associated Binaries</div><div class="result-bins">';
                 data.binary_names.forEach(b => { html += '<span class="bin-tag">' + esc(b) + '</span>'; });
                 html += '</div></div>';
