@@ -2428,6 +2428,52 @@ pub const HOME: &str = r#"<!doctype html>
             margin-top: 8px;
         }
 
+        .controlflow-group-strip {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 8px 10px;
+            border-top: 1px solid var(--border-subtle);
+            background: rgba(255, 255, 255, 0.015);
+        }
+
+        .controlflow-group-strip-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .controlflow-group-strip-label {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .controlflow-density-strip {
+            display: grid;
+            grid-template-columns: repeat(18, minmax(0, 1fr));
+            gap: 3px;
+        }
+
+        .controlflow-density-bin {
+            height: 10px;
+            border: 1px solid var(--border-dim);
+            background: var(--bg-base);
+        }
+
+        .controlflow-density-bin.fill {
+            background: rgba(0, 255, 136, 0.32);
+            border-color: rgba(0, 255, 136, 0.18);
+        }
+
+        .controlflow-density-bin.default {
+            background: rgba(255, 170, 0, 0.42);
+            border-color: rgba(255, 170, 0, 0.24);
+        }
+
         .controlflow-legend {
             display: flex;
             flex-wrap: wrap;
@@ -2523,6 +2569,11 @@ pub const HOME: &str = r#"<!doctype html>
             font-size: 10px;
             padding: 4px 8px;
             cursor: pointer;
+        }
+
+        .controlflow-toggle:hover {
+            border-color: rgba(0, 255, 136, 0.28);
+            color: var(--text-primary);
         }
 
         .jumptable-ref-list {
@@ -3740,6 +3791,27 @@ pub const HOME: &str = r#"<!doctype html>
             return { switches, tables, switchLinks, tableSwitchCounts, groupedSwitches, rowToGroup, controlFlowId };
         }
 
+        function renderCompactControlFlowStrip(labels, stats) {
+            const bins = Array.isArray(labels) ? labels.slice(0, 18) : [];
+            let html = '<div class="controlflow-group-strip">';
+            html += '<div class="controlflow-group-strip-head">';
+            html += '<div class="controlflow-group-strip-label">Case Density</div>';
+            html += '<div class="controlflow-toolbar-summary">';
+            stats.forEach(stat => {
+                html += '<span class="frame-chip' + (stat.warn ? ' warn' : '') + '">' + esc(stat.label) + '</span>';
+            });
+            html += '</div></div>';
+            html += '<div class="controlflow-density-strip">';
+            bins.forEach(label => {
+                html += '<div class="controlflow-density-bin fill' + (label === 'default' ? ' default' : '') + '" title="' + esc(label) + '"></div>';
+            });
+            for (let i = bins.length; i < 18; i++) {
+                html += '<div class="controlflow-density-bin"></div>';
+            }
+            html += '</div></div>';
+            return html;
+        }
+
         function estimateMetricMax(name, value) {
             const v = Number(value || 0);
             const prevPeak = metricPeaks[name] || 0;
@@ -4288,7 +4360,7 @@ pub const HOME: &str = r#"<!doctype html>
             const controlFlowId = ctx.controlFlowId;
 
             function renderCopyButton(label, value) {
-                return '<button class="controlflow-toggle" onclick="copyText(\'' + esc(value) + '\')">' + esc(label) + '</button>';
+                return '<button class="controlflow-toggle" onclick="event.stopPropagation();copyText(\'' + esc(value) + '\')">' + esc(label) + '</button>';
             }
 
             let html = '';
@@ -4303,8 +4375,8 @@ pub const HOME: &str = r#"<!doctype html>
             if (selectedControlFlowGroup) html += '<span class="controlflow-focus-note">selection ' + esc(selectedControlFlowGroup.replace(/^grp:/, '')) + '</span>';
             html += '</div>';
             html += '<div class="controlflow-toolbar-actions">';
-            html += '<button class="controlflow-toggle" onclick="toggleControlFlowFocusMode()">' + (controlFlowFocusMode ? 'Exit Focus Mode' : 'Focus Selection') + '</button>';
-            html += '<button class="controlflow-toggle" onclick="clearControlFlowSelection()">Clear</button>';
+            html += '<button class="controlflow-toggle" onclick="event.stopPropagation();toggleControlFlowFocusMode()">' + (controlFlowFocusMode ? 'Exit Focus Mode' : 'Focus Selection') + '</button>';
+            html += '<button class="controlflow-toggle" onclick="event.stopPropagation();clearControlFlowSelection()">Clear</button>';
             html += '</div></div>';
             if (cf.dominant) {
                 html += '<div class="controlflow-hero">';
@@ -4343,6 +4415,7 @@ pub const HOME: &str = r#"<!doctype html>
                 Array.from(groupedSwitches.entries()).forEach(([addr, group], groupIdx) => {
                     const groupId = 'swgrp-' + groupIdx;
                     const filterId = 'grp:' + addr;
+                    const linkedTable = addr === '__unlinked__' ? null : tables.find(jt => jt.addr === addr);
                     if (controlFlowFocusMode && selectedControlFlowGroup && selectedControlFlowGroup !== filterId) return;
                     const collapsed = collapsedSwitchGroups.has(groupId);
                     const dimmed = selectedControlFlowGroup && selectedControlFlowGroup !== filterId;
@@ -4351,6 +4424,19 @@ pub const HOME: &str = r#"<!doctype html>
                     html += '<span class="switch-group-title">' + (addr === '__unlinked__' ? 'Unlinked Switches' : ('Switch Cluster ' + (groupIdx + 1))) + '</span>';
                     html += '<span class="switch-meta">' + esc(String(group.length)) + ' sites' + (addr !== '__unlinked__' ? (' // ' + addr) : '') + '</span>';
                     html += '</div>';
+                    if (linkedTable) {
+                        html += renderCompactControlFlowStrip(linkedTable.coverage_runs || linkedTable.all_case_labels || [], [
+                            { label: String(linkedTable.case_count || 0) + ' cases' },
+                            { label: String(linkedTable.refs.length || 0) + ' refs' },
+                            { label: linkedTable.has_default ? 'default path' : 'no default', warn: !!linkedTable.has_default },
+                            { label: linkedTable.sparse ? 'sparse' : 'dense', warn: !!linkedTable.sparse },
+                        ]);
+                    } else {
+                        html += renderCompactControlFlowStrip([], [
+                            { label: String(group.length) + ' sites' },
+                            { label: 'unlinked', warn: true },
+                        ]);
+                    }
                     html += '<div class="switch-group-body">';
                     group.forEach(sw => {
                         const linkAddr = addr === '__unlinked__' ? null : addr;
@@ -4360,7 +4446,7 @@ pub const HOME: &str = r#"<!doctype html>
                         html += '<div class="switch-desc">' + esc(sw.description) + '</div>';
                         html += '<div class="switch-summary"><span class="frame-chip">' + (sw.description.includes('jump') ? 'jump site' : 'case site') + '</span></div>';
                         if (linkAddr) {
-                            html += '<div class="switch-links"><span class="frame-chip">table ' + esc(linkAddr) + '</span><button class="controlflow-toggle" onclick="jumpToControlFlowTable(\'' + esc(linkAddr) + '\')">Open Table</button></div>';
+                            html += '<div class="switch-links"><span class="frame-chip">table ' + esc(linkAddr) + '</span><button class="controlflow-toggle" onclick="event.stopPropagation();jumpToControlFlowTable(\'' + esc(linkAddr) + '\')">Open Table</button></div>';
                         }
                         html += '</div>';
                     });
@@ -4388,7 +4474,7 @@ pub const HOME: &str = r#"<!doctype html>
                     if (jt.sparse) html += '<span class="frame-chip warn">sparse</span>';
                     if (jt.has_default) html += '<span class="frame-chip warn">default case</span>';
                     html += '</div></div>';
-                    html += '<div class="controlflow-actions">' + renderCopyButton('Copy Addr', jt.addr) + renderCopyButton('Copy Cases', (jt.all_case_labels || []).join(', ')) + '<button class="controlflow-toggle" onclick="openAllJumpRefs(\'' + esc(jt.addr) + '\')">Open All Refs</button></div>';
+                    html += '<div class="controlflow-actions">' + renderCopyButton('Copy Addr', jt.addr) + renderCopyButton('Copy Cases', (jt.all_case_labels || []).join(', ')) + '<button class="controlflow-toggle" onclick="event.stopPropagation();openAllJumpRefs(\'' + esc(jt.addr) + '\')">Open All Refs</button></div>';
                     html += '<div class="jumptable-coverage">';
                     html += '<div class="detail-label" style="margin:0;">Case Coverage</div>';
                     if (jt.coverage_runs && jt.coverage_runs.length > 0) {
@@ -4414,7 +4500,7 @@ pub const HOME: &str = r#"<!doctype html>
                     visibleRefs.forEach(ref => {
                         const rowId = controlFlowId(ref.kind, ref.fchunk_nr, ref.fchunk_off);
                         html += '<div class="jumptable-ref' + (selectedControlFlowRow === rowId ? ' active' : '') + '" data-controlflow-id="' + rowId + '" onmouseenter="hoverControlFlowLink(\'' + rowId + '\')" onmouseleave="clearControlFlowHover()" onclick="selectControlFlowRow(\'' + rowId + '\', \'' + ('grp:' + jt.addr) + '\')">';
-                        html += '<div class="jumptable-ref-meta">' + esc(ref.kind) + '<br>chunk ' + esc(String(ref.fchunk_nr)) + '<br>@ <a href="javascript:void(0)" onclick="focusCommentRow(&quot;' + rowId + '&quot;, null, true);jumpToDetailSection(&quot;section-comments&quot;);setActiveDetailNav(&quot;section-comments&quot;);" style="color:var(--accent);text-decoration:none;">' + esc(fmtHex(ref.fchunk_off)) + '</a></div>';
+                        html += '<div class="jumptable-ref-meta">' + esc(ref.kind) + '<br>chunk ' + esc(String(ref.fchunk_nr)) + '<br>@ <a href="javascript:void(0)" onclick="event.stopPropagation();focusCommentRow(&quot;' + rowId + '&quot;, null, true);jumpToDetailSection(&quot;section-comments&quot;);setActiveDetailNav(&quot;section-comments&quot;);" style="color:var(--accent);text-decoration:none;">' + esc(fmtHex(ref.fchunk_off)) + '</a></div>';
                         html += '<div class="jumptable-ref-body"><div class="relation-summary"><span class="frame-chip">' + esc(ref.source_role) + '</span><span class="frame-chip">' + esc(summarizeRelation(ref)) + '</span></div>';
                         if (ref.case_labels && ref.case_labels.length > 0) {
                             html += '<div class="jumptable-case-strip">' + ref.case_labels.map(label => '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>').join('') + '</div>';
@@ -4428,7 +4514,7 @@ pub const HOME: &str = r#"<!doctype html>
                     });
                     html += '</div>';
                     if (jt.refs.length > 6) {
-                        html += '<div class="jumptable-more"><button class="controlflow-toggle" onclick="toggleJumpTableExpand(&quot;' + esc(jt.addr) + '&quot;)">' + (expanded ? 'Show Less' : ('Show All ' + jt.refs.length + ' Refs')) + '</button></div>';
+                        html += '<div class="jumptable-more"><button class="controlflow-toggle" onclick="event.stopPropagation();toggleJumpTableExpand(&quot;' + esc(jt.addr) + '&quot;)">' + (expanded ? 'Show Less' : ('Show All ' + jt.refs.length + ' Refs')) + '</button></div>';
                     }
                     html += '<div class="jumptable-graph">';
                     html += '<div class="jumptable-graph-node root"><div class="jumptable-graph-label">Jump Table</div><div class="jumptable-graph-value">' + esc(jt.addr) + '</div></div>';
