@@ -2156,6 +2156,16 @@ pub const HOME: &str = r#"<!doctype html>
             box-shadow: inset 2px 0 0 rgba(0, 255, 136, 0.85);
         }
 
+        .comment-item.active-controlflow .comment-item-head,
+        .comment-item.active-controlflow .comment-item-text {
+            background: rgba(255, 170, 0, 0.08);
+            box-shadow: inset 2px 0 0 rgba(255, 170, 0, 0.9);
+        }
+
+        .comment-item.dimmed {
+            opacity: 0.42;
+        }
+
         .comment-item-head,
         .comment-item-text {
             background: var(--bg-panel);
@@ -2208,6 +2218,40 @@ pub const HOME: &str = r#"<!doctype html>
             border: 1px solid var(--border-subtle);
             background: var(--bg-panel);
             padding: var(--space-md);
+            transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease;
+        }
+
+        .controlflow-panel.dimmed,
+        .switch-group.dimmed,
+        .jumptable-card.dimmed {
+            opacity: 0.42;
+        }
+
+        .controlflow-toolbar {
+            display: flex;
+            justify-content: space-between;
+            gap: var(--space-md);
+            flex-wrap: wrap;
+            align-items: center;
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
+            padding: 10px 12px;
+            margin-bottom: var(--space-md);
+        }
+
+        .controlflow-toolbar-summary,
+        .controlflow-toolbar-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .controlflow-focus-note {
+            color: var(--text-dim);
+            font-size: 11px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
         }
 
         .controlflow-matrix {
@@ -2221,6 +2265,13 @@ pub const HOME: &str = r#"<!doctype html>
             grid-template-columns: 150px minmax(0, 1fr);
             gap: 1px;
             background: var(--border-dim);
+            cursor: pointer;
+            transition: background 120ms ease;
+        }
+
+        .controlflow-matrix-row:hover .controlflow-matrix-cell,
+        .controlflow-matrix-row.active .controlflow-matrix-cell {
+            background: rgba(0, 255, 136, 0.05);
         }
 
         .controlflow-matrix-row + .controlflow-matrix-row {
@@ -2330,9 +2381,15 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         .switch-card:hover,
+        .switch-card.active,
         .switch-card.linked {
             border-color: rgba(0, 255, 136, 0.28);
             background: rgba(0, 255, 136, 0.04);
+        }
+
+        .switch-card.active {
+            border-color: rgba(255, 170, 0, 0.46);
+            background: rgba(255, 170, 0, 0.06);
         }
 
         .switch-card-head {
@@ -2358,10 +2415,24 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         .switch-desc {
-            color: var(--text-secondary);
+            color: var(--text-primary);
             font-family: var(--font-mono);
             font-size: 12px;
             overflow-wrap: anywhere;
+        }
+
+        .switch-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .controlflow-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: var(--space-md);
         }
 
         .jumptable-card {
@@ -2426,11 +2497,11 @@ pub const HOME: &str = r#"<!doctype html>
             content: "";
             position: absolute;
             inset: 0;
-            background: linear-gradient(180deg, rgba(0,255,136,0.55), rgba(0,255,136,0.2));
+            background: rgba(0,255,136,0.45);
         }
 
         .coverage-bin.default::before {
-            background: linear-gradient(180deg, rgba(255,170,0,0.65), rgba(255,170,0,0.2));
+            background: rgba(255,170,0,0.55);
         }
 
         .coverage-meta {
@@ -2468,6 +2539,12 @@ pub const HOME: &str = r#"<!doctype html>
 
         .jumptable-ref + .jumptable-ref {
             border-top: 1px solid var(--border-subtle);
+        }
+
+        .jumptable-ref.active .jumptable-ref-meta,
+        .jumptable-ref.active .jumptable-ref-body {
+            background: rgba(255, 170, 0, 0.06);
+            box-shadow: inset 2px 0 0 rgba(255, 170, 0, 0.92);
         }
 
         .jumptable-ref-meta,
@@ -2554,6 +2631,25 @@ pub const HOME: &str = r#"<!doctype html>
             color: var(--text-dim);
             font-size: 10px;
             line-height: 1.3;
+        }
+
+        .comment-item-text.controlflow {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .comment-flow-main {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .comment-flow-detail {
+            color: var(--text-dim);
+            font-size: 11px;
+            line-height: 1.35;
         }
 
         .jumptable-graph-node {
@@ -3508,6 +3604,9 @@ pub const HOME: &str = r#"<!doctype html>
         const compareHydrating = new Set();
         const expandedJumpTables = new Set();
         const collapsedSwitchGroups = new Set();
+        let selectedControlFlowGroup = null;
+        let selectedControlFlowRow = null;
+        let controlFlowFocusMode = false;
         let compareShowAll = false;
         let compareMode = 'summary';
 
@@ -3593,6 +3692,52 @@ pub const HOME: &str = r#"<!doctype html>
                 label: 'INTENT: IDENTIFIER',
                 hint: 'Single-token identifier search.',
             };
+        }
+
+        function buildControlFlowContext(cf) {
+            const switches = Array.isArray(cf && cf.switches) ? cf.switches : [];
+            const tables = Array.isArray(cf && cf.jumptables) ? cf.jumptables : [];
+
+            function controlFlowId(kind, chunk, off) {
+                return 'cf-' + String(kind || '').toLowerCase() + '-' + chunk + '-' + off;
+            }
+
+            const switchLinks = switches.map(sw => {
+                let best = null;
+                tables.forEach(jt => {
+                    jt.refs.forEach(ref => {
+                        if (ref.fchunk_nr !== sw.fchunk_nr) return;
+                        const dist = Math.abs(Number(ref.fchunk_off) - Number(sw.fchunk_off));
+                        if (!best || dist < best.dist) {
+                            best = { addr: jt.addr, dist };
+                        }
+                    });
+                });
+                return best && best.dist <= 0x80 ? best.addr : null;
+            });
+
+            const tableSwitchCounts = new Map();
+            switchLinks.forEach(addr => {
+                if (!addr) return;
+                tableSwitchCounts.set(addr, (tableSwitchCounts.get(addr) || 0) + 1);
+            });
+
+            const groupedSwitches = new Map();
+            const rowToGroup = new Map();
+            switches.forEach((sw, idx) => {
+                const addr = switchLinks[idx] || '__unlinked__';
+                if (!groupedSwitches.has(addr)) groupedSwitches.set(addr, []);
+                groupedSwitches.get(addr).push(sw);
+                rowToGroup.set(controlFlowId(sw.kind, sw.fchunk_nr, sw.fchunk_off), 'grp:' + addr);
+            });
+
+            tables.forEach(jt => {
+                jt.refs.forEach(ref => {
+                    rowToGroup.set(controlFlowId(ref.kind, ref.fchunk_nr, ref.fchunk_off), 'grp:' + jt.addr);
+                });
+            });
+
+            return { switches, tables, switchLinks, tableSwitchCounts, groupedSwitches, rowToGroup, controlFlowId };
         }
 
         function estimateMetricMax(name, value) {
@@ -4122,14 +4267,11 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function renderControlFlowMetadata(cf) {
-            const switches = Array.isArray(cf && cf.switches) ? cf.switches : [];
-            const tables = Array.isArray(cf && cf.jumptables) ? cf.jumptables : [];
+            const ctx = buildControlFlowContext(cf);
+            const switches = ctx.switches;
+            const tables = ctx.tables;
             if (switches.length === 0 && tables.length === 0) {
                 return '<div class="metadata-empty">No switch or jumptable annotations</div>';
-            }
-
-            function controlFlowId(kind, chunk, off) {
-                return 'cf-' + String(kind || '').toLowerCase() + '-' + chunk + '-' + off;
             }
 
             function summarizeRelation(ref) {
@@ -4140,38 +4282,30 @@ pub const HOME: &str = r#"<!doctype html>
                 return 'Entry site';
             }
 
-            const switchLinks = switches.map(sw => {
-                let best = null;
-                tables.forEach(jt => {
-                    jt.refs.forEach(ref => {
-                        if (ref.fchunk_nr !== sw.fchunk_nr) return;
-                        const dist = Math.abs(Number(ref.fchunk_off) - Number(sw.fchunk_off));
-                        if (!best || dist < best.dist) {
-                            best = { addr: jt.addr, dist };
-                        }
-                    });
-                });
-                return best && best.dist <= 0x80 ? best.addr : null;
-            });
-
-            const tableSwitchCounts = new Map();
-            switchLinks.forEach(addr => {
-                if (!addr) return;
-                tableSwitchCounts.set(addr, (tableSwitchCounts.get(addr) || 0) + 1);
-            });
-
-            const groupedSwitches = new Map();
-            switches.forEach((sw, idx) => {
-                const addr = switchLinks[idx] || '__unlinked__';
-                if (!groupedSwitches.has(addr)) groupedSwitches.set(addr, []);
-                groupedSwitches.get(addr).push(sw);
-            });
+            const switchLinks = ctx.switchLinks;
+            const tableSwitchCounts = ctx.tableSwitchCounts;
+            const groupedSwitches = ctx.groupedSwitches;
+            const controlFlowId = ctx.controlFlowId;
 
             function renderCopyButton(label, value) {
                 return '<button class="controlflow-toggle" onclick="copyText(\'' + esc(value) + '\')">' + esc(label) + '</button>';
             }
 
             let html = '';
+            html += '<div class="controlflow-legend">';
+            html += '<span class="frame-chip">entry</span><span class="frame-chip">case</span><span class="frame-chip warn">default</span><span class="comment-kind">REG</span><span class="comment-kind repeatable">RPT</span>';
+            html += '</div>';
+            html += '<div class="controlflow-toolbar">';
+            html += '<div class="controlflow-toolbar-summary">';
+            html += '<span class="frame-chip">' + esc(String(groupedSwitches.size)) + ' groups</span>';
+            html += '<span class="frame-chip">' + esc(String(switches.length)) + ' switch sites</span>';
+            html += '<span class="frame-chip">' + esc(String(tables.length)) + ' jump tables</span>';
+            if (selectedControlFlowGroup) html += '<span class="controlflow-focus-note">selection ' + esc(selectedControlFlowGroup.replace(/^grp:/, '')) + '</span>';
+            html += '</div>';
+            html += '<div class="controlflow-toolbar-actions">';
+            html += '<button class="controlflow-toggle" onclick="toggleControlFlowFocusMode()">' + (controlFlowFocusMode ? 'Exit Focus Mode' : 'Focus Selection') + '</button>';
+            html += '<button class="controlflow-toggle" onclick="clearControlFlowSelection()">Clear</button>';
+            html += '</div></div>';
             if (cf.dominant) {
                 html += '<div class="controlflow-hero">';
                 html += '<div class="controlflow-hero-title">Dominant Switch Cluster</div>';
@@ -4195,7 +4329,8 @@ pub const HOME: &str = r#"<!doctype html>
                     const value = addr === '__unlinked__'
                         ? (group.length + ' switch sites')
                         : (addr + ' // ' + group.length + ' switch sites');
-                    html += '<div class="controlflow-matrix-row"><div class="controlflow-matrix-cell"><div class="controlflow-matrix-label">' + esc(label) + '</div></div><div class="controlflow-matrix-cell"><div class="controlflow-matrix-value">' + esc(value) + '</div></div></div>';
+                    const groupId = 'grp:' + addr;
+                    html += '<div class="controlflow-matrix-row' + (selectedControlFlowGroup === groupId ? ' active' : '') + '" onclick="setControlFlowGroup(\'' + groupId + '\')"><div class="controlflow-matrix-cell"><div class="controlflow-matrix-label">' + esc(label) + '</div></div><div class="controlflow-matrix-cell"><div class="controlflow-matrix-value">' + esc(value) + '</div></div></div>';
                 });
                 html += '</div>';
             }
@@ -4207,8 +4342,11 @@ pub const HOME: &str = r#"<!doctype html>
             } else {
                 Array.from(groupedSwitches.entries()).forEach(([addr, group], groupIdx) => {
                     const groupId = 'swgrp-' + groupIdx;
+                    const filterId = 'grp:' + addr;
+                    if (controlFlowFocusMode && selectedControlFlowGroup && selectedControlFlowGroup !== filterId) return;
                     const collapsed = collapsedSwitchGroups.has(groupId);
-                    html += '<div class="switch-group' + (collapsed ? ' collapsed' : '') + '">';
+                    const dimmed = selectedControlFlowGroup && selectedControlFlowGroup !== filterId;
+                    html += '<div class="switch-group' + (collapsed ? ' collapsed' : '') + (dimmed ? ' dimmed' : '') + '">';
                     html += '<div class="switch-group-head" onclick="toggleSwitchGroup(\'' + groupId + '\')">';
                     html += '<span class="switch-group-title">' + (addr === '__unlinked__' ? 'Unlinked Switches' : ('Switch Cluster ' + (groupIdx + 1))) + '</span>';
                     html += '<span class="switch-meta">' + esc(String(group.length)) + ' sites' + (addr !== '__unlinked__' ? (' // ' + addr) : '') + '</span>';
@@ -4216,9 +4354,11 @@ pub const HOME: &str = r#"<!doctype html>
                     html += '<div class="switch-group-body">';
                     group.forEach(sw => {
                         const linkAddr = addr === '__unlinked__' ? null : addr;
-                        html += '<div class="switch-card' + (linkAddr ? ' linked' : '') + '" onmouseenter="hoverControlFlowLink(\'' + controlFlowId(sw.kind, sw.fchunk_nr, sw.fchunk_off) + '\')" onmouseleave="clearControlFlowHover()">';
+                        const rowId = controlFlowId(sw.kind, sw.fchunk_nr, sw.fchunk_off);
+                        html += '<div class="switch-card' + (linkAddr ? ' linked' : '') + (selectedControlFlowRow === rowId ? ' active' : '') + '" data-controlflow-id="' + rowId + '" onmouseenter="hoverControlFlowLink(\'' + rowId + '\')" onmouseleave="clearControlFlowHover()" onclick="selectControlFlowRow(\'' + rowId + '\', \'' + filterId + '\')">';
                         html += '<div class="switch-card-head"><span class="switch-title">' + esc(sw.kind) + ' switch</span><span class="switch-meta">chunk ' + esc(String(sw.fchunk_nr)) + ' @ ' + esc(fmtHex(sw.fchunk_off)) + '</span></div>';
                         html += '<div class="switch-desc">' + esc(sw.description) + '</div>';
+                        html += '<div class="switch-summary"><span class="frame-chip">' + (sw.description.includes('jump') ? 'jump site' : 'case site') + '</span></div>';
                         if (linkAddr) {
                             html += '<div class="switch-links"><span class="frame-chip">table ' + esc(linkAddr) + '</span><button class="controlflow-toggle" onclick="jumpToControlFlowTable(\'' + esc(linkAddr) + '\')">Open Table</button></div>';
                         }
@@ -4234,9 +4374,11 @@ pub const HOME: &str = r#"<!doctype html>
                 html += '<div class="metadata-empty">No jumptable comments</div>';
             } else {
                 tables.forEach(jt => {
+                    if (controlFlowFocusMode && selectedControlFlowGroup && selectedControlFlowGroup !== ('grp:' + jt.addr)) return;
                     const expanded = expandedJumpTables.has(jt.addr);
                     const visibleRefs = expanded ? jt.refs : jt.refs.slice(0, 6);
-                    html += '<div class="jumptable-card" id="jt-' + esc(jt.addr) + '">';
+                    const dimmed = selectedControlFlowGroup && selectedControlFlowGroup !== ('grp:' + jt.addr);
+                    html += '<div class="jumptable-card' + (dimmed ? ' dimmed' : '') + '" id="jt-' + esc(jt.addr) + '">';
                     html += '<div class="jumptable-head">';
                     html += '<div class="jumptable-title">' + esc(jt.addr) + '</div>';
                     html += '<div class="jumptable-badges">';
@@ -4271,7 +4413,7 @@ pub const HOME: &str = r#"<!doctype html>
                     html += '<div class="jumptable-ref-list">';
                     visibleRefs.forEach(ref => {
                         const rowId = controlFlowId(ref.kind, ref.fchunk_nr, ref.fchunk_off);
-                        html += '<div class="jumptable-ref" data-controlflow-id="' + rowId + '" onmouseenter="hoverControlFlowLink(\'' + rowId + '\')" onmouseleave="clearControlFlowHover()">';
+                        html += '<div class="jumptable-ref' + (selectedControlFlowRow === rowId ? ' active' : '') + '" data-controlflow-id="' + rowId + '" onmouseenter="hoverControlFlowLink(\'' + rowId + '\')" onmouseleave="clearControlFlowHover()" onclick="selectControlFlowRow(\'' + rowId + '\', \'' + ('grp:' + jt.addr) + '\')">';
                         html += '<div class="jumptable-ref-meta">' + esc(ref.kind) + '<br>chunk ' + esc(String(ref.fchunk_nr)) + '<br>@ <a href="javascript:void(0)" onclick="focusCommentRow(&quot;' + rowId + '&quot;, null, true);jumpToDetailSection(&quot;section-comments&quot;);setActiveDetailNav(&quot;section-comments&quot;);" style="color:var(--accent);text-decoration:none;">' + esc(fmtHex(ref.fchunk_off)) + '</a></div>';
                         html += '<div class="jumptable-ref-body"><div class="relation-summary"><span class="frame-chip">' + esc(ref.source_role) + '</span><span class="frame-chip">' + esc(summarizeRelation(ref)) + '</span></div>';
                         if (ref.case_labels && ref.case_labels.length > 0) {
@@ -4836,8 +4978,9 @@ pub const HOME: &str = r#"<!doctype html>
             return html;
         }
 
-        function renderInstructionCommentTimeline(insnCmts, rptInsnCmts) {
+        function renderInstructionCommentTimeline(insnCmts, rptInsnCmts, controlFlow) {
             const events = [];
+            const cfCtx = buildControlFlowContext(controlFlow);
             if (Array.isArray(insnCmts)) {
                 insnCmts.forEach(c => {
                     events.push({
@@ -4866,8 +5009,11 @@ pub const HOME: &str = r#"<!doctype html>
             const filterKind = commentFilterKind;
             const term = commentSearchTerm.trim().toLowerCase();
             const filteredEvents = events.filter(ev => {
+                ev.controlFlowRowId = cfCtx.controlFlowId(ev.kind, ev.chunk, ev.off);
+                ev.controlFlowGroupId = cfCtx.rowToGroup.get(ev.controlFlowRowId) || null;
                 if (filterKind !== 'all' && ev.kind !== filterKind) return false;
                 if (term && !ev.cmt.toLowerCase().includes(term)) return false;
+                if (controlFlowFocusMode && selectedControlFlowGroup) return ev.controlFlowGroupId === selectedControlFlowGroup;
                 return true;
             });
 
@@ -4903,7 +5049,6 @@ pub const HOME: &str = r#"<!doctype html>
                 list.forEach((ev, i) => {
                     ev.rowId = 'cmt-' + chunkId + '-' + i;
                     ev.markerId = 'cmtm-' + chunkId + '-' + i;
-                    ev.controlFlowRowId = 'cf-' + ev.kind.toLowerCase() + '-' + ev.chunk + '-' + ev.off;
                 });
 
                 const minOff = list[0].off;
@@ -4931,7 +5076,11 @@ pub const HOME: &str = r#"<!doctype html>
                     const left = ((ev.off - minOff) / span) * 100;
                     const top = 6 + (ev.stack * 8);
                     const title = (ev.kind === 'rpt' ? 'Repeatable' : 'Regular') + ' @ ' + fmtHex(ev.off) + ': ' + ev.cmt;
-                    html += '<div id="' + ev.markerId + '" class="comment-marker' + (ev.kind === 'rpt' ? ' repeatable' : '') + '" style="left:' + left.toFixed(2) + '%;top:' + top + 'px;" title="' + esc(title) + '" onmouseenter="pulseCommentMarker(\'' + ev.markerId + '\')" onclick="focusCommentRow(\'' + ev.rowId + '\', \'' + ev.markerId + '\', true)"></div>';
+                    let markerClick = 'focusCommentRow(\'' + ev.rowId + '\', \'' + ev.markerId + '\', true)';
+                    if (ev.controlFlowGroupId) {
+                        markerClick = 'activateCommentEvent(\'' + ev.rowId + '\', \'' + ev.markerId + '\', \'' + ev.controlFlowRowId + '\', \'' + ev.controlFlowGroupId + '\', true)';
+                    }
+                    html += '<div id="' + ev.markerId + '" class="comment-marker' + (ev.kind === 'rpt' ? ' repeatable' : '') + '" style="left:' + left.toFixed(2) + '%;top:' + top + 'px;" title="' + esc(title) + '" onmouseenter="pulseCommentMarker(\'' + ev.markerId + '\')" onclick="' + markerClick + '"></div>';
                 });
 
                 html += '</div>';
@@ -4939,12 +5088,18 @@ pub const HOME: &str = r#"<!doctype html>
 
                 html += '<div class="comment-list">';
                 list.forEach(ev => {
-                    html += '<div class="comment-item" id="' + ev.rowId + '" data-controlflow-id="' + ev.controlFlowRowId + '" onmouseenter="pulseCommentMarker(\'' + ev.markerId + '\');hoverControlFlowLink(\'' + ev.controlFlowRowId + '\')" onmouseleave="clearControlFlowHover()" onclick="focusCommentRow(\'' + ev.rowId + '\', \'' + ev.markerId + '\', false)">';
+                    const dimmed = selectedControlFlowGroup && ev.controlFlowGroupId !== selectedControlFlowGroup;
+                    const activeCf = selectedControlFlowRow && ev.controlFlowRowId === selectedControlFlowRow;
+                    let click = 'focusCommentRow(\'' + ev.rowId + '\', \'' + ev.markerId + '\', false)';
+                    if (ev.controlFlowGroupId) {
+                        click = 'activateCommentEvent(\'' + ev.rowId + '\', \'' + ev.markerId + '\', \'' + ev.controlFlowRowId + '\', \'' + ev.controlFlowGroupId + '\', false)';
+                    }
+                    html += '<div class="comment-item' + (dimmed ? ' dimmed' : '') + (activeCf ? ' active-controlflow' : '') + '" id="' + ev.rowId + '" data-controlflow-id="' + ev.controlFlowRowId + '" onmouseenter="pulseCommentMarker(\'' + ev.markerId + '\');hoverControlFlowLink(\'' + ev.controlFlowRowId + '\')" onmouseleave="clearControlFlowHover()" onclick="' + click + '">';
                     html += '<div class="comment-item-head">';
                     html += '<span class="comment-kind' + (ev.kind === 'rpt' ? ' repeatable' : '') + '">' + (ev.kind === 'rpt' ? 'RPT' : 'REG') + '</span>';
                     html += '<span>' + fmtHex(ev.off) + '</span>';
                     html += '</div>';
-                    html += '<div class="comment-item-text">' + esc(ev.cmt) + '</div>';
+                    html += renderCommentText(ev);
                     html += '</div>';
                 });
                 html += '</div>';
@@ -5031,6 +5186,15 @@ pub const HOME: &str = r#"<!doctype html>
             if (currentDetailData) renderFunctionDetail(currentDetailData);
         }
 
+        function activateCommentEvent(rowId, markerId, controlId = null, groupId = null, shouldScroll = false) {
+            if (controlId) {
+                selectControlFlowRow(controlId, groupId, false);
+                setTimeout(() => focusCommentRow(rowId, markerId, shouldScroll), 0);
+                return;
+            }
+            focusCommentRow(rowId, markerId, shouldScroll);
+        }
+
         function toggleCommentChunk(chunkId) {
             if (collapsedCommentChunks.has(chunkId)) collapsedCommentChunks.delete(chunkId);
             else collapsedCommentChunks.add(chunkId);
@@ -5040,6 +5204,42 @@ pub const HOME: &str = r#"<!doctype html>
         function toggleJumpTableExpand(addr) {
             if (expandedJumpTables.has(addr)) expandedJumpTables.delete(addr);
             else expandedJumpTables.add(addr);
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function clearControlFlowSelection() {
+            selectedControlFlowGroup = null;
+            selectedControlFlowRow = null;
+            controlFlowFocusMode = false;
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function selectControlFlowRow(rowId, groupId = null, rerender = true) {
+            const sameRow = selectedControlFlowRow === rowId;
+            const sameGroup = (groupId || null) === (selectedControlFlowGroup || null);
+            if (sameRow && sameGroup) {
+                selectedControlFlowRow = null;
+                if (!controlFlowFocusMode) selectedControlFlowGroup = groupId || null;
+            } else {
+                selectedControlFlowRow = rowId;
+                if (groupId) selectedControlFlowGroup = groupId;
+            }
+            if (controlFlowFocusMode && !selectedControlFlowGroup) controlFlowFocusMode = false;
+            if (rerender && currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function setControlFlowGroup(groupId) {
+            selectedControlFlowGroup = selectedControlFlowGroup === groupId ? null : groupId;
+            if (!selectedControlFlowGroup) {
+                selectedControlFlowRow = null;
+                controlFlowFocusMode = false;
+            }
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function toggleControlFlowFocusMode() {
+            if (!selectedControlFlowGroup) return;
+            controlFlowFocusMode = !controlFlowFocusMode;
             if (currentDetailData) renderFunctionDetail(currentDetailData);
         }
 
@@ -5069,6 +5269,42 @@ pub const HOME: &str = r#"<!doctype html>
 
         function clearControlFlowHover() {
             document.querySelectorAll('.linked').forEach(node => node.classList.remove('linked'));
+        }
+
+        function parseControlFlowComment(text) {
+            const cmt = String(text || '').trim();
+            if (cmt.startsWith('switch ')) {
+                return { type: 'switch', summary: cmt, chips: [] };
+            }
+            if (cmt.startsWith('jumptable ')) {
+                const rest = cmt.slice('jumptable '.length);
+                const space = rest.indexOf(' ');
+                const addr = space >= 0 ? rest.slice(0, space) : rest;
+                const rel = space >= 0 ? rest.slice(space + 1).trim() : '';
+                const labels = [];
+                if (rel.includes('default case')) labels.push('default');
+                rel.split(/[,\s]+/).forEach(tok => {
+                    if (/^\d+(?:-\d+)?$/.test(tok)) labels.push(tok);
+                });
+                return { type: 'jumptable', addr, summary: rel || 'entry', chips: labels };
+            }
+            return null;
+        }
+
+        function renderCommentText(ev) {
+            const parsed = parseControlFlowComment(ev.cmt);
+            if (!parsed) return '<div class="comment-item-text">' + esc(ev.cmt) + '</div>';
+            let html = '<div class="comment-item-text controlflow">';
+            html += '<div class="comment-flow-main">';
+            html += '<span class="frame-chip' + (parsed.type === 'jumptable' ? '' : ' warn') + '">' + esc(parsed.type) + '</span>';
+            if (parsed.addr) html += '<span class="frame-chip">' + esc(parsed.addr) + '</span>';
+            parsed.chips.slice(0, 12).forEach(label => {
+                html += '<span class="case-chip' + (label === 'default' ? ' default' : '') + '">' + esc(label) + '</span>';
+            });
+            html += '</div>';
+            html += '<div class="comment-flow-detail">' + esc(parsed.summary) + '</div>';
+            html += '</div>';
+            return html;
         }
 
         function parseHash() {
@@ -5425,6 +5661,9 @@ pub const HOME: &str = r#"<!doctype html>
             currentDetailData = null;
             currentCompareRecords = [];
             pendingDetailSection = sectionId;
+            selectedControlFlowGroup = null;
+            selectedControlFlowRow = null;
+            controlFlowFocusMode = false;
             el.modalKey.textContent = keyHex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
             el.detailModal.classList.add('active');
@@ -5447,6 +5686,9 @@ pub const HOME: &str = r#"<!doctype html>
             currentDetailData = null;
             currentCompareRecords = [];
             pendingDetailSection = null;
+            selectedControlFlowGroup = null;
+            selectedControlFlowRow = null;
+            controlFlowFocusMode = false;
             if (activeCommentRow) {
                 activeCommentRow.classList.remove('active');
                 activeCommentRow = null;
@@ -5579,7 +5821,7 @@ pub const HOME: &str = r#"<!doctype html>
                 const totalCommentCount = regCount + rptCount;
                 if (totalCommentCount > 0) {
                     html += '<div class="metadata-section detail-anchor" id="section-comments"><div class="metadata-header"><span>Instruction Comment Timeline</span><span class="badge">' + totalCommentCount + '</span></div><div class="metadata-content">';
-                    html += renderInstructionCommentTimeline(m.insn_cmts, m.rpt_insn_cmts);
+                    html += renderInstructionCommentTimeline(m.insn_cmts, m.rpt_insn_cmts, m.control_flow);
                     html += '</div></div>';
                 }
 
