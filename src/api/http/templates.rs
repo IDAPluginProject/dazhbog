@@ -789,27 +789,107 @@ pub const HOME: &str = r#"<!doctype html>
             border-color: var(--accent);
         }
 
-        .compare-tray {
+        .compare-panel {
             display: flex;
-            align-items: center;
-            gap: var(--space-sm);
-            font-size: 10px;
-            color: var(--text-dim);
             flex-wrap: wrap;
-            justify-content: flex-end;
+            justify-content: space-between;
+            align-items: center;
+            gap: var(--space-md);
+            margin: var(--space-lg) 0 var(--space-xl);
+            border: 1px solid var(--border-subtle);
+            background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));
+            padding: var(--space-md);
         }
 
-        .compare-tray .compare-title {
+        .compare-panel.compact {
+            padding: 10px 12px;
+        }
+
+        .compare-panel-head {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            flex-wrap: wrap;
+            min-width: 0;
+        }
+
+        .compare-panel .compare-title {
             color: var(--accent);
             letter-spacing: 0.1em;
             text-transform: uppercase;
         }
 
-        .compare-tray .compare-keys {
-            max-width: 320px;
+        .compare-panel-summary {
+            font-size: 10px;
+            color: var(--text-dim);
+            letter-spacing: 0.08em;
+        }
+
+        .compare-panel-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .compare-panel-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .compare-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(0, 255, 136, 0.25);
+            background: rgba(0, 255, 136, 0.08);
+            padding: 6px 8px;
+            min-width: 0;
+            max-width: 100%;
+        }
+
+        .compare-pill-main {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .compare-pill-name {
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 600;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            max-width: 320px;
+        }
+
+        .compare-pill-key {
+            color: var(--text-tertiary);
+            font-size: 9px;
+            font-family: var(--font-mono);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 320px;
+        }
+
+        .compare-pill-remove {
+            background: var(--bg-base);
+            border: 1px solid var(--border-dim);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            padding: 3px 7px;
+            cursor: pointer;
+        }
+
+        .compare-pill-remove:hover {
+            color: var(--state-warning);
+            border-color: rgba(255, 102, 0, 0.4);
         }
         
         .results-list {
@@ -1316,7 +1396,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         .compare-head {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr);
+            grid-template-columns: 180px repeat(var(--compare-cols, 2), minmax(0, 1fr));
             gap: 1px;
             background: var(--border-dim);
             border: 1px solid var(--border-subtle);
@@ -1366,7 +1446,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         .compare-row {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr);
+            grid-template-columns: 180px repeat(var(--compare-cols, 2), minmax(0, 1fr));
             gap: 1px;
             background: var(--border-dim);
         }
@@ -2290,8 +2370,8 @@ pub const HOME: &str = r#"<!doctype html>
                 width: 100%;
             }
 
-            .compare-tray {
-                justify-content: flex-start;
+            .compare-panel {
+                align-items: flex-start;
             }
 
             .results-hint {
@@ -2480,6 +2560,18 @@ pub const HOME: &str = r#"<!doctype html>
                 <span>PER PAGE: <span class="accent">25</span></span>
                 <span>PRESS <span class="accent">/</span> TO FOCUS</span>
             </div>
+        </section>
+
+        <section class="compare-panel compact" id="compare-panel">
+            <div class="compare-panel-head">
+                <span class="compare-title">Compare Panel</span>
+                <span class="compare-panel-summary" id="compare-summary">No functions queued</span>
+            </div>
+            <div class="compare-panel-actions">
+                <button class="pagination-btn" id="compare-open" disabled>Open Compare</button>
+                <button class="pagination-btn" id="compare-clear">Clear</button>
+            </div>
+            <div class="compare-panel-list" id="compare-list"></div>
         </section>
         
         <!-- Main Content -->
@@ -2799,12 +2891,6 @@ pub const HOME: &str = r#"<!doctype html>
                                 <option value="recent">Most Recent</option>
                             </select>
                         </div>
-                        <div class="compare-tray" id="compare-tray">
-                            <span class="compare-title">Compare</span>
-                            <span class="compare-keys" id="compare-keys">Pick up to 2 results</span>
-                            <button class="pagination-btn" id="compare-open" disabled>Open Compare</button>
-                            <button class="pagination-btn" id="compare-clear">Clear</button>
-                        </div>
                     </div>
                 </div>
                 <div class="results-list" id="results-list"></div>
@@ -2880,8 +2966,9 @@ pub const HOME: &str = r#"<!doctype html>
             resultsIntent: document.getElementById('results-intent'),
             resultsHint: document.getElementById('results-hint'),
             resultsSort: document.getElementById('results-sort'),
-            compareTray: document.getElementById('compare-tray'),
-            compareKeys: document.getElementById('compare-keys'),
+            comparePanel: document.getElementById('compare-panel'),
+            compareSummary: document.getElementById('compare-summary'),
+            compareList: document.getElementById('compare-list'),
             compareOpen: document.getElementById('compare-open'),
             compareClear: document.getElementById('compare-clear'),
             pagination: document.getElementById('pagination'),
@@ -2952,6 +3039,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         const pinnedKeys = new Set();
         const compareKeys = [];
+        const compareItems = new Map();
         const resultPreviewCache = new Map();
         let compareShowAll = false;
         let compareMode = 'summary';
@@ -3101,8 +3189,18 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function compareTextForKeys() {
-            if (compareKeys.length === 0) return 'Pick up to 2 results';
-            return compareKeys.join(' vs ');
+            if (compareKeys.length === 0) return 'No functions queued';
+            if (compareKeys.length === 1) return '1 function queued';
+            return compareKeys.length + ' functions queued';
+        }
+
+        function rememberCompareItem(hit) {
+            if (!hit || !hit.key_hex) return;
+            compareItems.set(hit.key_hex, {
+                key_hex: hit.key_hex,
+                name: hit.func_name_demangled || hit.func_name || hit.key_hex,
+                ts: hit.ts || 0,
+            });
         }
 
         function sortHits(hits, mode) {
@@ -3165,8 +3263,19 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function updateCompareTray() {
-            el.compareKeys.textContent = compareTextForKeys();
-            el.compareOpen.disabled = compareKeys.length !== 2;
+            el.compareSummary.textContent = compareTextForKeys();
+            el.compareOpen.disabled = compareKeys.length < 2;
+            el.comparePanel.classList.toggle('compact', compareKeys.length === 0);
+            el.compareList.innerHTML = compareKeys.map(keyHex => {
+                const item = compareItems.get(keyHex) || { key_hex: keyHex, name: keyHex, ts: 0 };
+                return '<div class="compare-pill">'
+                    + '<div class="compare-pill-main">'
+                    + '<div class="compare-pill-name">' + esc(item.name) + '</div>'
+                    + '<div class="compare-pill-key">' + esc(keyHex) + (item.ts ? ' // ' + esc(fmtRelativeTs(item.ts)) : '') + '</div>'
+                    + '</div>'
+                    + '<button class="compare-pill-remove" onclick="removeCompareKey(\'' + esc(keyHex) + '\')">x</button>'
+                    + '</div>';
+            }).join('');
         }
 
         function setCompareShowAll(next) {
@@ -3180,8 +3289,8 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function rerenderCompareDiff() {
-            if (currentCompareLeft && currentCompareRight) {
-                el.modalBody.innerHTML = buildStructuredDiff(currentCompareLeft, currentCompareRight);
+            if (currentCompareRecords.length >= 2) {
+                el.modalBody.innerHTML = buildStructuredDiff(currentCompareRecords);
             }
         }
 
@@ -3191,12 +3300,22 @@ pub const HOME: &str = r#"<!doctype html>
             renderResultsList();
         }
 
+        function removeCompareKey(keyHex) {
+            const idx = compareKeys.indexOf(keyHex);
+            if (idx >= 0) {
+                compareKeys.splice(idx, 1);
+            }
+            updateCompareTray();
+            renderResultsList();
+        }
+
         function toggleCompareKey(keyHex) {
+            const hit = currentHits.find(h => h.key_hex === keyHex);
+            if (hit) rememberCompareItem(hit);
             const idx = compareKeys.indexOf(keyHex);
             if (idx >= 0) {
                 compareKeys.splice(idx, 1);
             } else {
-                if (compareKeys.length >= 2) compareKeys.shift();
                 compareKeys.push(keyHex);
             }
             updateCompareTray();
@@ -3210,21 +3329,26 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function openCompareModal() {
-            if (compareKeys.length !== 2) return;
-            const [a, b] = compareKeys;
+            if (compareKeys.length < 2) return;
             currentDetailData = null;
-            currentCompareLeft = null;
-            currentCompareRight = null;
+            currentCompareRecords = [];
             pendingDetailSection = null;
-            el.modalKey.textContent = a + ' // ' + b;
+            el.modalKey.textContent = compareKeys.length + ' FUNCTIONS';
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING COMPARISON...</div>';
             el.detailModal.classList.add('active');
             document.body.style.overflow = 'hidden';
 
             Promise.all(compareKeys.map(k => fetch('/api/function/' + encodeURIComponent(k)).then(r => r.json())))
-                .then(([left, right]) => {
-                    currentCompareLeft = left;
-                    currentCompareRight = right;
+                .then(records => {
+                    records.forEach(rec => {
+                        compareItems.set(rec.key_hex, {
+                            key_hex: rec.key_hex,
+                            name: rec.name,
+                            ts: rec.ts || 0,
+                        });
+                    });
+                    updateCompareTray();
+                    currentCompareRecords = records;
                     rerenderCompareDiff();
                 })
                 .catch(err => {
@@ -3370,115 +3494,134 @@ pub const HOME: &str = r#"<!doctype html>
             return '<div class="compare-subsection"><div class="compare-subtitle">' + esc(title) + '</div>' + rows.join('') + '</div>';
         }
 
-        function renderSignatureDiff(leftDecl, rightDecl) {
-            const lp = parseDecodedSignature(leftDecl || '');
-            const rp = parseDecodedSignature(rightDecl || '');
-            const typeJump = { leftJump: { key: currentCompareLeft.key_hex, section: 'section-type' }, rightJump: { key: currentCompareRight.key_hex, section: 'section-type' } };
-            const rows = [
-                compareRow('Declaration', leftDecl || '-', rightDecl || '-', { mode: 'type', ...typeJump }),
-                compareRow('Return Type', lp ? lp.returnType : '-', rp ? rp.returnType : '-', { mode: 'type', ...typeJump }),
-                compareRow('Call Conv', lp ? (lp.cc || 'default') : '-', rp ? (rp.cc || 'default') : '-', typeJump),
-                compareRow('Return Loc', lp ? (lp.retLoc || '-') : '-', rp ? (rp.retLoc || '-') : '-', typeJump),
-            ];
-
-            const largs = lp ? lp.args : [];
-            const rargs = rp ? rp.args : [];
-            const maxArgs = Math.max(largs.length, rargs.length);
-            const fullRows = [];
-            for (let i = 0; i < maxArgs; i++) {
-                fullRows.push(compareRow('Arg ' + i, largs[i] || '-', rargs[i] || '-', { mode: 'type', ...typeJump }));
-            }
-            return renderCompareSection('Type Signature', rows.concat(compareMode === 'full' ? fullRows : []));
+        function multiJump(section) {
+            return currentCompareRecords.map(rec => ({ key: rec.key_hex, section }));
         }
 
-        function renderFrameMemberDiff(leftFd, rightFd) {
-            const leftMembers = normalizeFrameMembers(leftFd);
-            const rightMembers = normalizeFrameMembers(rightFd);
+        function renderMatrixRow(label, values, options = {}) {
+            const mode = options.mode || 'generic';
+            const normalized = values.map(v => String(v || '-'));
+            const baseline = normalized[0] || '-';
+            const unchanged = normalized.every(v => v === baseline);
+            const jumps = options.jumps || [];
+            const classes = ['compare-row'];
+            if (!compareShowAll && unchanged) classes.push('unchanged');
+            let html = '<div class="' + classes.join(' ') + '">';
+            html += '<div class="compare-label">' + esc(label) + '</div>';
+            normalized.forEach((value, idx) => {
+                const diff = idx > 0 && value !== baseline;
+                const rendered = idx === 0 || !diff ? esc(value) : diffTokenHtml(baseline, value, mode).rightHtml;
+                const jump = jumps[idx];
+                const click = jump ? ' onclick="event.stopPropagation();showFunctionDetail(\'' + esc(jump.key) + '\', \'' + esc(jump.section) + '\')"' : '';
+                html += '<div class="compare-cell' + (diff ? ' diff' : '') + (jump ? ' jumpable' : '') + '"' + click + '>' + rendered + '</div>';
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function renderSignatureDiff(records) {
+            const parsed = records.map(r => parseDecodedSignature((summaryFromMetadata(r).typeDecl || '')));
+            const typeDecls = records.map(r => summaryFromMetadata(r).typeDecl || '-');
+            const jumps = multiJump('section-type');
             const rows = [
-                compareRow('Members', String(leftMembers.length), String(rightMembers.length)),
-                compareRow('Frame Size', fmtHex(leftFd && leftFd.frsize), fmtHex(rightFd && rightFd.frsize)),
-                compareRow('Arg Size', fmtHex(leftFd && leftFd.argsize), fmtHex(rightFd && rightFd.argsize)),
-                compareRow('Diagnostics', analyzeFrame(leftFd || {}).map(x => x.label).join(', ') || 'layout coherent', analyzeFrame(rightFd || {}).map(x => x.label).join(', ') || 'layout coherent'),
+                renderMatrixRow('Declaration', typeDecls, { mode: 'type', jumps }),
+                renderMatrixRow('Return Type', parsed.map(p => p ? p.returnType : '-'), { mode: 'type', jumps }),
+                renderMatrixRow('Call Conv', parsed.map(p => p ? (p.cc || 'default') : '-'), { jumps }),
+                renderMatrixRow('Return Loc', parsed.map(p => p ? (p.retLoc || '-') : '-'), { jumps }),
             ];
+            if (compareMode === 'full') {
+                const maxArgs = Math.max(...parsed.map(p => p ? p.args.length : 0), 0);
+                for (let i = 0; i < maxArgs; i++) {
+                    rows.push(renderMatrixRow('Arg ' + i, parsed.map(p => p && p.args[i] ? p.args[i] : '-'), { mode: 'type', jumps }));
+                }
+            }
+            return renderCompareSection('Type Signature', rows);
+        }
 
-            const usedRight = new Set();
-            const pairs = [];
+        function renderFrameMemberDiff(records) {
+            const frames = records.map(r => r.metadata && r.metadata.frame_desc ? r.metadata.frame_desc : {});
+            const normalized = frames.map(fd => normalizeFrameMembers(fd));
+            const rowKeys = [];
+            const rowMap = new Map();
 
-            function takeRightIndex(pred) {
-                for (let i = 0; i < rightMembers.length; i++) {
-                    if (usedRight.has(i)) continue;
-                    if (pred(rightMembers[i])) {
-                        usedRight.add(i);
-                        return i;
+            normalized.forEach(members => {
+                members.forEach(m => {
+                    const key = (m.offset !== null ? 'off:' + m.offset : 'name:' + m.name);
+                    if (!rowMap.has(key)) {
+                        rowMap.set(key, true);
+                        rowKeys.push(key);
                     }
-                }
-                return -1;
-            }
-
-            leftMembers.forEach(l => {
-                let idx = takeRightIndex(r => r.offset === l.offset && r.name === l.name);
-                if (idx < 0) idx = takeRightIndex(r => r.offset === l.offset);
-                if (idx < 0) idx = takeRightIndex(r => r.name === l.name);
-                pairs.push([l, idx >= 0 ? rightMembers[idx] : null]);
+                });
             });
 
-            rightMembers.forEach((r, i) => {
-                if (!usedRight.has(i)) pairs.push([null, r]);
+            rowKeys.sort((a, b) => {
+                const ao = a.startsWith('off:') ? Number(a.slice(4)) : Number.MAX_SAFE_INTEGER;
+                const bo = b.startsWith('off:') ? Number(b.slice(4)) : Number.MAX_SAFE_INTEGER;
+                if (ao !== bo) return ao - bo;
+                return a.localeCompare(b);
             });
 
-            const fullRows = [];
-            pairs.forEach(([l, r], i) => {
-                const ldesc = l ? ((l.offset !== null ? fmtHex(l.offset) : '-') + ' ' + l.name + ' : ' + l.type + (l.size !== null ? ' [' + fmtHex(l.size) + ']' : '') + (l.cmt ? ' // ' + l.cmt : '')) : '-';
-                const rdesc = r ? ((r.offset !== null ? fmtHex(r.offset) : '-') + ' ' + r.name + ' : ' + r.type + (r.size !== null ? ' [' + fmtHex(r.size) + ']' : '') + (r.cmt ? ' // ' + r.cmt : '')) : '-';
-                fullRows.push(compareRow('Member ' + i, ldesc, rdesc, { mode: 'type', leftJump: { key: currentCompareLeft.key_hex, section: 'section-frame' }, rightJump: { key: currentCompareRight.key_hex, section: 'section-frame' } }));
-            });
-            return renderCompareSection('Frame Layout', rows.concat(compareMode === 'full' ? fullRows : []));
-        }
-
-        function renderCommentDiff(leftMeta, rightMeta) {
-            const leftEvents = normalizeCommentEvents(leftMeta);
-            const rightEvents = normalizeCommentEvents(rightMeta);
-            const leftMap = new Map(leftEvents.map(e => [e.kind + ':' + e.chunk + ':' + e.off, e]));
-            const rightMap = new Map(rightEvents.map(e => [e.kind + ':' + e.chunk + ':' + e.off, e]));
-            const shared = [];
-            const changed = [];
-            const onlyLeft = [];
-            const onlyRight = [];
-
-            for (const [k, le] of leftMap.entries()) {
-                const re = rightMap.get(k);
-                if (!re) {
-                    onlyLeft.push(le);
-                } else if (le.cmt === re.cmt) {
-                    shared.push(le);
-                } else {
-                    changed.push([le, re]);
-                }
-            }
-            for (const [k, re] of rightMap.entries()) {
-                if (!leftMap.has(k)) {
-                    onlyRight.push(re);
-                }
-            }
-
+            const jumps = multiJump('section-frame');
             const rows = [
-                compareRow('Total Comments', String(leftEvents.length), String(rightEvents.length)),
-                compareRow('Shared', String(shared.length), String(shared.length)),
-                compareRow('Changed In Place', String(changed.length), String(changed.length)),
-                compareRow('Unique Left/Right', String(onlyLeft.length), String(onlyRight.length)),
-                compareRow('Regular Comment', leftMeta && leftMeta.fcmt ? leftMeta.fcmt : '-', rightMeta && rightMeta.fcmt ? rightMeta.fcmt : '-', { mode: 'comment' }),
-                compareRow('Repeatable Comment', leftMeta && leftMeta.frptcmt ? leftMeta.frptcmt : '-', rightMeta && rightMeta.frptcmt ? rightMeta.frptcmt : '-', { mode: 'comment' }),
+                renderMatrixRow('Members', normalized.map(m => String(m.length)), { jumps }),
+                renderMatrixRow('Frame Size', frames.map(fd => fmtHex(fd.frsize)), { jumps }),
+                renderMatrixRow('Arg Size', frames.map(fd => fmtHex(fd.argsize)), { jumps }),
+                renderMatrixRow('Diagnostics', frames.map(fd => analyzeFrame(fd).map(x => x.label).join(', ') || 'layout coherent'), { jumps }),
             ];
 
-            const commentJump = { leftJump: { key: currentCompareLeft.key_hex, section: 'section-comments' }, rightJump: { key: currentCompareRight.key_hex, section: 'section-comments' } };
-            const changedRows = changed.slice(0, 10).map(([l, r]) => compareRow('Chunk ' + l.chunk + ' @ ' + fmtHex(l.off) + ' [' + l.kind + ']', l.cmt, r.cmt, { mode: 'comment', ...commentJump }));
-            const leftUniqueRows = onlyLeft.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off) + ' [' + e.kind + ']', e.cmt, '-', { mode: 'comment', ...commentJump }));
-            const rightUniqueRows = onlyRight.slice(0, 8).map(e => compareRow('Chunk ' + e.chunk + ' @ ' + fmtHex(e.off) + ' [' + e.kind + ']', '-', e.cmt, { mode: 'comment', ...commentJump }));
+            if (compareMode === 'full') {
+                rowKeys.forEach((key, i) => {
+                    const vals = normalized.map(members => {
+                        const found = members.find(m => (m.offset !== null ? 'off:' + m.offset : 'name:' + m.name) === key)
+                            || members.find(m => key.startsWith('off:') && m.offset === Number(key.slice(4)));
+                        if (!found) return '-';
+                        return (found.offset !== null ? fmtHex(found.offset) : '-') + ' ' + found.name + ' : ' + found.type + (found.size !== null ? ' [' + fmtHex(found.size) + ']' : '') + (found.cmt ? ' // ' + found.cmt : '');
+                    });
+                    rows.push(renderMatrixRow('Member ' + i, vals, { mode: 'type', jumps }));
+                });
+            }
+            return renderCompareSection('Frame Layout', rows);
+        }
 
-            return renderCompareSection('Comments', rows)
-                + (compareMode === 'full' ? renderCompareSubsection('Changed At Same Chunk/Offset', changedRows) : '')
-                + (compareMode === 'full' ? renderCompareSubsection('Only In Left', leftUniqueRows) : '')
-                + (compareMode === 'full' ? renderCompareSubsection('Only In Right', rightUniqueRows) : '');
+        function renderCommentDiff(records) {
+            const metas = records.map(r => r.metadata || {});
+            const eventsByRecord = metas.map(m => normalizeCommentEvents(m));
+            const jumps = multiJump('section-comments');
+            const rows = [
+                renderMatrixRow('Total Comments', eventsByRecord.map(e => String(e.length)), { jumps }),
+                renderMatrixRow('Regular Comment', metas.map(m => m.fcmt || '-'), { mode: 'comment', jumps }),
+                renderMatrixRow('Repeatable Comment', metas.map(m => m.frptcmt || '-'), { mode: 'comment', jumps }),
+            ];
+
+            if (compareMode === 'full') {
+                const eventKeys = [];
+                const seen = new Set();
+                eventsByRecord.forEach(events => {
+                    events.forEach(e => {
+                        const key = e.kind + ':' + e.chunk + ':' + e.off;
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            eventKeys.push(key);
+                        }
+                    });
+                });
+                eventKeys.sort((a, b) => {
+                    const [ak, ac, ao] = a.split(':');
+                    const [bk, bc, bo] = b.split(':');
+                    return Number(ac) - Number(bc) || Number(ao) - Number(bo) || ak.localeCompare(bk);
+                });
+
+                eventKeys.slice(0, 24).forEach(key => {
+                    const [kind, chunk, off] = key.split(':');
+                    const vals = eventsByRecord.map(events => {
+                        const ev = events.find(e => e.kind === kind && String(e.chunk) === chunk && String(e.off) === off);
+                        return ev ? ev.cmt : '-';
+                    });
+                    rows.push(renderMatrixRow('Chunk ' + chunk + ' @ ' + fmtHex(Number(off)) + ' [' + kind + ']', vals, { mode: 'comment', jumps }));
+                });
+            }
+
+            return renderCompareSection('Comments', rows);
         }
 
         function compareValue(a, b) {
@@ -3559,15 +3702,12 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function renderCompareSection(title, rows) {
-            return '<div class="compare-section"><div class="compare-section-title">' + esc(title) + '</div>' + rows.join('') + '</div>';
+            return '<div class="compare-section" style="--compare-cols:' + currentCompareRecords.length + ';"><div class="compare-section-title">' + esc(title) + '</div>' + rows.join('') + '</div>';
         }
 
-        function buildStructuredDiff(left, right) {
-            const l = summaryFromMetadata(left);
-            const r = summaryFromMetadata(right);
-            const lm = left.metadata || {};
-            const rm = right.metadata || {};
-
+        function buildStructuredDiff(records) {
+            const summaries = records.map(summaryFromMetadata);
+            const metas = records.map(r => r.metadata || {});
             let html = '<div class="compare-diff' + (compareShowAll ? ' show-all' : '') + '">';
             html += '<div class="compare-toolbar">';
             html += '<div class="compare-toolbar-group">';
@@ -3575,31 +3715,31 @@ pub const HOME: &str = r#"<!doctype html>
             html += '<button class="compare-toggle' + (compareMode === 'full' ? ' active' : '') + '" onclick="setCompareMode(\'full\')">Full Diff</button>';
             html += '<button class="compare-toggle' + (compareShowAll ? ' active' : '') + '" onclick="setCompareShowAll(' + (!compareShowAll) + ')">' + (compareShowAll ? 'Hide Unchanged' : 'Show Unchanged') + '</button>';
             html += '</div>';
-            html += '<div class="compare-status">' + esc(compareMode) + ' mode</div>';
+            html += '<div class="compare-status">' + records.length + ' functions // ' + esc(compareMode) + ' mode</div>';
             html += '</div>';
-            html += '<div class="compare-head">';
-            html += '<div class="compare-head-cell"><div class="compare-name">' + esc(left.name) + '</div><div class="compare-key">' + esc(left.key_hex) + '</div></div>';
-            html += '<div class="compare-head-cell center">Structured Diff</div>';
-            html += '<div class="compare-head-cell"><div class="compare-name">' + esc(right.name) + '</div><div class="compare-key">' + esc(right.key_hex) + '</div></div>';
+            html += '<div class="compare-head" style="--compare-cols:' + records.length + ';"><div class="compare-head-cell center">Field</div>';
+            records.forEach(rec => {
+                html += '<div class="compare-head-cell"><div class="compare-name">' + esc(rec.name) + '</div><div class="compare-key">' + esc(rec.key_hex) + '</div></div>';
+            });
             html += '</div>';
 
             html += renderCompareSection('Identity', [
-                compareRow('Age', fmtRelativeTs(left.ts), fmtRelativeTs(right.ts)),
-                compareRow('Data Size', fmtBytes(left.data_size || 0), fmtBytes(right.data_size || 0)),
-                compareRow('Binary Count', String((left.binary_names || []).length), String((right.binary_names || []).length)),
-                compareRow('Binaries', (left.binary_names || []).join(', '), (right.binary_names || []).join(', ')),
+                renderMatrixRow('Age', records.map(r => fmtRelativeTs(r.ts))),
+                renderMatrixRow('Data Size', records.map(r => fmtBytes(r.data_size || 0))),
+                renderMatrixRow('Binary Count', records.map(r => String((r.binary_names || []).length))),
+                renderMatrixRow('Binaries', records.map(r => (r.binary_names || []).join(', '))),
             ]);
 
-            html += renderSignatureDiff(l.typeDecl, r.typeDecl);
+            html += renderSignatureDiff(records);
 
-            html += renderFrameMemberDiff(lm.frame_desc || {}, rm.frame_desc || {});
+            html += renderFrameMemberDiff(records);
 
-            html += renderCommentDiff(lm, rm);
+            html += renderCommentDiff(records);
 
             html += renderCompareSection('Parser', [
-                compareRow('Bytes Parsed', String(lm.bytes_parsed || 0), String(rm.bytes_parsed || 0)),
-                compareRow('Raw Size', fmtBytes(lm.raw_size || 0), fmtBytes(rm.raw_size || 0)),
-                compareRow('Error List', (lm.errors || []).join(' | ') || '-', (rm.errors || []).join(' | ') || '-'),
+                renderMatrixRow('Bytes Parsed', metas.map(m => String(m.bytes_parsed || 0))),
+                renderMatrixRow('Raw Size', metas.map(m => fmtBytes(m.raw_size || 0))),
+                renderMatrixRow('Error List', metas.map(m => (m.errors || []).join(' | ') || '-'), { mode: 'comment' }),
             ]);
 
             html += '</div>';
@@ -3970,8 +4110,7 @@ pub const HOME: &str = r#"<!doctype html>
         let copiedKeyHex = null;
         let copiedKeyTimer = null;
         let pendingDetailSection = null;
-        let currentCompareLeft = null;
-        let currentCompareRight = null;
+        let currentCompareRecords = [];
 
         function pulseCommentMarker(markerId) {
             if (!markerId) return;
@@ -4375,8 +4514,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         function showFunctionDetail(keyHex, sectionId = null) {
             currentDetailData = null;
-            currentCompareLeft = null;
-            currentCompareRight = null;
+            currentCompareRecords = [];
             pendingDetailSection = sectionId;
             el.modalKey.textContent = keyHex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
@@ -4398,8 +4536,7 @@ pub const HOME: &str = r#"<!doctype html>
             el.detailModal.classList.remove('active');
             document.body.style.overflow = '';
             currentDetailData = null;
-            currentCompareLeft = null;
-            currentCompareRight = null;
+            currentCompareRecords = [];
             pendingDetailSection = null;
             if (activeCommentRow) {
                 activeCommentRow.classList.remove('active');
