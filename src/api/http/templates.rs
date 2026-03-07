@@ -6508,9 +6508,9 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function syncHashWithUi() {
-            const functionKey = isDetailPageOpen() && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
+            const functionKey = currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
             const hashMode = functionKey ? 'functions' : currentSearchMode;
-            const binaryMd5 = !functionKey && currentSearchMode === 'binaries' && currentBinaryMd5 && (isDetailPageOpen() || isComparePageOpen()) ? currentBinaryMd5 : '';
+            const binaryMd5 = !functionKey && currentSearchMode === 'binaries' && currentBinaryMd5 && (currentDetailKind === 'binary' || isComparePageOpen()) ? currentBinaryMd5 : '';
             const sectionId = functionKey ? (currentDetailSection || pendingDetailSection || '') : '';
             const compareRightMd5 = !functionKey && currentBinaryCompareData && currentBinaryCompareData.right && isComparePageOpen() ? currentBinaryCompareData.right.md5_hex : '';
             updateHash(hashMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId, compareRightMd5, currentBinaryCompareMode, currentBinaryComparePage, currentBinaryCompareQuery);
@@ -6985,10 +6985,10 @@ pub const HOME: &str = r#"<!doctype html>
             pendingDetailSection = null;
             currentDetailSection = null;
             el.modalTitle.innerHTML = 'BINARY DETAIL // <span id="modal-key"></span>';
-            if (updateUrl) syncHashWithUi();
+            activateFullPage('detail');
             el.modalKey.textContent = md5Hex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING BINARY PROFILE...</div>';
-            activateFullPage('detail');
+            if (updateUrl) syncHashWithUi();
 
             fetch('/api/binary/' + encodeURIComponent(md5Hex))
                 .then(r => {
