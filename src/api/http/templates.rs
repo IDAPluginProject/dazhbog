@@ -1024,6 +1024,11 @@ pub const HOME: &str = r#"<!doctype html>
             word-break: break-all;
             line-height: 1.4;
         }
+
+        .result-func .type-compact-token,
+        .comment-item-text .type-compact-token {
+            font-size: inherit;
+        }
         
         .result-key {
             font-size: 11px;
@@ -2330,6 +2335,392 @@ pub const HOME: &str = r#"<!doctype html>
             font-style: italic;
         }
 
+        .type-explorer {
+            margin-top: var(--space-md);
+            display: grid;
+            gap: 14px;
+        }
+
+        .type-explorer-topbar {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            border: 1px solid rgba(80, 140, 220, 0.28);
+            background: rgba(3, 10, 22, 0.7);
+        }
+
+        .type-explorer-stat {
+            padding: 12px 14px;
+            border-right: 1px solid rgba(80, 140, 220, 0.18);
+            display: grid;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .type-explorer-stat:last-child {
+            border-right: 0;
+        }
+
+        .type-explorer-stat .label {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        .type-explorer-stat .value {
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.25;
+            overflow-wrap: anywhere;
+            font-weight: 600;
+        }
+
+        .type-explorer-stat .value.warn {
+            color: #ff7b54;
+        }
+
+        .type-explorer-declaration {
+            display: grid;
+            gap: 8px;
+        }
+
+        .type-explorer-decl-box {
+            border: 1px solid rgba(80, 140, 220, 0.22);
+            background: rgba(5, 14, 28, 0.72);
+            padding: 14px 18px;
+            font-size: 15px;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+        .type-explorer-return {
+            color: #4bb4ff;
+        }
+
+        .type-explorer-cc {
+            color: var(--text-dim);
+        }
+
+        .type-explorer-func-name {
+            color: #31f2b2;
+            font-weight: 600;
+            text-shadow: 0 0 10px rgba(49, 242, 178, 0.16);
+        }
+
+        .type-explorer-func-scope {
+            color: var(--text-dim);
+            font-weight: 500;
+        }
+
+        .type-explorer-arg-name {
+            color: var(--text-dim);
+            font-size: 12px;
+        }
+
+        .type-explorer-generic {
+            color: var(--accent);
+        }
+
+        .type-explorer-togglebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-md);
+            flex-wrap: wrap;
+        }
+
+        .type-explorer-modes {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .type-explorer-mode,
+        .type-explorer-alloc-toggle {
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-dim);
+            padding: 10px 14px;
+            font: inherit;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+
+        .type-explorer-mode.active {
+            border-color: rgba(64, 210, 170, 0.45);
+            color: var(--accent);
+            background: rgba(32, 160, 140, 0.12);
+            box-shadow: inset 0 0 0 1px rgba(32, 160, 140, 0.12);
+        }
+
+        .type-explorer-alloc-toggle {
+            border-color: rgba(255, 123, 84, 0.35);
+            color: #ff7b54;
+        }
+
+        .type-explorer-canvas {
+            border: 1px solid rgba(80, 140, 220, 0.22);
+            background: rgba(2, 12, 24, 0.78);
+            padding: 18px;
+            min-height: 0;
+        }
+
+        .type-explorer-canvas.layered {
+            padding: 20px 22px;
+        }
+
+        .type-explorer-canvas.horizontal {
+            padding: 20px 16px 16px;
+        }
+
+        .type-explorer-layered {
+            display: grid;
+            gap: 8px;
+        }
+
+        .type-explorer-horizontal {
+            display: grid;
+            gap: 16px;
+        }
+
+        .type-horizontal-stage {
+            overflow-x: auto;
+            padding: 4px;
+        }
+
+        .type-horizontal-root {
+            min-width: max-content;
+        }
+
+        .type-horizontal-node,
+        .type-horizontal-leaf {
+            display: inline-flex;
+            flex-direction: column;
+            border: 1px solid var(--layer-color, rgba(255,255,255,0.16));
+            border-radius: 3px;
+            background: color-mix(in srgb, var(--layer-color, rgba(255,255,255,0.16)) 7%, rgba(2, 12, 24, 0.94));
+            min-width: 0;
+        }
+
+        .type-horizontal-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-bottom: 1px solid color-mix(in srgb, var(--layer-color, rgba(255,255,255,0.14)) 30%, transparent);
+            min-width: 0;
+            cursor: pointer;
+        }
+
+        .type-horizontal-leaf {
+            padding: 10px 14px;
+        }
+
+        .type-horizontal-children {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: stretch;
+            gap: 10px;
+            padding: 12px 14px 14px;
+            overflow-x: auto;
+        }
+
+        .type-horizontal-child {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .type-horizontal-sep {
+            color: rgba(255,255,255,0.12);
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .type-horizontal-label {
+            color: var(--layer-color, var(--accent));
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.1;
+            overflow-wrap: anywhere;
+        }
+
+        .type-horizontal-meta {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .type-horizontal-note {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .type-horizontal-leaf .type-horizontal-label {
+            font-size: 13px;
+        }
+
+        .type-layer-branch {
+            position: relative;
+            border-left: 2px solid var(--layer-color, rgba(255,255,255,0.14));
+            padding-left: 16px;
+            margin-left: 6px;
+            display: grid;
+            gap: 8px;
+        }
+
+        .type-layer-node {
+            position: relative;
+            display: grid;
+            gap: 8px;
+        }
+
+        .type-layer-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            flex-wrap: wrap;
+        }
+
+        .type-layer-pin {
+            position: absolute;
+            left: -24px;
+            top: 8px;
+            width: 14px;
+            height: 14px;
+            border-radius: 999px;
+            border: 4px solid var(--layer-color, var(--accent));
+            background: rgba(2, 12, 24, 0.9);
+            box-sizing: border-box;
+        }
+
+        .type-layer-node.leaf .type-layer-pin {
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .type-layer-toggle {
+            border: 0;
+            background: transparent;
+            color: var(--text-dim);
+            padding: 0;
+            width: 14px;
+            text-align: center;
+            cursor: pointer;
+            font: inherit;
+        }
+
+        .type-layer-index,
+        .type-layer-kicker {
+            color: var(--text-dim);
+            font-size: 9px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .type-layer-label {
+            color: var(--layer-color, var(--accent));
+            font-size: 14px;
+            line-height: 1.15;
+            overflow-wrap: anywhere;
+            font-weight: 600;
+        }
+
+        .type-layer-path {
+            color: var(--text-dim);
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            overflow-wrap: anywhere;
+        }
+
+        .type-layer-meta {
+            color: var(--text-dim);
+            font-size: 12px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .type-layer-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border: 1px solid rgba(255,255,255,0.18);
+            color: var(--text-dim);
+            background: rgba(255,255,255,0.02);
+        }
+
+        .type-layer-children {
+            display: grid;
+            gap: 10px;
+            padding-left: 4px;
+        }
+
+        .type-compact-token {
+            display: inline;
+            font-size: 13px;
+            font-family: var(--font-mono);
+        }
+
+        .type-compact-token.name {
+            font-weight: 600;
+        }
+
+        .type-compact-token.punct {
+            color: var(--text-dim);
+            font-size: 11px;
+        }
+
+        .type-explorer-legend {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            align-items: center;
+            color: var(--text-dim);
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .type-explorer-legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .type-explorer-legend-dot {
+            width: 16px;
+            height: 16px;
+            border-radius: 999px;
+            background: var(--dot-color, var(--accent));
+        }
+
+        .type-explorer-raw {
+            color: var(--text-dim);
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .type-explorer-raw-block {
+            margin-top: 10px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.02);
+            padding: 14px 16px;
+            color: var(--text-dim);
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-wrap: anywhere;
+        }
         .frame-viz {
             display: flex;
             flex-direction: column;
@@ -3895,6 +4286,27 @@ pub const HOME: &str = r#"<!doctype html>
 
             .signature-arg-row {
                 grid-template-columns: 1fr;
+            }
+
+            .type-explorer-topbar {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .type-explorer-canvas {
+                padding: 14px;
+            }
+
+            .type-horizontal-children {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .type-horizontal-child {
+                width: 100%;
+            }
+
+            .type-horizontal-sep {
+                display: none;
             }
         }
     </style>
@@ -5944,7 +6356,7 @@ pub const HOME: &str = r#"<!doctype html>
 
                 let typeHtml = '<span class="frame-missing">no decoded type</span>';
                 if (mem.tinfo && mem.tinfo.declaration) {
-                    typeHtml = esc(mem.tinfo.declaration);
+                    typeHtml = compactTypeHtmlFromText(mem.tinfo.declaration, false);
                 }
 
                 const chips = [];
@@ -6032,29 +6444,28 @@ pub const HOME: &str = r#"<!doctype html>
             }
             if (open < 0) return null;
 
-            const head = decl.slice(0, open).trim();
+            const rawHead = decl.slice(0, open).trim();
             const argsBlock = decl.slice(open + 1, close).trim();
+            const accessMatch = rawHead.match(/^(public|private|protected):\s*/i);
+            const access = accessMatch ? accessMatch[1].toLowerCase() : null;
+            const head = rawHead.replace(/^(?:public|private|protected):\s*/i, '').trim();
             if (!head || head.includes('(*')) {
                 return null;
             }
 
             const ccPattern = /__(?:cdecl|stdcall|pascal|fastcall|thiscall|swiftcall|golang|usercall|userpurge|cc\([^)]*\))/;
-            const ccMatch = head.match(ccPattern);
-            if (!ccMatch || ccMatch.index === undefined) {
-                return null;
-            }
-
             let cc = null;
-            let returnType = head;
-            let tail = '';
-
-            cc = ccMatch[0];
-            returnType = head.slice(0, ccMatch.index).trim();
-            tail = head.slice(ccMatch.index + cc.length).trim();
-
-            if (!returnType) returnType = head;
-            const retLocMatch = tail.match(/@<[^>]+>/);
+            const headWithoutCc = head.replace(ccPattern, match => {
+                if (!cc) cc = match;
+                return ' ';
+            }).replace(/\s+/g, ' ').trim();
+            const parts = splitSignatureHead(headWithoutCc);
+            let returnType = (parts.returnType || '').trim();
+            let callableName = (parts.callable || '').trim();
+            const retLocMatch = callableName.match(/@<[^>]+>/);
             const retLoc = retLocMatch ? retLocMatch[0] : null;
+            callableName = callableName.replace(/\s*@<[^>]+>/g, '').trim();
+            if (!returnType && !callableName) returnType = headWithoutCc || head;
 
             let args = [];
             if (argsBlock.length > 0) {
@@ -6065,48 +6476,495 @@ pub const HOME: &str = r#"<!doctype html>
             }
 
             return {
+                access,
                 returnType,
                 cc,
                 retLoc,
+                callableName: callableName || null,
                 args,
                 full: decl,
             };
         }
 
+
+        function isAllocatorTypeLabel(label) {
+            return /(^|::)allocator$/.test(String(label || '').trim());
+        }
+
+        function typeExplorerPalette(depth) {
+            const palette = ['#28e0a5', '#4bb4ff', '#d6ac45', '#ff7b54', '#b57aff', '#59d1d8', '#f08bb4', '#93b85c'];
+            return palette[depth % palette.length];
+        }
+
+        function normalizeTypeNode(node, showAllocators) {
+            if (!node) return null;
+            const label = String(node.label || '').trim();
+            let args = (node.args || []).map(child => normalizeTypeNode(child, showAllocators)).filter(Boolean);
+            const elided = [];
+
+            if (!showAllocators && isAllocatorTypeLabel(label)) {
+                if (args.length === 1) return args[0];
+                return null;
+            }
+
+            const canonical = label.replace(/std::__1::/g, 'std::');
+            if (!showAllocators) {
+                if (/^std::(?:vector|list|deque|forward_list|set|multiset)$/.test(canonical) && args.length >= 2 && isAllocatorTypeLabel(args[1].label)) {
+                    args = [args[0]];
+                    elided.push('allocator');
+                } else if (/^std::(?:map|multimap|unordered_map|unordered_multimap)$/.test(canonical)) {
+                    args.forEach(child => {
+                        const childLabel = String(child.label || '').trim();
+                        if (isAllocatorTypeLabel(childLabel)) elided.push('allocator');
+                        else if (/(^|::)less$/.test(childLabel)) elided.push('less');
+                        else if (/(^|::)equal_to$/.test(childLabel)) elided.push('equal_to');
+                        else if (/(^|::)hash$/.test(childLabel)) elided.push('hash');
+                    });
+                    args = args.filter(child => !isAllocatorTypeLabel(child.label) && !/(^|::)(less|equal_to|hash)$/.test(String(child.label || '').trim()));
+                } else if (/^std::basic_string$/.test(canonical)) {
+                    args.forEach((child, index) => {
+                        const childLabel = String(child.label || '').trim();
+                        if (index > 0 && /(^|::)char_traits$/.test(childLabel)) elided.push('char_traits');
+                        else if (index > 0 && isAllocatorTypeLabel(childLabel)) elided.push('allocator');
+                    });
+                    args = args.filter((child, index) => index === 0 || (!/(^|::)char_traits$/.test(String(child.label || '').trim()) && !isAllocatorTypeLabel(child.label)));
+                }
+            }
+
+            return { label: canonical, args, elided };
+        }
+
+        function stripTypeNoise(text) {
+            return String(text || '').replace(/\b(class|struct|enum)\s+/g, '').replace(/std::__1::/g, 'std::').trim();
+        }
+
+        function splitTypeLabelParts(label) {
+            const cleaned = stripTypeNoise(label);
+            const parts = cleaned.split(/\s+/).filter(Boolean);
+            if (!parts.length) return { prefix: '', name: 'unknown' };
+            const name = parts.pop() || 'unknown';
+            return { prefix: parts.join(' '), name };
+        }
+
+        function typeExplorerLabel(label) {
+            const parts = splitTypeLabelParts(label);
+            return String(parts.name || '').replace(/^std::/, '').replace(/^.*::/, '').trim() || 'unknown';
+        }
+
+        function typeExplorerPath(label) {
+            const value = String(label || '').replace(/std::__1::/g, 'std::').trim();
+            const parts = splitScope(value);
+            return parts.length > 1 ? parts.slice(0, -1).join('::') : '';
+        }
+
+        function flattenTypeTree(node, depth = 0, branch = 0, rows = []) {
+            if (!node) return rows;
+            rows.push({ label: node.label, depth, branch, childCount: node.args.length, path: typeExplorerPath(node.label) });
+            node.args.forEach((child, index) => flattenTypeTree(child, depth + 1, index, rows));
+            return rows;
+        }
+
+        function countTypeTreeNodes(node) {
+            if (!node) return 0;
+            return 1 + (node.args || []).reduce((sum, child) => sum + countTypeTreeNodes(child), 0);
+        }
+
+        function maxTypeTreeDepth(node) {
+            if (!node) return 0;
+            if (!node.args || !node.args.length) return 0;
+            return 1 + Math.max(...node.args.map(maxTypeTreeDepth));
+        }
+
+        function typeToCompactString(node) {
+            if (!node) return '';
+            const parts = splitTypeLabelParts(node.label);
+            const base = typeExplorerLabel(parts.name);
+            const prefix = parts.prefix ? parts.prefix + ' ' : '';
+            if (!node.args || !node.args.length) return prefix + base;
+            return prefix + base + '<' + node.args.map(typeToCompactString).join(', ') + '>';
+        }
+
+        function buildTypeExplorerNode(text, showAllocators) {
+            const cleaned = stripTypeNoise(text);
+            if (!cleaned) return null;
+            if (cleaned === '...') return { label: '...', args: [], displayLabel: '...', pathLabel: '', elided: [] };
+            const open = cleaned.indexOf('<');
+            if (open < 0) return { label: cleaned, args: [], displayLabel: cleaned, pathLabel: '', elided: [] };
+            const close = findMatchingAngle(cleaned, open);
+            if (close < 0) return { label: cleaned, args: [], displayLabel: cleaned, pathLabel: '', elided: [] };
+            const templateText = cleaned.slice(0, close + 1);
+            const suffix = cleaned.slice(close + 1).trim();
+            const node = normalizeTypeNode(parseTemplateNode(templateText), showAllocators);
+            if (!node) return null;
+            if (suffix) node.displaySuffix = suffix;
+            return node;
+        }
+
+        function decorateTypeExplorerNode(node, extras = {}) {
+            if (!node) return null;
+            return Object.assign({}, node, extras, {
+                args: (node.args || []).map(child => decorateTypeExplorerNode(child))
+            });
+        }
+
+        function buildSignatureExplorerTree(parsed, showAllocators) {
+            if (!parsed) return [];
+            const argumentChildren = [];
+            (parsed.args || []).forEach((arg, index) => {
+                const parts = splitArgumentName(arg);
+                const argNode = decorateTypeExplorerNode(buildTypeExplorerNode(parts.typeText || arg, showAllocators), {
+                    note: '',
+                    displayLabel: stripTypeNoise(parts.typeText || arg) || ('arg ' + index)
+                });
+                if (argNode) argumentChildren.push(argNode);
+            });
+            return [
+                {
+                    label: 'argument-list',
+                    displayLabel: 'Arguments',
+                    note: parsed.cc || '',
+                    pathLabel: '',
+                    args: argumentChildren,
+                    elided: []
+                },
+                {
+                    label: 'return-type',
+                    displayLabel: 'Return Type',
+                    note: '',
+                    pathLabel: '',
+                    args: [decorateTypeExplorerNode(buildTypeExplorerNode(parsed.returnType || 'void', showAllocators), {
+                        note: '',
+                        displayLabel: stripTypeNoise(parsed.returnType || 'void') || 'void',
+                        pathLabel: parsed.retLoc || ''
+                    })].filter(Boolean),
+                    elided: []
+                }
+            ];
+        }
+
+        function countTypeTreeNodesDeep(nodes) {
+            return (nodes || []).reduce((sum, node) => sum + countTypeTreeNodes(node), 0);
+        }
+
+        function maxTypeTreeDepthDeep(nodes) {
+            return (nodes || []).reduce((max, node) => Math.max(max, maxTypeTreeDepth(node)), 0);
+        }
+
+        function splitArgumentName(text) {
+            const value = stripTypeNoise(text);
+            if (!value || value === '...') return { typeText: value, argName: '' };
+            let angle = 0;
+            let paren = 0;
+            let bracket = 0;
+            for (let i = value.length - 1; i >= 0; i--) {
+                const ch = value[i];
+                if (ch === '>') angle += 1;
+                else if (ch === '<') angle = Math.max(0, angle - 1);
+                else if (ch === ')') paren += 1;
+                else if (ch === '(') paren = Math.max(0, paren - 1);
+                else if (ch === ']') bracket += 1;
+                else if (ch === '[') bracket = Math.max(0, bracket - 1);
+                else if (ch === ' ' && angle === 0 && paren === 0 && bracket === 0) {
+                    const suffix = value.slice(i + 1).trim();
+                    if (/^[*&]+[_A-Za-z][_A-Za-z0-9]*$/.test(suffix) || /^[_A-Za-z][_A-Za-z0-9]*$/.test(suffix)) {
+                        const sigil = (suffix.match(/^[*&]+/) || [''])[0];
+                        return {
+                            typeText: (value.slice(0, i).trim() + (sigil ? ' ' + sigil : '')).trim(),
+                            argName: suffix.slice(sigil.length)
+                        };
+                    }
+                    break;
+                }
+            }
+            return { typeText: value, argName: '' };
+        }
+
+        function stripTopLevelTemplateSuffix(text) {
+            const value = String(text || '').trim();
+            const open = value.indexOf('<');
+            if (open < 0) return value;
+            const close = findMatchingAngle(value, open);
+            if (close === value.length - 1) return value.slice(0, open).trim();
+            return value;
+        }
+
+        function renderCallableNameHtml(rawName, showAllocators) {
+            const value = String(rawName || '').trim();
+            if (!value) return '';
+            const lastScope = findLastTopLevelScope(value);
+            const leafRaw = lastScope >= 0 ? value.slice(lastScope + 2).trim() : value;
+            const scopeRaw = lastScope >= 0 ? value.slice(0, lastScope).trim() : '';
+            let leafDisplay = stripTopLevelTemplateSuffix(leafRaw);
+            if (!/^operator\S+$/.test(leafDisplay)) leafDisplay = typeExplorerLabel(leafDisplay);
+            const scopeHtml = scopeRaw ? compactTypeHtmlFromText(scopeRaw, showAllocators) + "<span class='type-compact-token punct'>::</span>" : '';
+            return " <span class='type-explorer-func-scope'>" + scopeHtml + "</span><span class='type-explorer-func-name'>" + esc(leafDisplay || leafRaw) + "</span>";
+        }
+
+        function compactTypeHtmlFromText(text, showAllocators) {
+            const cleaned = stripTypeNoise(text);
+            if (!cleaned) return '<span class="type-explorer-generic">unknown</span>';
+            if (cleaned === '...') return '<span class="type-explorer-generic">...</span>';
+            const open = cleaned.indexOf('<');
+            if (open < 0) return '<span class="type-explorer-generic">' + esc(cleaned) + '</span>';
+            const close = findMatchingAngle(cleaned, open);
+            if (close < 0) return '<span class="type-explorer-generic">' + esc(cleaned) + '</span>';
+            const templateText = cleaned.slice(0, close + 1);
+            const suffix = cleaned.slice(close + 1).trim();
+            const node = normalizeTypeNode(parseTemplateNode(templateText), showAllocators);
+            if (!node) return '<span class="type-explorer-generic">' + esc(cleaned) + '</span>';
+            return renderCompactType(node) + (suffix ? '<span class="type-compact-token punct">' + esc(suffix) + '</span>' : '');
+        }
+
+        function buildCompactDeclarationHtml(parsed, showAllocators) {
+            const accessHtml = parsed.access ? "<span class='type-explorer-cc'>" + esc(parsed.access + ':') + "</span> " : '';
+            const returnHtml = !parsed.returnType && parsed.callableName
+                ? ''
+                : parsed.returnType && /[<(]/.test(parsed.returnType)
+                ? compactTypeHtmlFromText(parsed.returnType, showAllocators)
+                : "<span class='type-explorer-return'>" + esc(parsed.returnType || 'void') + "</span>";
+            const args = (parsed.args || []).map(arg => {
+                const parts = splitArgumentName(arg);
+                const typeHtml = compactTypeHtmlFromText(parts.typeText || arg, showAllocators);
+                const nameHtml = parts.argName ? '<span class="type-explorer-arg-name"> ' + esc(parts.argName) + '</span>' : '';
+                return typeHtml + nameHtml;
+            }).join('<span class="type-compact-token punct">, </span>');
+            const callableName = parsed.callableName ? renderCallableNameHtml(parsed.callableName, showAllocators) : '';
+            const ccHtml = parsed.cc ? " <span class='type-explorer-cc'>" + esc(parsed.cc) + "</span>" : '';
+            return accessHtml + returnHtml + ccHtml + callableName + "(" + args + ")";
+        }
+
+        function renderQualifiedCallableSuffix(text) {
+            const value = String(text || '').trim();
+            if (!value || /[\s(),]/.test(value)) return null;
+            if (findLastTopLevelScope(value) < 0) return null;
+            return renderCallableNameHtml(value, false).trim();
+        }
+
+        function normalizeSymbolDisplay(text) {
+            let value = String(text || '').trim();
+            if (!value) return value;
+            value = value
+                .replace(/\$LT\$/g, '<')
+                .replace(/\$GT\$/g, '>')
+                .replace(/\$LP\$/g, '(')
+                .replace(/\$RP\$/g, ')')
+                .replace(/\$C\$/g, ',')
+                .replace(/\$u20\$/g, ' ')
+                .replace(/\$u5b\$/g, '[')
+                .replace(/\$u5d\$/g, ']')
+                .replace(/\$u7b\$/g, '{')
+                .replace(/\$u7d\$/g, '}')
+                .replace(/\$u27\$/g, "'")
+                .replace(/\$u3d\$/g, '=')
+                .replace(/\$u3a\$/g, ':')
+                .replace(/\$u2b\$/g, '+')
+                .replace(/\$u21\$/g, '!')
+                .replace(/\$u26\$/g, '&')
+                .replace(/\$u2f\$/g, '/')
+                .replace(/\$u5c\$/g, '\\')
+                .replace(/\.\./g, '::')
+                .replace(/::h[0-9a-f]{8,}$/i, '');
+            value = value.replace(/^_ZN\d+_?/, '').replace(/E$/, '');
+            return value.trim();
+        }
+
+        function renderCompactSignatureText(text, showAllocators = false) {
+            const value = normalizeSymbolDisplay(stripTypeNoise(text));
+            if (!value) return '';
+            const parsed = parseDecodedSignature(value);
+            if (parsed) return buildCompactDeclarationHtml(parsed, showAllocators);
+            const qualifiedCallable = renderQualifiedCallableSuffix(value);
+            if (qualifiedCallable) return qualifiedCallable;
+            const typeHtml = compactTypeHtmlFromText(value, showAllocators);
+            if (typeHtml && !/unknown/.test(typeHtml)) return typeHtml;
+            if (/^[?@_$A-Za-z][^\s]*$/.test(value)) return '<span class="result-mangled">' + esc(value) + '</span>';
+            return esc(value);
+        }
+
+        function renderOverviewFunctionName(data, metadata) {
+            const demangled = data && data.name ? String(data.name) : '';
+            const typeDecl = metadata && metadata.type_parts && metadata.type_parts.declaration ? String(metadata.type_parts.declaration) : '';
+            const parsedTypeDecl = typeDecl ? parseDecodedSignature(typeDecl) : null;
+            if (parsedTypeDecl) return buildCompactDeclarationHtml(parsedTypeDecl, false);
+            const parsedDemangled = demangled ? parseDecodedSignature(normalizeSymbolDisplay(stripTypeNoise(demangled))) : null;
+            if (parsedDemangled && parsedDemangled.callableName) return buildCompactDeclarationHtml(parsedDemangled, false);
+            if (demangled && demangled.indexOf('(') < 0) return renderCompactSignatureText(demangled, false);
+            return esc(demangled || typeDecl || '-');
+        }
+
+        function tokenizeCompactType(text) {
+            const tokens = [];
+            let depth = 0;
+            let buf = '';
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (ch === '<') {
+                    if (buf) tokens.push({ type: 'name', value: buf, depth });
+                    buf = '';
+                    tokens.push({ type: 'open', value: '<', depth });
+                    depth += 1;
+                } else if (ch === '>') {
+                    if (buf) tokens.push({ type: 'name', value: buf, depth });
+                    buf = '';
+                    depth = Math.max(0, depth - 1);
+                    tokens.push({ type: 'close', value: '>', depth });
+                } else if (ch === ',') {
+                    if (buf) tokens.push({ type: 'name', value: buf, depth });
+                    buf = '';
+                    tokens.push({ type: 'comma', value: ', ', depth });
+                } else {
+                    buf += ch;
+                }
+            }
+            if (buf) tokens.push({ type: 'name', value: buf, depth });
+            return tokens;
+        }
+
+        function renderCompactType(node) {
+            if (!node) return '<span class="type-explorer-generic">unknown</span>';
+            const tokens = tokenizeCompactType(typeToCompactString(node));
+            return tokens.map(tok => {
+                const color = tok.type === 'name' ? typeExplorerPalette(tok.depth) : (tok.type === 'comma' ? '#5e6572' : typeExplorerPalette(tok.depth));
+                const klass = tok.type === 'name' ? 'name' : 'punct';
+                return '<span class="type-compact-token ' + klass + '" style="color:' + color + '">' + esc(tok.value) + '</span>';
+            }).join('');
+        }
+
+        function explorerNodeLabel(node) {
+            return node && node.displayLabel ? node.displayLabel : typeExplorerLabel(node ? node.label : '');
+        }
+
+        function explorerNodePath(node) {
+            if (!node) return '';
+            if (node.pathLabel) return node.pathLabel;
+            return typeExplorerPath(node.label);
+        }
+
+        function explorerNodeDepthMeta(depth, branchIndex) {
+            if (branchIndex === null && depth === 0) return '';
+            return branchIndex === null ? '<span class="type-layer-kicker">D' + depth + '</span>' : '<span class="type-layer-index">' + branchIndex + '</span><span class="type-layer-kicker">D' + depth + '</span>';
+        }
+
+        function renderTypeExplorerLayered(node, depth = 0, branchIndex = null, path = 'root') {
+            if (!node) return '<div class="metadata-empty">No template structure detected</div>';
+            const color = typeExplorerPalette(depth);
+            const shortLabel = explorerNodeLabel(node);
+            const scopePath = explorerNodePath(node);
+            const hasChildren = !!(node.args && node.args.length);
+            const chips = [];
+            if ((node.elided || []).length) chips.push('<span class="type-layer-chip">-' + esc(node.elided.join(', ')) + '</span>');
+            if (node.displaySuffix) chips.push('<span class="type-layer-chip">' + esc(node.displaySuffix) + '</span>');
+            if (node.note) chips.push('<span class="type-layer-chip">' + esc(node.note) + '</span>');
+            const toggle = hasChildren ? '<button class="type-layer-toggle" onclick="toggleTypeTree(event, \'' + path + '\')">▼</button>' : '<span class="type-layer-toggle"></span>';
+            const index = explorerNodeDepthMeta(depth, branchIndex);
+            const children = hasChildren
+                ? '<div class="type-layer-children" data-type-layer-children="' + path + '">' + node.args.map((child, index) => renderTypeExplorerLayered(child, depth + 1, index, path + '-' + index)).join('') + '</div>'
+                : '';
+            return '<div class="type-layer-branch" style="--layer-color:' + color + '"><div class="type-layer-node' + (hasChildren ? '' : ' leaf') + '"><span class="type-layer-pin"></span><div class="type-layer-head">'
+                + toggle
+                + '<span class="type-layer-label">' + esc(shortLabel) + '</span>'
+                + index
+                + chips.join('')
+                + '</div>'
+                + (scopePath ? '<div class="type-layer-path">' + esc(scopePath) + '</div>' : '')
+                + (hasChildren ? '<div class="type-layer-meta"><span>&lt;</span><span>' + node.args.length + ' param' + (node.args.length === 1 ? '' : 's') + '</span></div>' : '')
+                + children
+                + '</div></div>';
+        }
+
+        function renderTypeExplorerLayeredForest(nodes) {
+            if (!nodes || !nodes.length) return '<div class="metadata-empty">No template structure detected</div>';
+            return '<div class="type-explorer-layered">' + nodes.map((node, index) => renderTypeExplorerLayered(node, 0, null, 'forest-' + index)).join('') + '</div>';
+        }
+
+        function renderTypeExplorerHorizontal(node, depth = 0, path = 'root') {
+            if (!node) return '<div class="metadata-empty">No template structure detected</div>';
+            const color = typeExplorerPalette(depth);
+            const label = explorerNodeLabel(node);
+            const hasChildren = !!(node.args && node.args.length);
+            const meta = '<span class="type-horizontal-meta">D' + depth + '</span>' + ((node.elided || []).length ? '<span class="type-horizontal-meta">-' + esc(node.elided.join(', ')) + '</span>' : '') + (node.displaySuffix ? '<span class="type-horizontal-meta">' + esc(node.displaySuffix) + '</span>' : '') + (node.note ? '<span class="type-horizontal-note">' + esc(node.note) + '</span>' : '');
+            if (!hasChildren) {
+                return '<div class="type-horizontal-leaf" style="--layer-color:' + color + '"><div class="type-horizontal-label">' + esc(label) + '</div><div class="type-horizontal-meta">D' + depth + '</div>' + (node.note ? '<div class="type-horizontal-note">' + esc(node.note) + '</div>' : '') + '</div>';
+            }
+            const children = '<div class="type-horizontal-children" data-type-layer-children="' + path + '">' + node.args.map((child, index) => '<div class="type-horizontal-child">' + (index > 0 ? '<span class="type-horizontal-sep">&middot;</span>' : '') + renderTypeExplorerHorizontal(child, depth + 1, path + '-' + index) + '</div>').join('') + '</div>';
+            return '<div class="type-horizontal-node" style="--layer-color:' + color + '"><div class="type-horizontal-head" onclick="toggleTypeTree(event, \'' + path + '\')"><button class="type-layer-toggle">▼</button><span class="type-horizontal-label">' + esc(label) + '</span>' + meta + '</div>' + children + '</div>';
+        }
+
+        function renderTypeExplorerHorizontalForest(nodes) {
+            if (!nodes || !nodes.length) return '<div class="metadata-empty">No template structure detected</div>';
+            return '<div class="type-explorer-horizontal"><div class="type-horizontal-stage"><div class="type-horizontal-root">' + nodes.map((node, index) => renderTypeExplorerHorizontal(node, 0, 'forest-' + index)).join('<div style="height:12px"></div>') + '</div></div></div>';
+        }
+
+        function setTypeExplorerMode(mode) {
+            typeExplorerMode = ['layered', 'horizontal'].includes(mode) ? mode : 'layered';
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function toggleTypeExplorerAllocators() {
+            typeExplorerShowAllocators = !typeExplorerShowAllocators;
+            if (currentDetailData) renderFunctionDetail(currentDetailData);
+        }
+
+        function toggleTypeTree(event, path) {
+            if (event) event.stopPropagation();
+            const children = document.querySelector('[data-type-layer-children="' + path + '"]');
+            if (!children) return;
+            const hidden = children.style.display === 'none';
+            children.style.display = hidden ? '' : 'none';
+            const button = event && event.currentTarget ? event.currentTarget : null;
+            const toggle = button ? button.querySelector('.type-layer-toggle') || button : null;
+            if (toggle) toggle.textContent = hidden ? '▼' : '▶';
+        }
+
         function renderTypeSignature(typeParts) {
             const decl = typeParts && typeParts.declaration ? typeParts.declaration : '';
             const parsed = parseDecodedSignature(decl);
-
-            let html = '<div class="signature-viz">';
+            let html = "<div class='signature-viz'>";
             if (parsed) {
-                html += '<div class="signature-cards">';
-                html += '<div class="signature-card"><div class="label">User Type</div><div class="value accent">' + (typeParts.userti ? 'YES' : 'NO') + '</div></div>';
-                html += '<div class="signature-card"><div class="label">Return Type</div><div class="value">' + esc(parsed.returnType || '-') + '</div></div>';
-                html += '<div class="signature-card"><div class="label">Calling Conv</div><div class="value">' + esc(parsed.cc || 'default') + '</div></div>';
-                html += '<div class="signature-card"><div class="label">Return Loc</div><div class="value">' + esc(parsed.retLoc || '-') + '</div></div>';
-                html += '</div>';
+                const signatureNodes = buildSignatureExplorerTree(parsed, typeExplorerShowAllocators);
+                const nodeCount = countTypeTreeNodesDeep(signatureNodes);
+                const maxDepth = maxTypeTreeDepthDeep(signatureNodes);
+                const compactDecl = buildCompactDeclarationHtml(parsed, typeExplorerShowAllocators);
+                html += "<div class='type-explorer'>";
+                html += "<div class='type-explorer-topbar'>";
+                html += "<div class='type-explorer-stat'><div class='label'>User Type</div><div class='value " + (typeParts.userti ? '' : 'warn') + "'>" + (typeParts.userti ? 'YES' : 'NO') + "</div></div>";
+                html += "<div class='type-explorer-stat'><div class='label'>Return Type</div><div class='value'>" + esc(parsed.returnType || '-') + "</div></div>";
+                html += "<div class='type-explorer-stat'><div class='label'>Calling Conv</div><div class='value'>" + esc(parsed.cc || 'default') + "</div></div>";
+                html += "<div class='type-explorer-stat'><div class='label'>Return Loc</div><div class='value'>" + esc(parsed.retLoc || '-') + "</div></div>";
+                html += "</div>";
+                html += "<div class='type-explorer-declaration'><div class='detail-label' style='margin:0;'>Compact Declaration</div><div class='type-explorer-decl-box'>" + compactDecl + "</div></div>";
+                html += "<div class='type-explorer-togglebar'><div class='type-explorer-modes'>";
+                html += "<button class='type-explorer-mode" + (typeExplorerMode === 'horizontal' ? ' active' : '') + "' onclick='setTypeExplorerMode(\"horizontal\")'>Horizontal</button>";
+                html += "<button class='type-explorer-mode" + (typeExplorerMode === 'layered' ? ' active' : '') + "' onclick='setTypeExplorerMode(\"layered\")'>Layered</button>";
+                html += "</div><button class='type-explorer-alloc-toggle' onclick='toggleTypeExplorerAllocators()'>" + (typeExplorerShowAllocators ? 'Hide Allocators' : 'Show Allocators') + "</button></div>";
+                html += "<div class='type-explorer-canvas " + typeExplorerMode + "'>";
+                if (!signatureNodes.length) html += "<div class='metadata-empty'>No template structure detected</div>";
+                else if (typeExplorerMode === 'horizontal') html += renderTypeExplorerHorizontalForest(signatureNodes) + "<div class='type-explorer-legend'><span>Depth</span>" + Array.from({length: maxDepth + 1}, (_, d) => "<span class='type-explorer-legend-item'><span class='type-explorer-legend-dot' style='--dot-color:" + typeExplorerPalette(d) + "'></span>" + d + "</span>").join('') + "</div>";
+                else html += renderTypeExplorerLayeredForest(signatureNodes);
+                html += "</div>";
+                html += "<details><summary class='type-explorer-raw'>Raw Type String</summary><div class='type-explorer-raw-block'>" + esc(parsed.full) + "</div></details>";
+                html += "</div>";
 
                 if (parsed.args.length > 0) {
-                    html += '<div class="detail-label" style="margin:0;">Arguments</div>';
-                    html += '<div class="signature-args">';
+                    html += "<div class='detail-label' style='margin:0;'>Arguments</div>";
+                    html += "<div class='signature-args'>";
                     parsed.args.forEach((arg, i) => {
                         const kind = arg === '...' ? 'vararg' : ('arg ' + i);
-                        html += '<div class="signature-arg-row">';
-                        html += '<div class="signature-arg-key">' + esc(kind) + '</div>';
-                        html += '<div class="signature-arg-val">' + esc(arg) + '</div>';
-                        html += '</div>';
+                        const parts = splitArgumentName(arg);
+                        html += "<div class='signature-arg-row'>";
+                        html += "<div class='signature-arg-key'>" + esc(kind) + "</div>";
+                        html += "<div class='signature-arg-val'>" + compactTypeHtmlFromText(parts.typeText || arg, typeExplorerShowAllocators) + (parts.argName ? "<span class='type-explorer-arg-name'> " + esc(parts.argName) + "</span>" : "") + "</div>";
+                        html += "</div>";
                     });
-                    html += '</div>';
+                    html += "</div>";
                 } else {
-                    html += '<div class="metadata-empty">No explicit arguments</div>';
+                    html += "<div class='metadata-empty'>No explicit arguments</div>";
                 }
-
-                html += '<div class="detail-section" style="margin-bottom:0;"><div class="detail-label">Full Declaration</div><div class="detail-value mono">' + esc(parsed.full) + '</div></div>';
             } else {
-                html += '<div class="signature-cards">';
-                html += '<div class="signature-card"><div class="label">User Type</div><div class="value accent">' + (typeParts.userti ? 'YES' : 'NO') + '</div></div>';
-                html += '<div class="signature-card" style="grid-column: span 3;"><div class="label">Decoded Declaration</div><div class="value">' + esc(decl || 'not available') + '</div></div>';
-                html += '</div>';
+                html += "<div class='signature-cards'>";
+                html += "<div class='signature-card'><div class='label'>User Type</div><div class='value accent'>" + (typeParts.userti ? 'YES' : 'NO') + "</div></div>";
+                html += "<div class='signature-card' style='grid-column: span 3;'><div class='label'>Decoded Declaration</div><div class='value'>" + esc(decl || 'not available') + "</div></div>";
+                html += "</div>";
             }
 
             if (typeParts && typeParts.decode_error) {
@@ -6261,6 +7119,8 @@ pub const HOME: &str = r#"<!doctype html>
         let copiedKeyTimer = null;
         let pendingDetailSection = null;
         let currentCompareRecords = [];
+        let typeExplorerMode = 'layered';
+        let typeExplorerShowAllocators = false;
         let suppressHashHandler = false;
         const metricAnimationState = new Map();
 
@@ -6457,7 +7317,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         function renderCommentText(ev) {
             const parsed = parseControlFlowComment(ev.cmt);
-            if (!parsed) return '<div class="comment-item-text">' + esc(ev.cmt) + '</div>';
+            if (!parsed) return '<div class="comment-item-text">' + renderCompactSignatureText(ev.cmt, false) + '</div>';
             let html = '<div class="comment-item-text controlflow">';
             html += '<div class="comment-flow-main">';
             html += '<span class="frame-chip' + (parsed.type === 'jumptable' ? '' : ' warn') + '">' + esc(parsed.type) + '</span>';
@@ -6521,11 +7381,11 @@ pub const HOME: &str = r#"<!doctype html>
 
         function syncHashWithUi() {
             const functionCompareOpen = isDetailPageOpen() && !currentDetailKeyHex && compareKeys.length >= 2;
-            const functionKey = !functionCompareOpen && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
+            const functionKey = !functionCompareOpen && isDetailPageOpen() && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
             const functionCompareKeys = functionCompareOpen ? compareKeys.join(',') : '';
             const functionCompareBaseline = functionCompareOpen ? (compareBaselineKey || compareKeys[0] || '') : '';
             const hashMode = functionKey ? 'functions' : currentSearchMode;
-            const binaryMd5 = !functionKey && !functionCompareOpen && currentSearchMode === 'binaries' && currentBinaryMd5 && (currentDetailKind === 'binary' || isComparePageOpen()) ? currentBinaryMd5 : '';
+            const binaryMd5 = !functionKey && !functionCompareOpen && currentSearchMode === 'binaries' && currentBinaryMd5 && ((isDetailPageOpen() && currentDetailKind === 'binary') || isComparePageOpen()) ? currentBinaryMd5 : '';
             const sectionId = functionKey ? (currentDetailSection || pendingDetailSection || '') : '';
             const compareRightMd5 = !functionKey && !functionCompareOpen && currentBinaryCompareData && currentBinaryCompareData.right && isComparePageOpen() ? currentBinaryCompareData.right.md5_hex : '';
             updateHash(hashMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId, functionCompareKeys, functionCompareBaseline, compareMode, compareShowAll, compareRightMd5, currentBinaryCompareMode, currentBinaryComparePage, currentBinaryCompareQuery);
@@ -6795,6 +7655,7 @@ pub const HOME: &str = r#"<!doctype html>
             el.resultsList.innerHTML = hits.map((h, i) => {
                 const bins = (h.binaries || []).map(b => '<span class="bin-tag clickable" onclick="event.stopPropagation();openBinaryFromFunction(\'' + esc(b.md5_hex) + '\', \'' + encodeURIComponent(b.basename) + '\')">' + esc(b.basename) + '<span class="accent">#' + esc(b.short_id) + '</span></span>').join('');
                 const displayName = h.func_name_demangled || h.func_name;
+                const displayNameHtml = renderCompactSignatureText(displayName, false);
                 const langBadge = h.lang ? '<span class="lang-badge">' + esc(h.lang.toUpperCase()) + '</span>' : '';
                 const mangledHint = h.func_name_demangled ? '<div class="result-mangled" title="Mangled name">' + esc(h.func_name) + '</div>' : '';
                 const scoreRatio = normalizeScore(Number(h.score || 0), minScore, maxScore);
@@ -6807,7 +7668,7 @@ pub const HOME: &str = r#"<!doctype html>
 
                 return '<div class="result-item clickable' + (isSelected ? ' selected' : '') + '" data-result-index="' + i + '" onclick="showFunctionDetail(\'' + esc(h.key_hex) + '\')">'
                     + '<div class="result-index">' + String(startIdx + i + 1).padStart(2, '0') + '</div>'
-                    + '<div class="result-main"><div class="result-func">' + esc(displayName) + '</div>' + mangledHint + '<div class="result-key"><span class="result-key-copy' + (copied ? ' copied' : '') + '" onclick="event.stopPropagation();copyResultKey(\'' + esc(h.key_hex) + '\')">KEY ' + esc(h.key_hex) + '</span><span class="result-age">' + esc(age) + '</span></div><div class="result-bins">' + bins + '</div></div>'
+                    + '<div class="result-main"><div class="result-func">' + displayNameHtml + '</div>' + mangledHint + '<div class="result-key"><span class="result-key-copy' + (copied ? ' copied' : '') + '" onclick="event.stopPropagation();copyResultKey(\'' + esc(h.key_hex) + '\')">KEY ' + esc(h.key_hex) + '</span><span class="result-age">' + esc(age) + '</span></div><div class="result-bins">' + bins + '</div></div>'
                     + '<div class="result-meta">' + langBadge + '<span class="version-badge age">' + esc(age) + '</span><span class="score-badge">SCORE ' + Number(h.score).toFixed(2) + '</span><div class="score-meter"><div class="score-meter-fill" style="width:' + (scoreRatio * 100).toFixed(1) + '%;"></div></div><div class="result-actions">'
                     + '<button class="result-action' + (isPinned ? ' active' : '') + '" onclick="event.stopPropagation();togglePin(\'' + esc(h.key_hex) + '\')">pin</button>'
                     + '<button class="result-action' + (inCompare ? ' active' : '') + '" onclick="event.stopPropagation();toggleCompareKey(\'' + esc(h.key_hex) + '\')">cmp</button>'
@@ -6974,6 +7835,7 @@ pub const HOME: &str = r#"<!doctype html>
             controlFlowFocusMode = false;
             currentDetailSection = sectionId || null;
             el.modalTitle.innerHTML = 'FUNCTION DETAIL // <span id="modal-key"></span>';
+            el.modalKey = document.getElementById('modal-key');
             activateFullPage('detail');
             el.modalKey.textContent = keyHex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
@@ -7018,6 +7880,9 @@ pub const HOME: &str = r#"<!doctype html>
             currentGraphFocusMd5 = null;
             currentBinaryGraphZoom = 1;
             currentCompareRecords = [];
+            el.modalTitle.innerHTML = 'BINARY DETAIL // <span id="modal-key"></span>';
+            el.modalKey = document.getElementById('modal-key');
+            el.modalKey.textContent = md5Hex;
             pendingDetailSection = null;
             currentDetailSection = null;
             el.modalTitle.innerHTML = 'BINARY DETAIL // <span id="modal-key"></span>';
@@ -7333,6 +8198,215 @@ pub const HOME: &str = r#"<!doctype html>
                 + '</div>';
         }
 
+        function findTopLevelChar(text, target) {
+            let angle = 0;
+            let paren = 0;
+            let bracket = 0;
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (ch === target && angle === 0 && paren === 0 && bracket === 0) return i;
+                if (ch === '<') angle += 1;
+                else if (ch === '>') angle = Math.max(0, angle - 1);
+                else if (ch === '(') paren += 1;
+                else if (ch === ')') paren = Math.max(0, paren - 1);
+                else if (ch === '[') bracket += 1;
+                else if (ch === ']') bracket = Math.max(0, bracket - 1);
+            }
+            return -1;
+        }
+
+        function findMatchingAngle(text, start) {
+            let depth = 0;
+            for (let i = start; i < text.length; i++) {
+                const ch = text[i];
+                if (ch === '<') depth += 1;
+                else if (ch === '>') {
+                    depth -= 1;
+                    if (depth === 0) return i;
+                }
+            }
+            return -1;
+        }
+
+        function splitTopLevel(text, separator = ',') {
+            const out = [];
+            let angle = 0;
+            let paren = 0;
+            let bracket = 0;
+            let current = '';
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (ch === '<') angle += 1;
+                else if (ch === '>') angle = Math.max(0, angle - 1);
+                else if (ch === '(') paren += 1;
+                else if (ch === ')') paren = Math.max(0, paren - 1);
+                else if (ch === '[') bracket += 1;
+                else if (ch === ']') bracket = Math.max(0, bracket - 1);
+                if (ch === separator && angle === 0 && paren === 0 && bracket === 0) {
+                    if (current.trim()) out.push(current.trim());
+                    current = '';
+                    continue;
+                }
+                current += ch;
+            }
+            if (current.trim()) out.push(current.trim());
+            return out;
+        }
+
+        function stripOuterParens(text) {
+            let value = (text || '').trim();
+            while (value.startsWith('(') && value.endsWith(')')) {
+                let depth = 0;
+                let balanced = true;
+                for (let i = 0; i < value.length; i++) {
+                    const ch = value[i];
+                    if (ch === '(') depth += 1;
+                    else if (ch === ')') {
+                        depth -= 1;
+                        if (depth === 0 && i < value.length - 1) {
+                            balanced = false;
+                            break;
+                        }
+                    }
+                }
+                if (!balanced || depth !== 0) break;
+                value = value.slice(1, -1).trim();
+            }
+            return value;
+        }
+
+        function splitTopLevelWhitespace(text) {
+            const out = [];
+            let angle = 0;
+            let paren = 0;
+            let bracket = 0;
+            let current = '';
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (ch === '<') angle += 1;
+                else if (ch === '>') angle = Math.max(0, angle - 1);
+                else if (ch === '(') paren += 1;
+                else if (ch === ')') paren = Math.max(0, paren - 1);
+                else if (ch === '[') bracket += 1;
+                else if (ch === ']') bracket = Math.max(0, bracket - 1);
+                if (/\s/.test(ch) && angle === 0 && paren === 0 && bracket === 0) {
+                    if (current.trim()) out.push(current.trim());
+                    current = '';
+                    continue;
+                }
+                current += ch;
+            }
+            if (current.trim()) out.push(current.trim());
+            return out;
+        }
+
+        function findLastTopLevelScope(text) {
+            let angle = 0;
+            let paren = 0;
+            let bracket = 0;
+            let last = -1;
+            for (let i = 0; i < text.length - 1; i++) {
+                const ch = text[i];
+                const next = text[i + 1];
+                if (ch === '<') angle += 1;
+                else if (ch === '>') angle = Math.max(0, angle - 1);
+                else if (ch === '(') paren += 1;
+                else if (ch === ')') paren = Math.max(0, paren - 1);
+                else if (ch === '[') bracket += 1;
+                else if (ch === ']') bracket = Math.max(0, bracket - 1);
+                if (ch === ':' && next === ':' && angle === 0 && paren === 0 && bracket === 0) last = i;
+            }
+            return last;
+        }
+
+        function isCallableFragment(text) {
+            const value = String(text || '').trim();
+            if (!value) return false;
+            if (/^(?:const|volatile|signed|unsigned|short|long|class|struct|enum|union)$/.test(value)) return false;
+            if (/^operator\S+$/.test(value)) return true;
+            if (/^[~A-Za-z_][A-Za-z0-9_]*$/.test(value)) return true;
+            if (findLastTopLevelScope(value) >= 0) return true;
+            return false;
+        }
+
+        function splitSignatureHead(head) {
+            const text = String(head || '').trim();
+            if (!text) return { returnType: '', callable: '' };
+            const tokens = splitTopLevelWhitespace(text);
+            for (let i = tokens.length - 1; i > 0; i--) {
+                const candidateCallable = tokens.slice(i).join(' ');
+                if (!isCallableFragment(candidateCallable)) continue;
+                return {
+                    returnType: tokens.slice(0, i).join(' ').trim(),
+                    callable: candidateCallable.trim()
+                };
+            }
+            if (findLastTopLevelScope(text) >= 0) {
+                return { returnType: '', callable: text };
+            }
+            return { returnType: text, callable: '' };
+        }
+
+        function splitReturnTypeAndCallable(signatureHead) {
+            return splitSignatureHead(signatureHead);
+        }
+
+        function templateDepth(text) {
+            let depth = 0;
+            let maxDepth = 0;
+            const value = String(text || '');
+            for (let i = 0; i < value.length; i++) {
+                if (value[i] === '<') {
+                    depth += 1;
+                    maxDepth = Math.max(maxDepth, depth);
+                } else if (value[i] === '>') {
+                    depth = Math.max(0, depth - 1);
+                }
+            }
+            return maxDepth;
+        }
+
+        function splitScope(label) {
+            const parts = [];
+            let current = '';
+            let angle = 0;
+            let paren = 0;
+            for (let i = 0; i < label.length; i++) {
+                const ch = label[i];
+                const next = label[i + 1];
+                if (ch === '<') angle += 1;
+                else if (ch === '>') angle = Math.max(0, angle - 1);
+                else if (ch === '(') paren += 1;
+                else if (ch === ')') paren = Math.max(0, paren - 1);
+                if (ch === ':' && next === ':' && angle === 0 && paren === 0) {
+                    parts.push(current);
+                    current = '';
+                    i += 1;
+                    continue;
+                }
+                current += ch;
+            }
+            if (current) parts.push(current);
+            return parts.filter(Boolean);
+        }
+
+        function parseTemplateNode(text) {
+            const value = (text || '').trim();
+            if (!value) return null;
+            const open = findTopLevelChar(value, '<');
+            if (open < 0) return { label: value, path: splitScope(value), kind: 'leaf', args: [] };
+            const close = findMatchingAngle(value, open);
+            if (close < 0) return { label: value, path: splitScope(value), kind: 'leaf', args: [] };
+            const label = value.slice(0, open).trim() || value;
+            const inner = value.slice(open + 1, close).trim();
+            return {
+                label,
+                path: splitScope(label),
+                kind: 'template',
+                args: splitTopLevel(inner).map(parseTemplateNode).filter(Boolean)
+            };
+        }
+
         function renderBinaryOverlapMetrics(sharedFunctions, knownPct, sharedObservations, observedPct, maxSharedFunctions, maxSharedObservations) {
             const fnWidth = maxSharedFunctions > 0 ? (Number(sharedFunctions || 0) / maxSharedFunctions) * 100 : 0;
             const obsWidth = maxSharedObservations > 0 ? (Number(sharedObservations || 0) / maxSharedObservations) * 100 : 0;
@@ -7626,8 +8700,9 @@ pub const HOME: &str = r#"<!doctype html>
             } else {
                 fnPage.results.forEach(hit => {
                     const bins = (hit.binaries || []).map(b => '<span class="bin-tag clickable" onclick="event.stopPropagation();showBinaryDetail(\'' + esc(b.md5_hex) + '\')">' + esc(b.basename) + '<span class="accent">#' + esc(b.short_id) + '</span></span>').join('');
+                    const displayNameHtml = renderCompactSignatureText(hit.func_name_demangled || hit.func_name, false);
                     html += '<div class="result-item clickable" onclick="showFunctionDetail(\'' + esc(hit.key_hex) + '\')">'
-                        + '<div class="result-main"><div class="result-func">' + esc(hit.func_name_demangled || hit.func_name) + '</div><div class="result-key"><span class="result-key-copy" onclick="event.stopPropagation();copyResultKey(\'' + esc(hit.key_hex) + '\')">KEY ' + esc(hit.key_hex) + '</span><span class="result-age">' + esc(fmtRelativeTs(hit.ts)) + '</span></div><div class="result-bins">' + bins + '</div></div>'
+                        + '<div class="result-main"><div class="result-func">' + displayNameHtml + '</div><div class="result-key"><span class="result-key-copy" onclick="event.stopPropagation();copyResultKey(\'' + esc(hit.key_hex) + '\')">KEY ' + esc(hit.key_hex) + '</span><span class="result-age">' + esc(fmtRelativeTs(hit.ts)) + '</span></div><div class="result-bins">' + bins + '</div></div>'
                         + '<div class="result-meta"><span class="score-badge">OBS ' + fmt(hit.score || 0) + '</span></div>'
                         + '</div>';
                 });
@@ -7675,7 +8750,8 @@ pub const HOME: &str = r#"<!doctype html>
             html += '</div><div class="detail-main">';
 
             // Function name
-            html += '<div class="detail-section detail-anchor" id="section-overview"><div class="detail-label">Function Name</div><div class="detail-value accent">' + esc(data.name) + '</div></div>';
+            const overviewName = renderOverviewFunctionName(data, m);
+            html += '<div class="detail-section detail-anchor" id="section-overview"><div class="detail-label">Function Name</div><div class="detail-value accent">' + overviewName + '</div></div>';
 
             // Key
             html += '<div class="detail-section"><div class="detail-label">Function Key</div><div class="detail-value mono">' + esc(data.key_hex) + '</div></div>';

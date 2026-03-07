@@ -9,6 +9,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::api::metrics::METRICS;
+use crate::common::demangle;
 use crate::db::{BinaryCompareBucket, BinaryCompareItem, BinaryFacetSummary, BinarySummary, Database};
 use crate::engine::SearchHit;
 use crate::protocol::lumina::metadata::{parse_metadata, InsnCmt};
@@ -435,6 +436,7 @@ pub struct ParsedMetadataJson {
 pub struct FunctionDetailResponse {
     pub key_hex: String,
     pub name: String,
+    pub raw_name: Option<String>,
     pub popularity: u32,
     pub ts: u64,
     pub data_size: usize,
@@ -727,6 +729,8 @@ pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Respons
                 }),
             });
 
+            let demangle_result = demangle(&func.name);
+
             // Get binary names from context index
             let binary_names = db.get_basenames_for_key(key).unwrap_or_default();
             let binaries = db.get_binary_refs_for_key(key, 12).unwrap_or_default();
@@ -734,7 +738,8 @@ pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Respons
             json_response(
                 &FunctionDetailResponse {
                     key_hex: format!("{:032x}", key),
-                    name: func.name,
+                    name: demangle_result.name,
+                    raw_name: if demangle_result.demangled { Some(func.name) } else { None },
                     popularity: func.popularity,
                     ts: func.ts_sec,
                     data_size: func.data.len(),
