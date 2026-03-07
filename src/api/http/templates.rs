@@ -5107,12 +5107,14 @@ pub const HOME: &str = r#"<!doctype html>
         function setCompareShowAll(next) {
             compareShowAll = !!next;
             rerenderCompareDiff();
+            syncHashWithUi();
         }
 
         function setCompareBaseline(keyHex) {
             compareBaselineKey = keyHex;
             updateCompareTray();
             rerenderCompareDiff();
+            syncHashWithUi();
         }
 
         function startCompareDrag(keyHex) {
@@ -5165,6 +5167,7 @@ pub const HOME: &str = r#"<!doctype html>
         function setCompareMode(next) {
             compareMode = next === 'full' ? 'full' : 'summary';
             rerenderCompareDiff();
+            syncHashWithUi();
         }
 
         function rerenderCompareDiff() {
@@ -5215,10 +5218,10 @@ pub const HOME: &str = r#"<!doctype html>
             currentDetailKeyHex = null;
             currentCompareRecords = [];
             pendingDetailSection = null;
-            syncHashWithUi();
             el.modalKey.textContent = compareKeys.length + ' FUNCTIONS';
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING COMPARISON...</div>';
             activateFullPage('detail');
+            syncHashWithUi();
 
             Promise.all(compareKeys.map(k => fetch('/api/function/' + encodeURIComponent(k)).then(r => r.json())))
                 .then(records => {
@@ -5231,6 +5234,7 @@ pub const HOME: &str = r#"<!doctype html>
                     });
                     updateCompareTray();
                     currentCompareRecords = records;
+                    syncHashWithUi();
                     rerenderCompareDiff();
                 })
                 .catch(err => {
@@ -6476,6 +6480,10 @@ pub const HOME: &str = r#"<!doctype html>
                 f: params.get('f') || '',
                 b: params.get('b') || '',
                 s: params.get('s') || '',
+                fk: params.get('fk') || '',
+                fb: params.get('fb') || '',
+                fm: params.get('fm') || 'summary',
+                fa: params.get('fa') === '1',
                 bc: params.get('bc') || '',
                 bcm: params.get('bcm') || 'all',
                 bcp: parseInt(params.get('bcp') || '1', 10) || 1,
@@ -6483,7 +6491,7 @@ pub const HOME: &str = r#"<!doctype html>
             };
         }
 
-        function updateHash(mode, query, page = 1, functionKey = '', binaryMd5 = '', sectionId = '', compareRightMd5 = '', compareMode = 'all', comparePage = 1, compareQuery = '') {
+        function updateHash(mode, query, page = 1, functionKey = '', binaryMd5 = '', sectionId = '', functionCompareKeys = '', functionCompareBaseline = '', functionCompareMode = 'summary', functionCompareShowAll = false, compareRightMd5 = '', compareMode = 'all', comparePage = 1, compareQuery = '') {
             const params = new URLSearchParams();
             if (mode && mode !== 'functions') params.set('m', mode);
             if (query) params.set('q', query);
@@ -6491,6 +6499,10 @@ pub const HOME: &str = r#"<!doctype html>
             if (functionKey) params.set('f', functionKey);
             if (binaryMd5) params.set('b', binaryMd5);
             if (functionKey && sectionId) params.set('s', sectionId);
+            if (functionCompareKeys) params.set('fk', functionCompareKeys);
+            if (functionCompareKeys && functionCompareBaseline) params.set('fb', functionCompareBaseline);
+            if (functionCompareKeys && functionCompareMode && functionCompareMode !== 'summary') params.set('fm', functionCompareMode);
+            if (functionCompareKeys && functionCompareShowAll) params.set('fa', '1');
             if (binaryMd5 && compareRightMd5) params.set('bc', compareRightMd5);
             if (binaryMd5 && compareRightMd5 && compareMode && compareMode !== 'all') params.set('bcm', compareMode);
             if (binaryMd5 && compareRightMd5 && comparePage > 1) params.set('bcp', String(comparePage));
@@ -6508,12 +6520,15 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function syncHashWithUi() {
-            const functionKey = currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
+            const functionCompareOpen = isDetailPageOpen() && !currentDetailKeyHex && compareKeys.length >= 2;
+            const functionKey = !functionCompareOpen && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
+            const functionCompareKeys = functionCompareOpen ? compareKeys.join(',') : '';
+            const functionCompareBaseline = functionCompareOpen ? (compareBaselineKey || compareKeys[0] || '') : '';
             const hashMode = functionKey ? 'functions' : currentSearchMode;
-            const binaryMd5 = !functionKey && currentSearchMode === 'binaries' && currentBinaryMd5 && (currentDetailKind === 'binary' || isComparePageOpen()) ? currentBinaryMd5 : '';
+            const binaryMd5 = !functionKey && !functionCompareOpen && currentSearchMode === 'binaries' && currentBinaryMd5 && (currentDetailKind === 'binary' || isComparePageOpen()) ? currentBinaryMd5 : '';
             const sectionId = functionKey ? (currentDetailSection || pendingDetailSection || '') : '';
-            const compareRightMd5 = !functionKey && currentBinaryCompareData && currentBinaryCompareData.right && isComparePageOpen() ? currentBinaryCompareData.right.md5_hex : '';
-            updateHash(hashMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId, compareRightMd5, currentBinaryCompareMode, currentBinaryComparePage, currentBinaryCompareQuery);
+            const compareRightMd5 = !functionKey && !functionCompareOpen && currentBinaryCompareData && currentBinaryCompareData.right && isComparePageOpen() ? currentBinaryCompareData.right.md5_hex : '';
+            updateHash(hashMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId, functionCompareKeys, functionCompareBaseline, compareMode, compareShowAll, compareRightMd5, currentBinaryCompareMode, currentBinaryComparePage, currentBinaryCompareQuery);
         }
 
         function applyHashState(state) {
@@ -6523,6 +6538,10 @@ pub const HOME: &str = r#"<!doctype html>
             const f = (state && state.f) ? state.f : '';
             const b = (state && state.b) ? state.b : '';
             const s = (state && state.s) ? state.s : null;
+            const fk = (state && state.fk) ? state.fk.split(',').filter(Boolean) : [];
+            const fb = (state && state.fb) ? state.fb : '';
+            const fm = (state && state.fm) ? state.fm : 'summary';
+            const fa = !!(state && state.fa);
             const bc = (state && state.bc) ? state.bc : '';
             const bcm = (state && state.bcm) ? state.bcm : 'all';
             const bcp = state && state.bcp ? state.bcp : 1;
@@ -6535,6 +6554,15 @@ pub const HOME: &str = r#"<!doctype html>
                 runSearch(q, page, false).then(() => {
                     const needsOpen = f && (!isDetailPageOpen() || currentDetailKeyHex !== f || currentCompareRecords.length > 0 || currentDetailKind !== 'function');
                     if (needsOpen) showFunctionDetail(f, s, false);
+                    else if (fk.length >= 2) {
+                        compareKeys.length = 0;
+                        fk.forEach(key => compareKeys.push(key));
+                        compareBaselineKey = fb || fk[0] || null;
+                        compareMode = fm === 'full' ? 'full' : 'summary';
+                        compareShowAll = fa;
+                        hydrateCompareItems(compareKeys);
+                        openCompareModal();
+                    }
                     else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) activateDetailSection(s, false, false);
                     else if (b && (!isDetailPageOpen() || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) showBinaryDetail(b, false);
                     if (b && bc) {
@@ -6551,6 +6579,14 @@ pub const HOME: &str = r#"<!doctype html>
             showDashboard(false);
             if (f && (!isDetailPageOpen() || currentDetailKeyHex !== f || currentCompareRecords.length > 0 || currentDetailKind !== 'function')) {
                 showFunctionDetail(f, s, false);
+            } else if (fk.length >= 2) {
+                compareKeys.length = 0;
+                fk.forEach(key => compareKeys.push(key));
+                compareBaselineKey = fb || fk[0] || null;
+                compareMode = fm === 'full' ? 'full' : 'summary';
+                compareShowAll = fa;
+                hydrateCompareItems(compareKeys);
+                openCompareModal();
             } else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) {
                 activateDetailSection(s, false, false);
             } else if (b && (!isDetailPageOpen() || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) {
