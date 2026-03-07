@@ -1792,8 +1792,25 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         /* ─────────────────────────────────────────────────────────────
-           FUNCTION DETAIL MODAL
+           DETAIL PAGES
            ───────────────────────────────────────────────────────────── */
+
+        .detail-page-shell {
+            margin-top: var(--space-lg);
+        }
+
+        .page-panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+            min-width: 0;
+            overflow: visible;
+        }
+
+        .detail-page-shell .modal-body {
+            overflow: visible;
+            min-height: auto;
+        }
 
         .modal-overlay {
             position: fixed;
@@ -1824,6 +1841,10 @@ pub const HOME: &str = r#"<!doctype html>
             flex-direction: column;
             position: relative;
             box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+        }
+
+        .page-panel.compare-panel-page {
+            width: 100%;
         }
 
         .modal-header {
@@ -3478,6 +3499,50 @@ pub const HOME: &str = r#"<!doctype html>
            ───────────────────────────────────────────────────────────── */
         
         @media (max-width: 1200px) {
+            .classification-bar,
+            .search-row,
+            .search-meta,
+            .compare-panel-actions,
+            .compare-toolbar-row,
+            .compare-search-row,
+            .binary-compare-grid,
+            .compare-list-grid,
+            .detail-grid,
+            .related-binary-row,
+            .timeline-row {
+                grid-template-columns: 1fr;
+            }
+
+            .classification-bar,
+            .search-row,
+            .search-meta,
+            .compare-panel-actions,
+            .compare-toolbar,
+            .compare-toolbar-row,
+            .compare-search-row,
+            .binary-compare-grid,
+            .compare-list-grid {
+                flex-wrap: wrap;
+            }
+
+            .related-binary-row,
+            .timeline-row {
+                gap: var(--space-lg);
+            }
+
+            .timeline-metric-row,
+            .related-overlap-row {
+                grid-template-columns: 1fr;
+                gap: 6px;
+            }
+
+            .timeline-metric-label,
+            .related-overlap-label,
+            .timeline-meta {
+                text-align: left;
+                justify-items: start;
+            }
+
             .dashboard-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
@@ -3494,6 +3559,118 @@ pub const HOME: &str = r#"<!doctype html>
         }
         
         @media (max-width: 768px) {
+            .classification-bar,
+            .brand-block,
+            .search-row,
+            .search-mode-switch,
+            .search-input-wrap,
+            .compare-panel-head,
+            .compare-panel-actions,
+            .compare-toolbar,
+            .compare-toolbar-row,
+            .compare-mode-switch,
+            .results-title,
+            .results-meta,
+            .results-tools,
+            .binary-overlap-actions,
+            .binary-name-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .classification-bar {
+                gap: 10px;
+                align-items: flex-start;
+            }
+
+            .classification-bar .doc-code,
+            .results-title,
+            .results-meta,
+            .modal-title,
+            .detail-value,
+            .coverage-card .value,
+            .compare-item-name,
+            .compare-name {
+                overflow-wrap: anywhere;
+            }
+
+            .search-row {
+                gap: var(--space-md);
+            }
+
+            .search-prompt,
+            .search-kbd {
+                display: none;
+            }
+
+            .search-mode-switch,
+            .search-input-wrap,
+            .search-input,
+            .compare-field,
+            .comment-search,
+            .sort-controls,
+            .sort-controls select {
+                width: 100%;
+            }
+
+            .search-mode-btn,
+            .pagination-btn,
+            .result-action {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .detail-page-shell {
+                margin-top: var(--space-md);
+            }
+
+            .page-panel {
+                box-shadow: none;
+            }
+
+            .modal-header,
+            .modal-body {
+                padding: var(--space-md);
+            }
+
+            .detail-nav {
+                top: 0;
+                margin: 0 calc(var(--space-md) * -1);
+                padding-left: var(--space-md);
+                padding-right: var(--space-md);
+                overflow-x: auto;
+                flex-wrap: nowrap;
+            }
+
+            .detail-nav button {
+                flex: 0 0 auto;
+            }
+
+            .compare-list-grid,
+            .binary-compare-grid,
+            .signature-cards,
+            .result-preview-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .compare-item-row,
+            .result-key,
+            .result-meta,
+            .metadata-header,
+            .telemetry-left,
+            .telemetry-center,
+            .telemetry-right {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .result-bins,
+            .compare-panel-list,
+            .compare-list-column,
+            .metadata-content {
+                min-width: 0;
+            }
+
             .header-grid {
                 grid-template-columns: 1fr;
                 gap: var(--space-lg);
@@ -3543,16 +3720,6 @@ pub const HOME: &str = r#"<!doctype html>
             }
             .terminal-frame {
                 padding: var(--space-md);
-            }
-
-            .modal-overlay {
-                align-items: stretch;
-                padding: var(--space-sm);
-            }
-
-            .modal-container {
-                width: 100%;
-                max-height: calc(100dvh - (var(--space-sm) * 2));
             }
 
             .modal-header {
@@ -3635,6 +3802,60 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         @media (max-width: 480px) {
+            .terminal-frame {
+                padding: 12px;
+            }
+
+            .classification-bar,
+            .search-terminal,
+            .results-header,
+            .page-panel,
+            .metric-card,
+            .metric-mini,
+            .compare-panel,
+            .metadata-section,
+            .result-item,
+            .timeline-row,
+            .related-binary-row,
+            .compare-list-column,
+            .coverage-card {
+                padding-left: 12px;
+                padding-right: 12px;
+            }
+
+            .brand-name {
+                font-size: clamp(36px, 14vw, 64px);
+            }
+
+            .brand-sub,
+            .serial-block,
+            .coord-block,
+            .telemetry-bar,
+            .results-title,
+            .modal-title {
+                letter-spacing: 0.12em;
+            }
+
+            .binary-short-id {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .compare-item-row,
+            .metadata-item,
+            .result-main,
+            .result-meta {
+                gap: var(--space-sm);
+            }
+
+            .frame-table,
+            .compare-diff-table,
+            .detail-table-wrap {
+                min-width: 100%;
+                overflow-x: auto;
+                display: block;
+            }
+
             .result-item {
                 grid-template-columns: 1fr;
                 gap: var(--space-md);
@@ -4078,32 +4299,31 @@ pub const HOME: &str = r#"<!doctype html>
                 <div class="results-list" id="results-list"></div>
                 <div class="pagination" id="pagination"></div>
             </div>
-        </main>
-        
-        <!-- Function Detail Modal -->
-        <div class="modal-overlay" id="detail-modal">
-            <div class="modal-container">
-                <div class="modal-header">
-                    <span class="modal-title" id="modal-title">FUNCTION DETAIL // <span id="modal-key"></span></span>
-                    <button class="modal-close" onclick="closeDetailModal()">&times;</button>
-                </div>
-                <div class="modal-body" id="modal-body">
-                    <div class="detail-loading">&gt;&gt;&gt; LOADING...</div>
-                </div>
-            </div>
-        </div>
 
-        <div class="modal-overlay" id="binary-compare-modal">
-            <div class="modal-container" style="width:min(96vw, 1680px); max-width:none; height:min(92vh, 1100px);">
-                <div class="modal-header">
-                    <span class="modal-title">BINARY COMPARE // <span id="binary-compare-title">-</span></span>
-                    <button class="modal-close" onclick="closeBinaryCompareModal()">&times;</button>
+            <section id="detail-page" class="results-container detail-page-shell">
+                <div class="page-panel">
+                    <div class="modal-header">
+                        <span class="modal-title" id="modal-title">FUNCTION DETAIL // <span id="modal-key"></span></span>
+                        <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+                    </div>
+                    <div class="modal-body" id="modal-body">
+                        <div class="detail-loading">&gt;&gt;&gt; LOADING...</div>
+                    </div>
                 </div>
-                <div class="modal-body" id="binary-compare-body">
-                    <div class="detail-loading">&gt;&gt;&gt; LOADING COMPARE...</div>
+            </section>
+
+            <section id="binary-compare-page" class="results-container detail-page-shell">
+                <div class="page-panel compare-panel-page">
+                    <div class="modal-header">
+                        <span class="modal-title">BINARY COMPARE // <span id="binary-compare-title">-</span></span>
+                        <button class="modal-close" onclick="closeBinaryCompareModal()">&times;</button>
+                    </div>
+                    <div class="modal-body" id="binary-compare-body">
+                        <div class="detail-loading">&gt;&gt;&gt; LOADING COMPARE...</div>
+                    </div>
                 </div>
-            </div>
-        </div>
+            </section>
+        </main>
 
         <input type="file" id="compare-import-file" accept="application/json,.json" style="display:none;">
 
@@ -4222,8 +4442,8 @@ pub const HOME: &str = r#"<!doctype html>
             ratePushes: document.getElementById('rate-pushes'),
             protoMixDonut: document.getElementById('proto-mix-donut'),
             protoMixLabel: document.getElementById('proto-mix-label'),
-            detailModal: document.getElementById('detail-modal'),
-            binaryCompareModal: document.getElementById('binary-compare-modal'),
+            detailPage: document.getElementById('detail-page'),
+            binaryComparePage: document.getElementById('binary-compare-page'),
             binaryCompareTitle: document.getElementById('binary-compare-title'),
             binaryCompareBody: document.getElementById('binary-compare-body'),
             modalTitle: document.getElementById('modal-title'),
@@ -4257,6 +4477,39 @@ pub const HOME: &str = r#"<!doctype html>
         const BINARY_COMPARE_PAGE_SIZE = 12;
         let currentBinaryGraphZoom = 1;
         let currentBinaryGraphView = 'list';
+
+        const isDetailPageOpen = () => el.detailPage.classList.contains('active');
+        const isComparePageOpen = () => el.binaryComparePage.classList.contains('active');
+
+        function hideFullPages() {
+            el.detailPage.classList.remove('active');
+            el.binaryComparePage.classList.remove('active');
+        }
+
+        function activateFullPage(kind) {
+            el.dashboard.classList.add('hidden');
+            el.secondary.classList.add('hidden');
+            el.results.classList.remove('active');
+            el.comparePanel.classList.add('hidden');
+            hideFullPages();
+            if (kind === 'detail') el.detailPage.classList.add('active');
+            if (kind === 'compare') el.binaryComparePage.classList.add('active');
+        }
+
+        function restorePrimarySurface() {
+            hideFullPages();
+            if (currentQuery) {
+                el.dashboard.classList.add('hidden');
+                el.secondary.classList.add('hidden');
+                el.results.classList.add('active');
+                el.comparePanel.classList.toggle('hidden', currentSearchMode !== 'functions');
+            } else {
+                el.dashboard.classList.remove('hidden');
+                el.secondary.classList.remove('hidden');
+                el.results.classList.remove('active');
+                el.comparePanel.classList.add('hidden');
+            }
+        }
 
         const pinnedKeys = new Set();
         const compareKeys = [];
@@ -4965,8 +5218,7 @@ pub const HOME: &str = r#"<!doctype html>
             syncHashWithUi();
             el.modalKey.textContent = compareKeys.length + ' FUNCTIONS';
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING COMPARISON...</div>';
-            el.detailModal.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            activateFullPage('detail');
 
             Promise.all(compareKeys.map(k => fetch('/api/function/' + encodeURIComponent(k)).then(r => r.json())))
                 .then(records => {
@@ -5071,7 +5323,7 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function syncDetailSectionFromScroll() {
-            if (!el.detailModal.classList.contains('active') || !currentDetailKeyHex) return;
+            if (!isDetailPageOpen() || !currentDetailKeyHex) return;
             const anchors = Array.from(el.modalBody.querySelectorAll('.detail-anchor[id]'));
             if (!anchors.length) return;
             const containerTop = el.modalBody.getBoundingClientRect().top;
@@ -6256,11 +6508,11 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function syncHashWithUi() {
-            const functionKey = el.detailModal.classList.contains('active') && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
+            const functionKey = isDetailPageOpen() && currentDetailKind === 'function' && currentDetailKeyHex ? currentDetailKeyHex : '';
             const hashMode = functionKey ? 'functions' : currentSearchMode;
-            const binaryMd5 = !functionKey && currentSearchMode === 'binaries' && currentBinaryMd5 ? currentBinaryMd5 : '';
+            const binaryMd5 = !functionKey && currentSearchMode === 'binaries' && currentBinaryMd5 && (isDetailPageOpen() || isComparePageOpen()) ? currentBinaryMd5 : '';
             const sectionId = functionKey ? (currentDetailSection || pendingDetailSection || '') : '';
-            const compareRightMd5 = !functionKey && currentBinaryCompareData && currentBinaryCompareData.right && el.binaryCompareModal.classList.contains('active') ? currentBinaryCompareData.right.md5_hex : '';
+            const compareRightMd5 = !functionKey && currentBinaryCompareData && currentBinaryCompareData.right && isComparePageOpen() ? currentBinaryCompareData.right.md5_hex : '';
             updateHash(hashMode, currentQuery, currentPage, functionKey, binaryMd5, sectionId, compareRightMd5, currentBinaryCompareMode, currentBinaryComparePage, currentBinaryCompareQuery);
         }
 
@@ -6281,27 +6533,27 @@ pub const HOME: &str = r#"<!doctype html>
             el.q.value = q;
             if (q) {
                 runSearch(q, page, false).then(() => {
-                    const needsOpen = f && (!el.detailModal.classList.contains('active') || currentDetailKeyHex !== f || currentCompareRecords.length > 0 || currentDetailKind !== 'function');
+                    const needsOpen = f && (!isDetailPageOpen() || currentDetailKeyHex !== f || currentCompareRecords.length > 0 || currentDetailKind !== 'function');
                     if (needsOpen) showFunctionDetail(f, s, false);
                     else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) activateDetailSection(s, false, false);
-                    else if (b && (!el.detailModal.classList.contains('active') || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) showBinaryDetail(b, false);
+                    else if (b && (!isDetailPageOpen() || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) showBinaryDetail(b, false);
                     if (b && bc) {
                         currentBinaryCompareMode = bcm;
                         currentBinaryComparePage = bcp;
                         currentBinaryCompareQuery = bcq;
                         setTimeout(() => loadBinaryCompare(bc), 0);
                     }
-                    else if (!f && !b && el.detailModal.classList.contains('active') && !currentCompareRecords.length) closeDetailModal(false);
+                    else if (!f && !b && (isDetailPageOpen() || isComparePageOpen()) && !currentCompareRecords.length) closeDetailModal(false);
                 });
                 return;
             }
 
             showDashboard(false);
-            if (f && (!el.detailModal.classList.contains('active') || currentDetailKeyHex !== f || currentCompareRecords.length > 0 || currentDetailKind !== 'function')) {
+            if (f && (!isDetailPageOpen() || currentDetailKeyHex !== f || currentCompareRecords.length > 0 || currentDetailKind !== 'function')) {
                 showFunctionDetail(f, s, false);
             } else if (f && s && currentDetailKeyHex === f && !currentCompareRecords.length) {
                 activateDetailSection(s, false, false);
-            } else if (b && (!el.detailModal.classList.contains('active') || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) {
+            } else if (b && (!isDetailPageOpen() || currentBinaryMd5 !== b || currentDetailKind !== 'binary')) {
                 showBinaryDetail(b, false);
                 if (bc) {
                     currentBinaryCompareMode = bcm;
@@ -6309,7 +6561,7 @@ pub const HOME: &str = r#"<!doctype html>
                     currentBinaryCompareQuery = bcq;
                     setTimeout(() => loadBinaryCompare(bc), 0);
                 }
-            } else if (!f && !b && el.detailModal.classList.contains('active') && !currentCompareRecords.length) {
+            } else if (!f && !b && (isDetailPageOpen() || isComparePageOpen()) && !currentCompareRecords.length) {
                 closeDetailModal(false);
             }
         }
@@ -6417,6 +6669,7 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function showDashboard(updateUrl = true) {
+            hideFullPages();
             el.dashboard.classList.remove('hidden');
             el.secondary.classList.remove('hidden');
             el.results.classList.remove('active');
@@ -6437,6 +6690,7 @@ pub const HOME: &str = r#"<!doctype html>
             currentQuery = query;
             currentPage = page;
 
+            hideFullPages();
             el.dashboard.classList.add('hidden');
             el.secondary.classList.add('hidden');
             el.results.classList.add('active');
@@ -6577,7 +6831,7 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function handleResultsKeyNav(e) {
-            if (!el.results.classList.contains('active') || el.detailModal.classList.contains('active')) return;
+            if (!el.results.classList.contains('active') || isDetailPageOpen() || isComparePageOpen()) return;
             if (document.activeElement === el.q || document.activeElement === el.resultsSort) return;
             const hits = sortHits(currentHits, currentSort);
             if (hits.length === 0) return;
@@ -6668,7 +6922,7 @@ pub const HOME: &str = r#"<!doctype html>
 
         function showFunctionDetail(keyHex, sectionId = null, updateUrl = true) {
             setSearchMode('functions', false, false);
-            if (el.binaryCompareModal.classList.contains('active')) el.binaryCompareModal.classList.remove('active');
+            hideFullPages();
             currentDetailKind = 'function';
             currentDetailData = null;
             currentDetailKeyHex = keyHex;
@@ -6684,8 +6938,7 @@ pub const HOME: &str = r#"<!doctype html>
             controlFlowFocusMode = false;
             currentDetailSection = sectionId || null;
             el.modalTitle.innerHTML = 'FUNCTION DETAIL // <span id="modal-key"></span>';
-            el.detailModal.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            activateFullPage('detail');
             el.modalKey.textContent = keyHex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING METADATA...</div>';
             if (updateUrl) syncHashWithUi();
@@ -6713,6 +6966,7 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function showBinaryDetail(md5Hex, updateUrl = true) {
+            hideFullPages();
             currentDetailKind = 'binary';
             currentDetailData = null;
             currentDetailKeyHex = null;
@@ -6734,8 +6988,7 @@ pub const HOME: &str = r#"<!doctype html>
             if (updateUrl) syncHashWithUi();
             el.modalKey.textContent = md5Hex;
             el.modalBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING BINARY PROFILE...</div>';
-            el.detailModal.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            activateFullPage('detail');
 
             fetch('/api/binary/' + encodeURIComponent(md5Hex))
                 .then(r => {
@@ -6749,8 +7002,7 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function closeDetailModal(updateUrl = true) {
-            el.detailModal.classList.remove('active');
-            if (!el.binaryCompareModal.classList.contains('active')) document.body.style.overflow = '';
+            restorePrimarySurface();
             currentDetailData = null;
             currentDetailKind = 'function';
             currentDetailKeyHex = null;
@@ -6784,14 +7036,6 @@ pub const HOME: &str = r#"<!doctype html>
             }
         }
 
-        el.detailModal.addEventListener('click', e => {
-            if (e.target === el.detailModal) closeDetailModal();
-        });
-
-        el.binaryCompareModal.addEventListener('click', e => {
-            if (e.target === el.binaryCompareModal) closeBinaryCompareModal();
-        });
-
         el.modalBody.addEventListener('scroll', () => {
             if (currentDetailKind !== 'function') return;
             if (detailScrollSyncRaf) cancelAnimationFrame(detailScrollSyncRaf);
@@ -6802,11 +7046,11 @@ pub const HOME: &str = r#"<!doctype html>
         });
 
         document.addEventListener('keydown', e => {
-            if (e.key === 'Escape' && el.binaryCompareModal.classList.contains('active')) {
+            if (e.key === 'Escape' && isComparePageOpen()) {
                 closeBinaryCompareModal();
                 return;
             }
-            if (e.key === 'Escape' && el.detailModal.classList.contains('active')) {
+            if (e.key === 'Escape' && isDetailPageOpen()) {
                 closeDetailModal();
             }
         });
@@ -6884,15 +7128,14 @@ pub const HOME: &str = r#"<!doctype html>
         }
 
         function openBinaryCompareModal() {
-            el.binaryCompareModal.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            activateFullPage('compare');
             el.binaryCompareBody.innerHTML = '<div class="detail-loading">&gt;&gt;&gt; LOADING COMPARE...</div>';
             syncHashWithUi();
         }
 
         function closeBinaryCompareModal() {
-            el.binaryCompareModal.classList.remove('active');
-            if (!el.detailModal.classList.contains('active')) document.body.style.overflow = '';
+            if (currentBinaryMd5 && currentDetailKind === 'binary' && currentDetailData) activateFullPage('detail');
+            else restorePrimarySurface();
             syncHashWithUi();
         }
 
