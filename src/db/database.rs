@@ -97,6 +97,17 @@ impl Database {
         }
     }
 
+    fn refresh_live_metrics(rt: &EngineRuntime, include_unique_binaries: bool) {
+        let stats = rt.get_stats();
+        METRICS.set_indexed_funcs(stats.indexed_funcs);
+        METRICS.set_total_records(stats.total_records);
+        METRICS.set_storage_bytes(stats.storage_bytes);
+        METRICS.set_search_docs(stats.search_docs);
+        if include_unique_binaries {
+            METRICS.set_unique_binaries(stats.unique_binaries);
+        }
+    }
+
     /// Get the latest version of a function by key.
     pub async fn get_latest(&self, key: u128) -> io::Result<Option<FuncLatest>> {
         let addr = self.rt.index.get(key);
@@ -289,6 +300,8 @@ impl Database {
         if let Err(e) = rt.search.commit() {
             log::warn!("failed to commit search index: {}", e);
         }
+
+        Self::refresh_live_metrics(rt, ctx.md5.is_some());
         Ok(status)
     }
 
@@ -348,6 +361,7 @@ impl Database {
                 deleted += 1;
             }
         }
+        Self::refresh_live_metrics(&self.rt, false);
         Ok(deleted)
     }
 
