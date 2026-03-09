@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::common::addr::pack_addr;
+use crate::common::addr::{addr_off, addr_seg, pack_addr};
 use crate::engine::crc32c::{crc32c, crc32c_legacy};
 
 pub type Addr = u64;
@@ -550,6 +550,18 @@ impl OpenSegments {
     pub fn get_reader(&self, seg_id: u16) -> Option<SegmentReader> {
         let rs = self.readers.lock();
         rs.iter().find(|r| r.id == seg_id).cloned()
+    }
+
+    pub fn read_record(&self, addr: Addr) -> io::Result<Record> {
+        let seg_id = addr_seg(addr);
+        let offset = addr_off(addr);
+        let reader = self.get_reader(seg_id).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("segment {} not found", seg_id),
+            )
+        })?;
+        reader.read_at(offset)
     }
 
     pub fn append(&self, rec: &Record) -> io::Result<Addr> {
