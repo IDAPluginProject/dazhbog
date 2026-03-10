@@ -4,9 +4,12 @@ mod index;
 pub mod search;
 mod segment;
 
-pub use context_index::{BinaryMeta, BinaryOverlapEntry, ContextIndex};
+pub use context_index::{BinaryMeta, BinaryOverlapEntry, CanonicalVersion, ContextIndex};
 pub use index::{migrate_legacy_index_files, IndexError, ShardedIndex, UpsertResult};
-pub use search::{rebuild_from_engine, BinaryRefHit, SearchDocument, SearchHit, SearchIndex};
+pub use search::{
+    rebuild_from_engine, BinaryRefHit, SearchDocument, SearchHit, SearchIndex,
+    SemanticNeighborRationale,
+};
 pub use segment::{OpenSegments, Record};
 
 use crate::config::{Engine, Scoring};
@@ -29,6 +32,14 @@ pub struct EngineRuntime {
 
 impl EngineRuntime {
     pub fn open(cfg: Engine, scoring: Scoring) -> io::Result<Self> {
+        Self::open_inner(cfg, scoring, true)
+    }
+
+    pub fn open_for_replay(cfg: Engine, scoring: Scoring) -> io::Result<Self> {
+        Self::open_inner(cfg, scoring, false)
+    }
+
+    fn open_inner(cfg: Engine, scoring: Scoring, rebuild_search: bool) -> io::Result<Self> {
         std::fs::create_dir_all(&cfg.data_dir)?;
         let dir = PathBuf::from(&cfg.data_dir);
         let segments = Arc::new(OpenSegments::open(
@@ -71,7 +82,7 @@ impl EngineRuntime {
 
         let search_dir = dir.join("search_index");
         let search = Arc::new(SearchIndex::open(&search_dir)?);
-        if search.is_empty()? {
+        if rebuild_search && search.is_empty()? {
             rebuild_from_engine(&search, &segments, &index, &ctx_index)?;
         }
 

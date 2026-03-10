@@ -422,9 +422,11 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
 
     let qctx = crate::db::QueryContext {
         keys: &keys,
+        requested_mdkeys: &pull_msg.keys,
         md5: None,
         basename: None,
         hostname: None,
+        origin_token: None,
     };
     let selected = match db.select_versions_for_batch(&qctx).await {
         Ok(v) => v,
@@ -433,13 +435,16 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
             // Fallback to legacy latest-per-key
             let mut v = Vec::with_capacity(keys.len());
             for &k in &keys {
-                v.push(
-                    db.get_latest(k)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|f| (f.popularity, f.len_bytes, f.name, f.data)),
-                );
+                v.push(db.get_latest(k).await.ok().flatten().map(|f| {
+                    let data =
+                        crate::db::semantic::shape_metadata_for_request(&f.data, &pull_msg.keys);
+                    let data = if pull_msg.keys.is_empty() {
+                        f.data
+                    } else {
+                        data
+                    };
+                    (f.popularity, data.len() as u32, f.name, data)
+                }));
             }
             v
         }
@@ -458,7 +463,7 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
         let mut missing_keys = Vec::new();
         let mut missing_pos = Vec::new();
         for (i, (&k, st)) in keys.iter().zip(statuses.iter()).enumerate() {
-            if k != 0 && *st == 1 {
+            if k != 0 && *st == 0xFFFFFFFE {
                 missing_keys.push(k);
                 missing_pos.push(i);
             }
@@ -517,7 +522,7 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
     debug!(
         "Lumina PULL response: {} found, {} not found",
         found_list.len(),
-        statuses.iter().filter(|&&s| s == 1).count()
+        statuses.iter().filter(|&&s| s == 0xFFFFFFFE).count()
     );
     lumina::send_lumina_pull_result(stream, &statuses, &found_list).await
 }
@@ -594,10 +599,17 @@ async fn handle_lumina_push<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("");
+    let origin_token =
+        crate::db::semantic::normalize_origin_token(if push_msg.idb_path.is_empty() {
+            &push_msg.file_path
+        } else {
+            &push_msg.idb_path
+        });
     let ctx = crate::db::PushContext {
         md5: Some(push_msg.md5),
         basename: Some(basename),
         hostname: Some(push_msg.hostname.as_str()),
+        origin_token: Some(origin_token.as_str()),
     };
 
     match db.push_with_ctx(&inlined, &ctx).await {
@@ -680,7 +692,7 @@ async fn handle_lumina_get_pop<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
 /// Handle Lumina GetInfo (0x2b) command.
 async fn handle_lumina_info<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     stream: &mut S,
-    cfg: &Config,
+    _cfg: &Config,
 ) -> io::Result<()> {
     debug!("Lumina GET_INFO request");
 
@@ -707,7 +719,7 @@ async fn handle_lumina_info<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
 async fn handle_lumina_stats<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     stream: &mut S,
     cfg: &Config,
-    db: &Database,
+    _db: &Database,
 ) -> io::Result<()> {
     debug!("Lumina GET_STATS request");
 
@@ -908,11 +920,14 @@ async fn handle_rpc_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
     debug!("PULL request: {} keys", keys.len());
     METRICS.inc_queried_funcs(keys.len() as u64);
 
+    let empty_requested_mdkeys: [u32; 0] = [];
     let qctx = crate::db::QueryContext {
         keys: &keys,
+        requested_mdkeys: &empty_requested_mdkeys,
         md5: None,
         basename: None,
         hostname: None,
+        origin_token: None,
     };
     let selected = match db.select_versions_for_batch(&qctx).await {
         Ok(v) => v,
@@ -943,7 +958,7 @@ async fn handle_rpc_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
         let mut missing_keys = Vec::new();
         let mut missing_pos = Vec::new();
         for (i, (&k, st)) in keys.iter().zip(statuses.iter()).enumerate() {
-            if *st == 1 {
+            if *st == 0xFFFFFFFE {
                 // Skip keys that are in the failure cache
                 if !db.failure_cache.is_failed(k) {
                     missing_keys.push(k);
@@ -1007,7 +1022,7 @@ async fn handle_rpc_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
     debug!(
         "PULL response: {} found, {} not found (took {:?})",
         found.len(),
-        statuses.iter().filter(|&&s| s == 1).count(),
+        statuses.iter().filter(|&&s| s == 0xFFFFFFFE).count(),
         msg_start.elapsed()
     );
     write_all(stream, &encode_pull_ok(&statuses, &found)).await

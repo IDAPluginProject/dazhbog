@@ -8,9 +8,14 @@
 
 mod database;
 mod failure_cache;
+pub mod semantic;
 mod types;
 pub mod upstream;
 
 pub use database::Database;
 pub use failure_cache::FailureCache;
-pub use types::{BinaryCompareBucket, BinaryCompareItem, BinaryFacetSummary, BinarySummary, FuncLatest, PushContext, QueryContext};
+pub use types::{
+    BinaryCompareBucket, BinaryCompareItem, BinaryFacetSummary, BinarySummary, FuncLatest,
+    PushContext, QueryContext, ReplayCaseOptions, ReplayCaseResult, ReplayRequestMode,
+    ReplaySelectorResult,
+};

@@ -2,15 +2,25 @@
 
 use crate::api::metrics::METRICS;
 use crate::common::demangle::demangle;
+use crate::common::hash::version_id;
 use crate::common::{addr_off, addr_seg};
 use crate::config::Config;
-use crate::engine::{BinaryRefHit, EngineRuntime, IndexError, Record, SearchDocument, SearchHit, UpsertResult};
+use crate::engine::{
+    BinaryRefHit, EngineRuntime, IndexError, Record, SearchDocument, SearchHit,
+    SemanticNeighborRationale, UpsertResult,
+};
 use crate::protocol::lumina::metadata::parse_metadata;
 
 use super::failure_cache::FailureCache;
+use super::semantic::{
+    analyze_function, choose_canonical_name, fingerprint_similarity, normalize_origin_token,
+    normalize_requested_mdkeys, shape_metadata_for_request, synthesize_metadata, SemanticAnalysis,
+    SynthesisInput,
+};
 use super::types::{
     BinaryCompareItem, BinaryFacetSummary, BinarySummary, FuncLatest, OwnedPushContext,
-    PushContext, QueryContext,
+    PushContext, QueryContext, ReplayCaseOptions, ReplayCaseResult, ReplayRequestMode,
+    ReplaySelectorResult,
 };
 
 use log::*;
@@ -25,6 +35,178 @@ pub struct Database {
     rt: Arc<EngineRuntime>,
     pub failure_cache: FailureCache,
 }
+
+#[derive(Clone)]
+struct AnalyzedVersion {
+    rec: Record,
+    version_id: [u8; 32],
+    analysis: SemanticAnalysis,
+}
+
+#[derive(Clone)]
+struct SelectionOutcome {
+    popularity: u32,
+    name: String,
+    data: Vec<u8>,
+    best_score: f64,
+    margin: f64,
+    entropy: f64,
+    used_synthesis: bool,
+    best_version_id: [u8; 32],
+}
+
+#[derive(Default)]
+struct NeighborFamilyContext {
+    direct_weights: HashMap<[u8; 16], f64>,
+    related_weights: HashMap<[u8; 16], f64>,
+}
+
+struct SemanticNeighborScore {
+    final_score: f64,
+    rationale: SemanticNeighborRationale,
+}
+
+const GENERIC_NEIGHBOR_TOKENS: &[&str] = &[
+    "__cdecl",
+    "__fastcall",
+    "__stdcall",
+    "__thiscall",
+    "__vectorcall",
+    "__usercall",
+    "__userpurge",
+    "__hidden",
+    "__int16",
+    "__int64",
+    "__cxx11",
+    "__src",
+    "__dst",
+    "__formal",
+    "__return_ptr",
+    "__struct_ptr",
+    "cdecl",
+    "fastcall",
+    "stdcall",
+    "thiscall",
+    "vectorcall",
+    "usercall",
+    "userpurge",
+    "arg",
+    "args",
+    "argsize",
+    "argloc",
+    "bool",
+    "byte",
+    "bytes",
+    "char",
+    "const",
+    "dword",
+    "double",
+    "default",
+    "defaults",
+    "dispatcher",
+    "dispatch",
+    "error",
+    "errors",
+    "err",
+    "uuu",
+    "u20",
+    "u7b",
+    "u7d",
+    "0ca",
+    "far",
+    "field",
+    "fields",
+    "float",
+    "frame",
+    "frregs",
+    "frsize",
+    "int",
+    "loc",
+    "long",
+    "near",
+    "offset",
+    "param",
+    "params",
+    "backend",
+    "frontend",
+    "engine",
+    "context",
+    "module",
+    "common",
+    "generic",
+    "internal",
+    "impl",
+    "handler",
+    "manager",
+    "table",
+    "jumptable",
+    "switch",
+    "case",
+    "cases",
+    "emulator",
+    "x86",
+    "x64",
+    "x86_64",
+    "amd64",
+    "arm",
+    "arm64",
+    "aarch64",
+    "mips",
+    "ppc",
+    "sse",
+    "avx",
+    "neon",
+    "qeaa",
+    "qeax",
+    "qeba",
+    "qeav",
+    "qeaaxxz",
+    "ueaa",
+    "ueba",
+    "ueaapeaxi",
+    "ueaaxxz",
+    "aeaa",
+    "aeav",
+    "aeaaxxz",
+    "aebv",
+    "aeaufframe",
+    "peav",
+    "yapeavufunction",
+    "yapeavuclass",
+    "sapeavuclass",
+    "sapeavuscriptstruct",
+    "saxpeavuobject",
+    "zzappendmembergetprev",
+    "vfmember",
+    "back_chain",
+    "sender_sp",
+    "retstr",
+    "saved_r4",
+    "deleting",
+    "cold",
+    "v_0",
+    "_lambda_1_",
+    "ptr",
+    "qword",
+    "oword",
+    "ref",
+    "ret",
+    "return",
+    "short",
+    "signed",
+    "size",
+    "stack",
+    "struct",
+    "this",
+    "type",
+    "uint",
+    "ulong",
+    "unsigned",
+    "ushort",
+    "var",
+    "void",
+    "word",
+];
 
 impl Database {
     /// Open or create a database with the given configuration.
@@ -50,42 +232,24 @@ impl Database {
         }))
     }
 
-    fn update_search_entry(&self, key: u128, name: &str, ts: u64) {
-        self.update_search_entry_no_commit(key, name, ts);
+    /// Open the database for offline replay/evaluation without rebuilding search.
+    pub async fn open_for_replay(cfg: Arc<Config>) -> io::Result<Arc<Self>> {
+        let rt = EngineRuntime::open_for_replay(cfg.engine.clone(), cfg.scoring.clone())?;
+        Ok(Arc::new(Self {
+            rt: Arc::new(rt),
+            failure_cache: FailureCache::new(),
+        }))
+    }
+
+    fn update_search_entry(&self, key: u128, name: &str, data: &[u8], ts: u64) {
+        self.update_search_entry_no_commit(key, name, data, ts);
         if let Err(e) = self.rt.search.commit() {
             log::warn!("failed to commit search index: {}", e);
         }
     }
 
-    fn update_search_entry_no_commit(&self, key: u128, name: &str, ts: u64) {
-        // Get basenames, but still index even if this fails
-        let basenames = match self.rt.ctx_index.resolve_basenames_for_key(key) {
-            Ok(b) => b,
-            Err(e) => {
-                log::debug!("no basenames for key {:032x}: {}", key, e);
-                Vec::new()
-            }
-        };
-
-        // Pre-compute demangled name
-        let demangle_result = demangle(name);
-        let (func_name_demangled, lang) = if demangle_result.demangled {
-            (
-                demangle_result.name,
-                demangle_result.lang.unwrap_or("").to_string(),
-            )
-        } else {
-            (String::new(), String::new())
-        };
-
-        let doc = SearchDocument {
-            key,
-            func_name: name.to_string(),
-            func_name_demangled,
-            lang,
-            binary_names: basenames,
-            ts,
-        };
+    fn update_search_entry_no_commit(&self, key: u128, name: &str, data: &[u8], ts: u64) {
+        let doc = Self::build_search_document_static(&self.rt, key, name, data, ts);
         if let Err(e) = self.rt.search.index_function_no_commit(&doc) {
             log::warn!("failed to update search index for key {:032x}: {}", key, e);
         }
@@ -140,6 +304,7 @@ impl Database {
             md5: None,
             basename: None,
             hostname: None,
+            origin_token: None,
         };
         self.push_with_ctx(items, &null_ctx).await
     }
@@ -159,6 +324,7 @@ impl Database {
             md5: ctx.md5,
             basename: ctx.basename.map(|s| s.to_string()),
             hostname: ctx.hostname.map(|s| s.to_string()),
+            origin_token: ctx.origin_token.map(|s| s.to_string()),
         };
         let rt = self.rt.clone();
 
@@ -195,48 +361,43 @@ impl Database {
                 let seg_id = addr_seg(old);
                 let off = addr_off(old);
                 match rt.segments.get_reader(seg_id) {
-                    Some(reader) => {
-                        match reader.read_at(off) {
-                            Ok(existing) => {
-                                if existing.name == *name && existing.data == *data {
-                                    status.push(2);
-                                    // Still record context observation even if unchanged
-                                    if let Some(md5) = ctx.md5 {
-                                        let ts = now_ts_sec();
-                                        let vid = version_id(*key, name, data);
-                                        let _ = rt.ctx_index.record_binary_meta(
-                                            md5,
-                                            ctx.basename.as_deref().unwrap_or(""),
-                                            ctx.hostname.as_deref().unwrap_or(""),
-                                            ts,
-                                        );
-                                        let _ = rt.ctx_index.record_key_observation(
-                                            *key,
-                                            md5,
-                                            Some(vid),
-                                            ts,
-                                            ctx.basename.as_deref(),
-                                        );
-                                    }
+                    Some(reader) => match reader.read_at(off) {
+                        Ok(existing) => {
+                            if existing.name == *name && existing.data == *data {
+                                status.push(2);
+                                let ts = now_ts_sec();
+                                Self::record_context_observation(rt, *key, name, data, ctx, ts);
+                                if let Some((canonical, _, _)) =
+                                    Self::refresh_canonical_for_key(rt, *key)?
+                                {
+                                    Self::update_search_entry_no_commit_static(
+                                        rt,
+                                        *key,
+                                        &canonical.name,
+                                        &canonical.data,
+                                        canonical.ts_sec,
+                                    );
+                                } else {
                                     Self::update_search_entry_no_commit_static(
                                         rt,
                                         *key,
                                         name,
+                                        data,
                                         existing.ts_sec,
                                     );
-                                    continue;
                                 }
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "Failed to read existing record at seg={}, off={}: {}",
-                                    seg_id,
-                                    off,
-                                    e
-                                );
+                                continue;
                             }
                         }
-                    }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to read existing record at seg={}, off={}: {}",
+                                seg_id,
+                                off,
+                                e
+                            );
+                        }
+                    },
                     None => {
                         log::warn!("Segment {} not found for existing record", seg_id);
                     }
@@ -277,24 +438,19 @@ impl Database {
                 }
             }
 
-            if let Some(md5) = ctx.md5 {
-                let ts = rec.ts_sec;
-                let vid = version_id(*key, name, data);
-                let _ = rt.ctx_index.record_binary_meta(
-                    md5,
-                    ctx.basename.as_deref().unwrap_or(""),
-                    ctx.hostname.as_deref().unwrap_or(""),
-                    ts,
-                );
-                let _ = rt.ctx_index.record_key_observation(
+            let ts = rec.ts_sec;
+            Self::record_context_observation(rt, *key, name, data, ctx, ts);
+            if let Some((canonical, _, _)) = Self::refresh_canonical_for_key(rt, *key)? {
+                Self::update_search_entry_no_commit_static(
+                    rt,
                     *key,
-                    md5,
-                    Some(vid),
-                    ts,
-                    ctx.basename.as_deref(),
+                    &canonical.name,
+                    &canonical.data,
+                    canonical.ts_sec,
                 );
+            } else {
+                Self::update_search_entry_no_commit_static(rt, *key, name, data, rec.ts_sec);
             }
-            Self::update_search_entry_no_commit_static(rt, *key, name, rec.ts_sec);
         }
         // Commit all search index changes at once
         if let Err(e) = rt.search.commit() {
@@ -305,8 +461,26 @@ impl Database {
         Ok(status)
     }
 
-    fn update_search_entry_no_commit_static(rt: &EngineRuntime, key: u128, name: &str, ts: u64) {
-        // Get basenames, but still index even if this fails
+    fn update_search_entry_no_commit_static(
+        rt: &EngineRuntime,
+        key: u128,
+        name: &str,
+        data: &[u8],
+        ts: u64,
+    ) {
+        let doc = Self::build_search_document_static(rt, key, name, data, ts);
+        if let Err(e) = rt.search.index_function_no_commit(&doc) {
+            log::warn!("failed to update search index for key {:032x}: {}", key, e);
+        }
+    }
+
+    fn build_search_document_static(
+        rt: &EngineRuntime,
+        key: u128,
+        name: &str,
+        data: &[u8],
+        ts: u64,
+    ) -> SearchDocument {
         let basenames = match rt.ctx_index.resolve_basenames_for_key(key) {
             Ok(b) => b,
             Err(e) => {
@@ -314,8 +488,19 @@ impl Database {
                 Vec::new()
             }
         };
-
-        // Pre-compute demangled name
+        let origin_tokens: Vec<String> = rt
+            .ctx_index
+            .get_binary_refs_for_key(key, 8)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|meta| {
+                if meta.origin_token.is_empty() {
+                    None
+                } else {
+                    Some(meta.origin_token)
+                }
+            })
+            .collect();
         let demangle_result = demangle(name);
         let (func_name_demangled, lang) = if demangle_result.demangled {
             (
@@ -325,18 +510,157 @@ impl Database {
         } else {
             (String::new(), String::new())
         };
-
-        let doc = SearchDocument {
+        let analysis = analyze_function(name, data);
+        SearchDocument {
             key,
             func_name: name.to_string(),
             func_name_demangled,
-            lang,
+            lang: if lang.is_empty() {
+                analysis.fingerprint.language.clone()
+            } else {
+                lang
+            },
             binary_names: basenames,
+            origin_tokens,
+            prototype_tokens: analysis.fingerprint.prototype_tokens,
+            frame_tokens: analysis.fingerprint.frame_tokens,
+            comment_tokens: analysis.fingerprint.comment_tokens,
+            operand_tokens: analysis.fingerprint.operand_tokens,
+            semantic_tokens: analysis.fingerprint.tokens,
             ts,
-        };
-        if let Err(e) = rt.search.index_function_no_commit(&doc) {
-            log::warn!("failed to update search index for key {:032x}: {}", key, e);
         }
+    }
+
+    fn record_context_observation(
+        rt: &EngineRuntime,
+        key: u128,
+        name: &str,
+        data: &[u8],
+        ctx: &OwnedPushContext,
+        ts: u64,
+    ) {
+        if let Some(md5) = ctx.md5 {
+            let vid = version_id(key, name, data);
+            let _ = rt.ctx_index.record_binary_meta(
+                md5,
+                ctx.basename.as_deref().unwrap_or(""),
+                ctx.hostname.as_deref().unwrap_or(""),
+                ctx.origin_token.as_deref().unwrap_or(""),
+                ts,
+            );
+            let _ = rt.ctx_index.record_key_observation(
+                key,
+                md5,
+                Some(vid),
+                ts,
+                ctx.basename.as_deref(),
+            );
+        }
+    }
+
+    fn collect_versions_sync(
+        rt: &EngineRuntime,
+        key: u128,
+        cap: usize,
+    ) -> io::Result<Vec<AnalyzedVersion>> {
+        let mut versions = Vec::new();
+        let mut addr = rt.index.get(key);
+        let mut seen_addrs = HashSet::new();
+        while addr != 0 && versions.len() < cap && !seen_addrs.contains(&addr) {
+            seen_addrs.insert(addr);
+            let seg_id = addr_seg(addr);
+            let off = addr_off(addr);
+            let Some(reader) = rt.segments.get_reader(seg_id) else {
+                break;
+            };
+            let rec = match reader.read_at(off) {
+                Ok(rec) => rec,
+                Err(e) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("segment read_at failed: {e}"),
+                    ));
+                }
+            };
+            let next = rec.prev_addr;
+            if rec.flags & 0x01 == 0 {
+                let analysis = analyze_function(&rec.name, &rec.data);
+                versions.push(AnalyzedVersion {
+                    version_id: version_id(key, &rec.name, &rec.data),
+                    rec,
+                    analysis,
+                });
+            }
+            addr = next;
+        }
+        Ok(versions)
+    }
+
+    fn refresh_canonical_for_key(
+        rt: &EngineRuntime,
+        key: u128,
+    ) -> io::Result<Option<(Record, [u8; 32], f64)>> {
+        let versions = Self::collect_versions_sync(rt, key, rt.scoring.max_versions_per_key)?;
+        if versions.is_empty() {
+            return Ok(None);
+        }
+
+        let ts_min = versions.iter().map(|v| v.rec.ts_sec).min().unwrap_or(0);
+        let ts_max = versions
+            .iter()
+            .map(|v| v.rec.ts_sec)
+            .max()
+            .unwrap_or(ts_min);
+        let max_total_obs = versions
+            .iter()
+            .filter_map(|v| rt.ctx_index.get_version_stats(&v.version_id).ok().flatten())
+            .map(|vs| vs.total_obs.max(1))
+            .max()
+            .unwrap_or(1);
+        let max_bins = versions
+            .iter()
+            .filter_map(|v| rt.ctx_index.get_version_stats(&v.version_id).ok().flatten())
+            .map(|vs| vs.num_binaries.max(vs.top_md5s.len() as u32).max(1))
+            .max()
+            .unwrap_or(1);
+
+        let empty_weights: HashMap<String, f64> = HashMap::new();
+        let empty_pmd5: HashMap<[u8; 16], f64> = HashMap::new();
+        let requested: [u32; 0] = [];
+        let scoring_ctx = CandidateScoringContext {
+            key,
+            md5: None,
+            basename: None,
+            hostname: None,
+            origin_token: None,
+            requested_mdkeys: &requested,
+            pmd5: &empty_pmd5,
+            anchor_token_weights: &empty_weights,
+            canonical_hint: None,
+        };
+
+        let mut best_idx = 0usize;
+        let mut best_score = f64::NEG_INFINITY;
+        for (idx, version) in versions.iter().enumerate() {
+            let score = score_candidate_version(
+                rt,
+                version,
+                &scoring_ctx,
+                ts_min,
+                ts_max,
+                max_total_obs,
+                max_bins,
+            )?;
+            if score > best_score {
+                best_score = score;
+                best_idx = idx;
+            }
+        }
+
+        let best = &versions[best_idx];
+        rt.ctx_index
+            .set_canonical_version(key, best.version_id, best_score, best.rec.ts_sec)?;
+        Ok(Some((best.rec.clone(), best.version_id, best_score)))
     }
 
     /// Delete function metadata by keys.
@@ -411,6 +735,161 @@ impl Database {
         Ok((hits, total))
     }
 
+    pub async fn semantic_neighbors_for_key(
+        &self,
+        key: u128,
+        limit: usize,
+        strict_family: bool,
+    ) -> io::Result<Vec<SearchHit>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let Some(seed) = self.get_latest(key).await? else {
+            return Ok(Vec::new());
+        };
+        let seed_doc =
+            Self::build_search_document_static(&self.rt, key, &seed.name, &seed.data, seed.ts_sec);
+        let seed_analysis = analyze_function(&seed.name, &seed.data);
+        if seed_analysis.fingerprint.tokens.is_empty()
+            && seed_analysis.fingerprint.prototype_tokens.is_empty()
+            && seed_analysis.fingerprint.frame_tokens.is_empty()
+            && seed_analysis.fingerprint.comment_tokens.is_empty()
+            && seed_analysis.fingerprint.operand_tokens.is_empty()
+        {
+            return Ok(Vec::new());
+        }
+
+        let seed_binary_metas = self.rt.ctx_index.get_binary_refs_for_key(key, 8)?;
+        if strict_family && seed_binary_metas.is_empty() {
+            return Ok(Vec::new());
+        }
+        let family_ctx = self
+            .build_neighbor_family_context(&seed_binary_metas)
+            .await?;
+
+        let candidate_limit = limit.saturating_mul(8).clamp(24, 96);
+        let initial_hits = self
+            .rt
+            .search
+            .semantic_neighbors(&seed_doc, key, candidate_limit)?;
+        let mut reranked = Vec::new();
+        for mut hit in initial_hits {
+            let Ok(candidate_key) = u128::from_str_radix(&hit.key_hex, 16) else {
+                continue;
+            };
+            if candidate_key == key {
+                continue;
+            }
+            let Some(candidate) = self.get_latest(candidate_key).await? else {
+                continue;
+            };
+            let candidate_doc = Self::build_search_document_static(
+                &self.rt,
+                candidate_key,
+                &candidate.name,
+                &candidate.data,
+                candidate.ts_sec,
+            );
+            let candidate_analysis = analyze_function(&candidate.name, &candidate.data);
+            let candidate_binary_metas = self
+                .rt
+                .ctx_index
+                .get_binary_refs_for_key(candidate_key, 8)?;
+            let Some(scored) = semantic_neighbor_similarity(
+                &seed_analysis,
+                &seed_doc,
+                &candidate_analysis,
+                &candidate_doc,
+                &family_ctx,
+                &candidate_binary_metas,
+                hit.score as f64,
+            ) else {
+                continue;
+            };
+            if scored.final_score < 0.08 {
+                continue;
+            }
+            if strict_family && scored.rationale.family_score <= 0.0 {
+                continue;
+            }
+            hit.score = scored.final_score as f32;
+            hit.semantic_neighbor = Some(scored.rationale);
+            reranked.push(hit);
+        }
+
+        reranked.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.ts.cmp(&a.ts))
+                .then_with(|| a.key_hex.cmp(&b.key_hex))
+        });
+        reranked.truncate(limit);
+        self.attach_binary_refs(&mut reranked)?;
+        Ok(reranked)
+    }
+
+    async fn build_neighbor_family_context(
+        &self,
+        seed_binary_metas: &[crate::engine::BinaryMeta],
+    ) -> io::Result<NeighborFamilyContext> {
+        let mut ctx = NeighborFamilyContext::default();
+        if seed_binary_metas.is_empty() {
+            return Ok(ctx);
+        }
+
+        let max_obs = seed_binary_metas
+            .iter()
+            .map(|meta| meta.obs_count.max(1) as f64)
+            .fold(1.0f64, f64::max);
+        let obs_denom = max_obs.ln_1p().max(1.0);
+
+        for (seed_rank, meta) in seed_binary_metas.iter().take(4).enumerate() {
+            let rank_decay = 1.0 / (1.0 + (seed_rank as f64 * 0.22));
+            let obs_norm = ((meta.obs_count.max(1) as f64).ln_1p() / obs_denom).clamp(0.35, 1.0);
+            let direct_weight = ((0.45 + (0.55 * obs_norm)) * rank_decay).clamp(0.0, 1.0);
+            let direct_entry = ctx.direct_weights.entry(meta.md5).or_insert(0.0);
+            *direct_entry = direct_entry.max(direct_weight);
+
+            let overlap_rows: Vec<([u8; 16], u64)> =
+                if let Some(cached) = self.rt.ctx_index.get_binary_overlap_cache(&meta.md5)? {
+                    cached
+                        .into_iter()
+                        .take(12)
+                        .map(|entry| (entry.md5, entry.shared_functions))
+                        .collect()
+                } else {
+                    self.get_binary_overlap(meta.md5, 12)
+                        .await?
+                        .into_iter()
+                        .filter_map(|(summary, shared)| {
+                            parse_md5_hex_local(&summary.md5_hex).map(|md5| (md5, shared))
+                        })
+                        .collect()
+                };
+
+            let max_shared = overlap_rows
+                .iter()
+                .map(|(_, shared)| *shared as f64)
+                .fold(1.0f64, f64::max);
+            for (overlap_rank, (other_md5, shared)) in overlap_rows.into_iter().enumerate() {
+                if other_md5 == meta.md5 {
+                    continue;
+                }
+                let shared_norm = ((shared as f64) / max_shared).clamp(0.0, 1.0);
+                let overlap_decay = 1.0 / (1.0 + (overlap_rank as f64 * 0.18));
+                let related_weight =
+                    (direct_weight * (0.25 + (0.75 * shared_norm)) * overlap_decay * 0.9)
+                        .clamp(0.0, 1.0);
+                let related_entry = ctx.related_weights.entry(other_md5).or_insert(0.0);
+                *related_entry = related_entry.max(related_weight);
+            }
+        }
+
+        Ok(ctx)
+    }
+
     pub async fn get_popular_functions(&self, limit: usize) -> io::Result<Vec<FuncLatest>> {
         let top_keys = self.rt.ctx_index.get_top_popular_keys(limit)?;
         let mut results = Vec::with_capacity(top_keys.len());
@@ -438,7 +917,11 @@ impl Database {
     }
 
     /// Get structured binary references associated with a function key.
-    pub fn get_binary_refs_for_key(&self, key: u128, limit: usize) -> io::Result<Vec<BinaryRefHit>> {
+    pub fn get_binary_refs_for_key(
+        &self,
+        key: u128,
+        limit: usize,
+    ) -> io::Result<Vec<BinaryRefHit>> {
         Ok(self
             .rt
             .ctx_index
@@ -448,7 +931,11 @@ impl Database {
                 md5_hex: hex_md5(&meta.md5),
                 short_id: short_md5(&meta.md5),
                 basename: basename_only(&meta.basename),
-                display_name: format!("{} · {}", basename_only(&meta.basename), short_md5(&meta.md5)),
+                display_name: format!(
+                    "{} · {}",
+                    basename_only(&meta.basename),
+                    short_md5(&meta.md5)
+                ),
             })
             .collect())
     }
@@ -493,9 +980,16 @@ impl Database {
         offset: usize,
         limit: usize,
     ) -> io::Result<(Vec<SearchHit>, usize)> {
-        let (entries, total) = self.rt.ctx_index.get_binary_function_entries(&md5, offset, limit)?;
+        let (entries, total) = self
+            .rt
+            .ctx_index
+            .get_binary_function_entries(&md5, offset, limit)?;
         let mut entries = entries;
-        entries.sort_by(|a, b| b.obs_count.cmp(&a.obs_count).then_with(|| b.last_ts_sec.cmp(&a.last_ts_sec)));
+        entries.sort_by(|a, b| {
+            b.obs_count
+                .cmp(&a.obs_count)
+                .then_with(|| b.last_ts_sec.cmp(&a.last_ts_sec))
+        });
         let mut hits = Vec::with_capacity(entries.len());
         for entry in entries {
             if let Some(func) = self.get_latest(entry.key).await? {
@@ -514,7 +1008,10 @@ impl Database {
                     func_name_demangled,
                     lang,
                     binary_names: self.get_basenames_for_key(entry.key).unwrap_or_default(),
-                    binaries: self.get_binary_refs_for_key(entry.key, 12).unwrap_or_default(),
+                    binaries: self
+                        .get_binary_refs_for_key(entry.key, 12)
+                        .unwrap_or_default(),
+                    semantic_neighbor: None,
                     ts: func.ts_sec,
                     score: entry.obs_count as f32,
                 });
@@ -532,7 +1029,10 @@ impl Database {
             let mut rows = Vec::new();
             for entry in cached.into_iter().take(limit) {
                 if let Some(other_meta) = self.rt.ctx_index.get_binary_meta(&entry.md5)? {
-                    rows.push((binary_summary_from_meta(&other_meta, entry.shared_functions as f32), entry.shared_functions));
+                    rows.push((
+                        binary_summary_from_meta(&other_meta, entry.shared_functions as f32),
+                        entry.shared_functions,
+                    ));
                 }
             }
             return Ok(rows);
@@ -553,7 +1053,10 @@ impl Database {
                 rows.push((binary_summary_from_meta(&meta, shared as f32), shared));
             }
         }
-        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.last_seen_ts.cmp(&a.0.last_seen_ts)));
+        rows.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| b.0.last_seen_ts.cmp(&a.0.last_seen_ts))
+        });
         let cache_rows: Vec<crate::engine::BinaryOverlapEntry> = rows
             .iter()
             .map(|(summary, shared)| crate::engine::BinaryOverlapEntry {
@@ -562,7 +1065,10 @@ impl Database {
             })
             .filter(|entry| entry.md5 != [0u8; 16])
             .collect();
-        let _ = self.rt.ctx_index.set_binary_overlap_cache(&md5, &cache_rows);
+        let _ = self
+            .rt
+            .ctx_index
+            .set_binary_overlap_cache(&md5, &cache_rows);
         rows.truncate(limit);
         Ok(rows)
     }
@@ -604,11 +1110,20 @@ impl Database {
         let mut rows = Vec::new();
         for (other_md5, (shared_functions, shared_observations)) in related {
             if let Some(summary) = self.get_binary_summary(other_md5).await? {
-                let known_den = seed_summary.function_count.min(summary.function_count).max(1);
+                let known_den = seed_summary
+                    .function_count
+                    .min(summary.function_count)
+                    .max(1);
                 let obs_den = seed_summary.obs_count.min(summary.obs_count).max(1);
                 let known_pct = (shared_functions as f32 / known_den as f32) * 100.0;
                 let observed_pct = (shared_observations as f32 / obs_den as f32) * 100.0;
-                rows.push((summary, shared_functions, shared_observations, known_pct, observed_pct));
+                rows.push((
+                    summary,
+                    shared_functions,
+                    shared_observations,
+                    known_pct,
+                    observed_pct,
+                ));
             }
         }
         rows.sort_by(|a, b| {
@@ -621,10 +1136,16 @@ impl Database {
         Ok(rows)
     }
 
-    pub async fn get_binary_facets(&self, md5: [u8; 16], limit: usize) -> io::Result<BinaryFacetSummary> {
+    pub async fn get_binary_facets(
+        &self,
+        md5: [u8; 16],
+        limit: usize,
+    ) -> io::Result<BinaryFacetSummary> {
         if let Some(meta) = self.rt.ctx_index.get_binary_meta(&md5)? {
             if let Some(cached) = self.rt.ctx_index.get_binary_facets(&md5)? {
-                if cached.function_count == meta.function_count && cached.cached_at_ts >= meta.last_seen_ts {
+                if cached.function_count == meta.function_count
+                    && cached.cached_at_ts >= meta.last_seen_ts
+                {
                     return Ok(cached);
                 }
             }
@@ -645,7 +1166,11 @@ impl Database {
             if parsed.frame_desc.is_some() {
                 out.framed_functions += 1;
             }
-            if parsed.fcmt.is_some() || parsed.frptcmt.is_some() || !parsed.insn_cmts.is_empty() || !parsed.rpt_insn_cmts.is_empty() {
+            if parsed.fcmt.is_some()
+                || parsed.frptcmt.is_some()
+                || !parsed.insn_cmts.is_empty()
+                || !parsed.rpt_insn_cmts.is_empty()
+            {
                 out.commented_functions += 1;
             }
             if !parsed.errors.is_empty() {
@@ -692,13 +1217,17 @@ impl Database {
         for _ in 0..depth {
             let mut next = Vec::new();
             for node_md5_hex in frontier {
-                let Some(node_md5) = parse_md5_hex_local(&node_md5_hex) else { continue; };
+                let Some(node_md5) = parse_md5_hex_local(&node_md5_hex) else {
+                    continue;
+                };
                 for (neighbor, shared) in self.get_binary_overlap(node_md5, limit).await? {
                     edges.push((node_md5_hex.clone(), neighbor.md5_hex.clone(), shared));
                     if seen.insert(neighbor.md5_hex.clone()) {
                         next.push(neighbor.md5_hex.clone());
                         if let Some(neighbor_md5) = parse_md5_hex_local(&neighbor.md5_hex) {
-                            if let Some(facets) = self.rt.ctx_index.get_binary_facets(&neighbor_md5)? {
+                            if let Some(facets) =
+                                self.rt.ctx_index.get_binary_facets(&neighbor_md5)?
+                            {
                                 let mut neighbor = neighbor;
                                 neighbor.typed_functions = facets.typed_functions;
                                 neighbor.commented_functions = facets.commented_functions;
@@ -742,7 +1271,8 @@ impl Database {
                     let seed_stats = self.rt.ctx_index.get_key_md5_stats(*key, &md5)?;
                     let other_stats = self.rt.ctx_index.get_key_md5_stats(*key, &other_md5)?;
                     if let (Some(a), Some(b)) = (seed_stats, other_stats) {
-                        shared_observations = shared_observations.saturating_add(u64::from(a.obs_count.min(b.obs_count)));
+                        shared_observations = shared_observations
+                            .saturating_add(u64::from(a.obs_count.min(b.obs_count)));
                     }
                 }
             }
@@ -763,9 +1293,20 @@ impl Database {
             } else {
                 (0.0, 0.0)
             };
-            out.push((summary, shared, shared_observations, known_pct, observed_pct, false));
+            out.push((
+                summary,
+                shared,
+                shared_observations,
+                known_pct,
+                observed_pct,
+                false,
+            ));
         }
-        out.sort_by(|a, b| b.0.last_seen_ts.cmp(&a.0.last_seen_ts).then_with(|| b.1.cmp(&a.1)));
+        out.sort_by(|a, b| {
+            b.0.last_seen_ts
+                .cmp(&a.0.last_seen_ts)
+                .then_with(|| b.1.cmp(&a.1))
+        });
         Ok(out)
     }
 
@@ -774,7 +1315,20 @@ impl Database {
         left: [u8; 16],
         right: [u8; 16],
         sample_limit: usize,
-    ) -> io::Result<(BinaryFacetSummary, BinaryFacetSummary, usize, usize, usize, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>, Vec<BinaryCompareItem>)> {
+    ) -> io::Result<(
+        BinaryFacetSummary,
+        BinaryFacetSummary,
+        usize,
+        usize,
+        usize,
+        Vec<BinaryCompareItem>,
+        Vec<BinaryCompareItem>,
+        Vec<BinaryCompareItem>,
+        Vec<BinaryCompareItem>,
+        Vec<BinaryCompareItem>,
+        Vec<BinaryCompareItem>,
+        Vec<BinaryCompareItem>,
+    )> {
         let left_keys = self.rt.ctx_index.get_binary_function_keys(&left, 8192)?;
         let right_keys = self.rt.ctx_index.get_binary_function_keys(&right, 8192)?;
         let left_set: HashSet<u128> = left_keys.iter().copied().collect();
@@ -796,33 +1350,66 @@ impl Database {
         let mut freshest_drift = Vec::new();
         for key in shared_keys.iter().take(sample_limit) {
             if let Some(func) = self.get_latest(*key).await? {
-                let rarity_score = self.get_binary_refs_for_key(*key, 64).map(|items| items.len()).unwrap_or(0);
+                let rarity_score = self
+                    .get_binary_refs_for_key(*key, 64)
+                    .map(|items| items.len())
+                    .unwrap_or(0);
                 let richness_score = metadata_richness(&func.data);
-                shared.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec, rarity_score, richness_score });
+                shared.push(BinaryCompareItem {
+                    key_hex: format!("{:032x}", key),
+                    name: func.name,
+                    ts: func.ts_sec,
+                    rarity_score,
+                    richness_score,
+                });
             }
         }
         for key in left_only_keys.iter().take(sample_limit) {
             if let Some(func) = self.get_latest(*key).await? {
-                let rarity_score = self.get_binary_refs_for_key(*key, 64).map(|items| items.len()).unwrap_or(0);
+                let rarity_score = self
+                    .get_binary_refs_for_key(*key, 64)
+                    .map(|items| items.len())
+                    .unwrap_or(0);
                 let richness_score = metadata_richness(&func.data);
-                left_only.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec, rarity_score, richness_score });
+                left_only.push(BinaryCompareItem {
+                    key_hex: format!("{:032x}", key),
+                    name: func.name,
+                    ts: func.ts_sec,
+                    rarity_score,
+                    richness_score,
+                });
             }
         }
         for key in right_only_keys.iter().take(sample_limit) {
             if let Some(func) = self.get_latest(*key).await? {
-                let rarity_score = self.get_binary_refs_for_key(*key, 64).map(|items| items.len()).unwrap_or(0);
+                let rarity_score = self
+                    .get_binary_refs_for_key(*key, 64)
+                    .map(|items| items.len())
+                    .unwrap_or(0);
                 let richness_score = metadata_richness(&func.data);
-                right_only.push(BinaryCompareItem { key_hex: format!("{:032x}", key), name: func.name, ts: func.ts_sec, rarity_score, richness_score });
+                right_only.push(BinaryCompareItem {
+                    key_hex: format!("{:032x}", key),
+                    name: func.name,
+                    ts: func.ts_sec,
+                    rarity_score,
+                    richness_score,
+                });
             }
         }
         sort_compare_items(&mut shared);
         sort_compare_items(&mut left_only);
         sort_compare_items(&mut right_only);
         let mut union_items = Vec::new();
-        for key in union_keys.iter().take(sample_limit.saturating_mul(4).max(sample_limit)) {
+        for key in union_keys
+            .iter()
+            .take(sample_limit.saturating_mul(4).max(sample_limit))
+        {
             if let Some(func) = self.get_latest(*key).await? {
                 let richness = metadata_richness(&func.data);
-                let rarity = self.get_binary_refs_for_key(*key, 64).map(|items| items.len()).unwrap_or(0);
+                let rarity = self
+                    .get_binary_refs_for_key(*key, 64)
+                    .map(|items| items.len())
+                    .unwrap_or(0);
                 union_items.push((
                     richness,
                     rarity,
@@ -845,11 +1432,19 @@ impl Database {
                 .then_with(|| a.2.name.cmp(&b.2.name))
                 .then_with(|| a.2.key_hex.cmp(&b.2.key_hex))
         });
-        recent.extend(by_recent.iter().take(sample_limit).map(|(_, _, item)| item.clone()));
+        recent.extend(
+            by_recent
+                .iter()
+                .take(sample_limit)
+                .map(|(_, _, item)| item.clone()),
+        );
         freshest_drift.extend(
             by_recent
                 .iter()
-                .filter(|(_, _, item)| left_only.iter().any(|x| x.key_hex == item.key_hex) || right_only.iter().any(|x| x.key_hex == item.key_hex))
+                .filter(|(_, _, item)| {
+                    left_only.iter().any(|x| x.key_hex == item.key_hex)
+                        || right_only.iter().any(|x| x.key_hex == item.key_hex)
+                })
                 .take(sample_limit)
                 .map(|(_, _, item)| item.clone()),
         );
@@ -860,7 +1455,12 @@ impl Database {
                 .then_with(|| a.2.name.cmp(&b.2.name))
                 .then_with(|| a.2.key_hex.cmp(&b.2.key_hex))
         });
-        metadata_rich.extend(union_items.iter().take(sample_limit).map(|(_, _, item)| item.clone()));
+        metadata_rich.extend(
+            union_items
+                .iter()
+                .take(sample_limit)
+                .map(|(_, _, item)| item.clone()),
+        );
         let mut by_rare = union_items.clone();
         by_rare.sort_by(|a, b| {
             a.1.cmp(&b.1)
@@ -869,13 +1469,31 @@ impl Database {
                 .then_with(|| a.2.name.cmp(&b.2.name))
                 .then_with(|| a.2.key_hex.cmp(&b.2.key_hex))
         });
-        rare_symbols.extend(by_rare.into_iter().take(sample_limit).map(|(_, _, item)| item));
+        rare_symbols.extend(
+            by_rare
+                .into_iter()
+                .take(sample_limit)
+                .map(|(_, _, item)| item),
+        );
         let shared_count = left_set.intersection(&right_set).count();
         let left_only_count = left_set.difference(&right_set).count();
         let right_only_count = right_set.difference(&left_set).count();
         let left_facets = self.get_binary_facets(left, 8192).await?;
         let right_facets = self.get_binary_facets(right, 8192).await?;
-        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only, recent, metadata_rich, rare_symbols, freshest_drift))
+        Ok((
+            left_facets,
+            right_facets,
+            shared_count,
+            left_only_count,
+            right_only_count,
+            shared,
+            left_only,
+            right_only,
+            recent,
+            metadata_rich,
+            rare_symbols,
+            freshest_drift,
+        ))
     }
 
     fn attach_binary_refs(&self, hits: &mut [SearchHit]) -> io::Result<()> {
@@ -912,7 +1530,7 @@ impl Database {
         Ok(summary)
     }
 
-    /// Select best versions for a batch of keys using scoring.
+    /// Select best versions for a batch of keys using semantic-aware scoring.
     pub async fn select_versions_for_batch(
         &self,
         ctx: &QueryContext<'_>,
@@ -921,16 +1539,20 @@ impl Database {
         use std::time::Instant;
         METRICS.inc_scoring_batches();
         let start = Instant::now();
+        let requested_mdkeys = normalize_requested_mdkeys(ctx.requested_mdkeys);
 
         if self.rt.ctx_index.approx_is_empty() {
             METRICS.inc_scoring_fallback();
             let mut out = Vec::with_capacity(ctx.keys.len());
             for &k in ctx.keys {
-                out.push(
-                    self.get_latest(k)
-                        .await?
-                        .map(|f| (f.popularity, f.len_bytes, f.name, f.data)),
-                );
+                out.push(self.get_latest(k).await?.map(|f| {
+                    let data = if requested_mdkeys.is_empty() {
+                        f.data
+                    } else {
+                        shape_metadata_for_request(&f.data, &requested_mdkeys)
+                    };
+                    (f.popularity, data.len() as u32, f.name, data)
+                }));
             }
             METRICS
                 .scoring_time_ns
@@ -938,7 +1560,6 @@ impl Database {
             return Ok(out);
         }
 
-        // Build P(md5 | Q)
         let mut vote: HashMap<[u8; 16], f64> = HashMap::new();
         for &k in ctx.keys {
             let md5_list = self.rt.ctx_index.get_md5_bins_for_key(k)?;
@@ -947,9 +1568,8 @@ impl Database {
             }
             let df = md5_list.len() as f64;
             let w_k = 1.0f64 / (1.0 + (1.0 + df).ln());
-            for e in md5_list.into_iter() {
-                let v = vote.entry(e.md5).or_insert(0.0);
-                *v += w_k * (e.obs_count as f64);
+            for e in md5_list {
+                *vote.entry(e.md5).or_insert(0.0) += w_k * (e.obs_count as f64);
             }
         }
         let sum_votes: f64 = vote.values().copied().sum();
@@ -959,223 +1579,195 @@ impl Database {
             HashMap::new()
         };
 
-        // For each key, enumerate versions and score
-        let mut results = Vec::with_capacity(ctx.keys.len());
-        let mut versions_considered_total: u64 = 0;
-
+        let mut per_key_versions: Vec<Vec<AnalyzedVersion>> = Vec::with_capacity(ctx.keys.len());
+        let mut versions_considered_total = 0u64;
         for &k in ctx.keys {
-            // Walk history up to cap
-            let cap = self.rt.scoring.max_versions_per_key;
-            let mut versions: Vec<(Record, [u8; 32])> = Vec::new();
-            let mut addr = self.rt.index.get(k);
-            let mut seen_addrs = HashSet::new();
-            while addr != 0 && versions.len() < cap && !seen_addrs.contains(&addr) {
-                seen_addrs.insert(addr);
-                let seg_id = addr_seg(addr);
-                let off = addr_off(addr);
-                let reader = match self.rt.segments.get_reader(seg_id) {
-                    Some(r) => r,
-                    None => break,
-                };
-                match reader.read_at(off) {
-                    Ok(rec) => {
-                        if rec.flags & 0x01 == 0 {
-                            let vid = version_id(k, &rec.name, &rec.data);
-                            versions.push((rec.clone(), vid));
-                        }
-                        addr = rec.prev_addr;
-                    }
-                    Err(_) => break,
+            let versions =
+                Self::collect_versions_sync(&self.rt, k, self.rt.scoring.max_versions_per_key)?;
+            versions_considered_total += versions.len() as u64;
+            per_key_versions.push(versions);
+        }
+
+        let canonical_hints: Vec<Option<[u8; 32]>> = ctx
+            .keys
+            .iter()
+            .map(|&k| {
+                self.rt
+                    .ctx_index
+                    .get_canonical_version(k)
+                    .ok()
+                    .flatten()
+                    .map(|cv| cv.version_id)
+            })
+            .collect();
+
+        let mut anchor_token_weights: HashMap<String, f64> = HashMap::new();
+        for (i, versions) in per_key_versions.iter().enumerate() {
+            if versions.is_empty() {
+                continue;
+            }
+            let key = ctx.keys[i];
+            let ts_min = versions.iter().map(|v| v.rec.ts_sec).min().unwrap_or(0);
+            let ts_max = versions
+                .iter()
+                .map(|v| v.rec.ts_sec)
+                .max()
+                .unwrap_or(ts_min);
+            let max_total_obs = versions
+                .iter()
+                .filter_map(|v| {
+                    self.rt
+                        .ctx_index
+                        .get_version_stats(&v.version_id)
+                        .ok()
+                        .flatten()
+                })
+                .map(|vs| vs.total_obs.max(1))
+                .max()
+                .unwrap_or(1);
+            let max_bins = versions
+                .iter()
+                .filter_map(|v| {
+                    self.rt
+                        .ctx_index
+                        .get_version_stats(&v.version_id)
+                        .ok()
+                        .flatten()
+                })
+                .map(|vs| vs.num_binaries.max(vs.top_md5s.len() as u32).max(1))
+                .max()
+                .unwrap_or(1);
+            let empty_weights: HashMap<String, f64> = HashMap::new();
+            let scoring_ctx = CandidateScoringContext {
+                key,
+                md5: ctx.md5,
+                basename: ctx.basename,
+                hostname: ctx.hostname,
+                origin_token: ctx.origin_token,
+                requested_mdkeys: &requested_mdkeys,
+                pmd5: &pmd5,
+                anchor_token_weights: &empty_weights,
+                canonical_hint: canonical_hints[i],
+            };
+            let mut scored: Vec<(usize, f64)> = versions
+                .iter()
+                .enumerate()
+                .map(|(idx, version)| {
+                    Ok((
+                        idx,
+                        score_candidate_version(
+                            &self.rt,
+                            version,
+                            &scoring_ctx,
+                            ts_min,
+                            ts_max,
+                            max_total_obs,
+                            max_bins,
+                        )?,
+                    ))
+                })
+                .collect::<io::Result<Vec<_>>>()?;
+            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let anchor = match scored.as_slice() {
+                [] => None,
+                [top] => Some(top.0),
+                [top, second, ..] if top.1 - second.1 >= 1.0 => Some(top.0),
+                _ => None,
+            };
+            if let Some(best_idx) = anchor {
+                for token in &versions[best_idx].analysis.fingerprint.tokens {
+                    *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 1.0;
+                }
+                for token in &versions[best_idx].analysis.fingerprint.prototype_tokens {
+                    *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 0.5;
+                }
+                for token in &versions[best_idx].analysis.fingerprint.frame_tokens {
+                    *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 0.35;
+                }
+                for token in &versions[best_idx].analysis.fingerprint.comment_tokens {
+                    *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 0.25;
+                }
+                for token in &versions[best_idx].analysis.fingerprint.operand_tokens {
+                    *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 0.2;
                 }
             }
+        }
+        let max_weight = anchor_token_weights
+            .values()
+            .copied()
+            .fold(0.0f64, f64::max);
+        if max_weight > 0.0 {
+            for value in anchor_token_weights.values_mut() {
+                *value /= max_weight;
+            }
+        }
 
-            versions_considered_total += versions.len() as u64;
-
+        let mut results = Vec::with_capacity(ctx.keys.len());
+        for (i, versions) in per_key_versions.iter().enumerate() {
             if versions.is_empty() {
                 results.push(None);
                 continue;
             }
-            if versions.len() == 1 {
-                let rec = &versions[0].0;
-                results.push(Some((
-                    rec.popularity,
-                    rec.len_bytes,
-                    rec.name.clone(),
-                    rec.data.clone(),
-                )));
-                continue;
-            }
 
-            // Compute per-version signals
-            let ts_min = versions.iter().map(|(r, _)| r.ts_sec).min().unwrap();
-            let ts_max = versions.iter().map(|(r, _)| r.ts_sec).max().unwrap();
-
-            let max_total_obs = {
-                let mut m = 0u32;
-                for (_, vid) in &versions {
-                    if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                        if vs.total_obs > m {
-                            m = vs.total_obs;
-                        }
-                    }
-                }
-                if m == 0 {
-                    1
-                } else {
-                    m
-                }
+            let key = ctx.keys[i];
+            let ts_min = versions.iter().map(|v| v.rec.ts_sec).min().unwrap_or(0);
+            let ts_max = versions
+                .iter()
+                .map(|v| v.rec.ts_sec)
+                .max()
+                .unwrap_or(ts_min);
+            let max_total_obs = versions
+                .iter()
+                .filter_map(|v| {
+                    self.rt
+                        .ctx_index
+                        .get_version_stats(&v.version_id)
+                        .ok()
+                        .flatten()
+                })
+                .map(|vs| vs.total_obs.max(1))
+                .max()
+                .unwrap_or(1);
+            let max_bins = versions
+                .iter()
+                .filter_map(|v| {
+                    self.rt
+                        .ctx_index
+                        .get_version_stats(&v.version_id)
+                        .ok()
+                        .flatten()
+                })
+                .map(|vs| vs.num_binaries.max(vs.top_md5s.len() as u32).max(1))
+                .max()
+                .unwrap_or(1);
+            let scoring_ctx = CandidateScoringContext {
+                key,
+                md5: ctx.md5,
+                basename: ctx.basename,
+                hostname: ctx.hostname,
+                origin_token: ctx.origin_token,
+                requested_mdkeys: &requested_mdkeys,
+                pmd5: &pmd5,
+                anchor_token_weights: &anchor_token_weights,
+                canonical_hint: canonical_hints[i],
             };
-
-            let mut max_bins = 1u32;
-            for (_, vid) in &versions {
-                if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                    let nb = if vs.num_binaries == 0 {
-                        vs.top_md5s.len() as u32
-                    } else {
-                        vs.num_binaries
-                    };
-                    if nb > max_bins {
-                        max_bins = nb;
-                    }
-                }
-            }
-
-            let mut best_idx = 0usize;
-            let mut best_score = f64::NEG_INFINITY;
-
-            for (idx, (rec, vid)) in versions.iter().enumerate() {
-                // s_md5
-                let s_md5 = if let Some(md5q) = ctx.md5 {
-                    match self.rt.ctx_index.get_key_md5_stats(k, &md5q)? {
-                        Some(st) if st.last_version_id == *vid => 1.0,
-                        Some(_) => 0.0,
-                        None => 0.0,
-                    }
-                } else {
-                    0.0
-                };
-
-                // s_name
-                let s_name = if let Some(bq) = ctx.basename {
-                    if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                        let mut best = 0.0f64;
-                        for e in vs.top_md5s.iter().take(self.rt.scoring.max_md5_per_version) {
-                            if let Ok(Some(bm)) = self.rt.ctx_index.get_binary_meta(&e.md5) {
-                                let sim = name_suffix_similarity(&bm.basename, bq);
-                                if sim > best {
-                                    best = sim;
-                                }
-                            }
-                        }
-                        best
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                };
-
-                // s_coh
-                let s_coh = if !pmd5.is_empty() {
-                    if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                        let mut sum = 0.0f64;
-                        for e in vs.top_md5s.iter().take(self.rt.scoring.max_md5_per_version) {
-                            if let Some(p) = pmd5.get(&e.md5) {
-                                sum += *p;
-                            }
-                        }
-                        sum
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                };
-
-                // s_stab
-                let s_stab = if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                    (vs.total_obs as f64) / ((max_total_obs as f64) + f64::EPSILON)
-                } else {
-                    0.5
-                };
-
-                // s_rec
-                let s_rec = if ts_max == ts_min {
-                    1.0
-                } else {
-                    (rec.ts_sec.saturating_sub(ts_min) as f64) / ((ts_max - ts_min) as f64)
-                };
-
-                // s_pop_bin
-                let s_pop_bin = if let Ok(Some(vs)) = self.rt.ctx_index.get_version_stats(vid) {
-                    let nb = if vs.num_binaries == 0 {
-                        vs.top_md5s.len() as u32
-                    } else {
-                        vs.num_binaries
-                    };
-                    let denom = (1.0 + (max_bins as f64)).ln();
-                    if denom > 0.0 {
-                        ((1.0 + (nb as f64)).ln()) / denom
-                    } else {
-                        0.5
-                    }
-                } else {
-                    0.5
-                };
-
-                // host/origin not tracked presently
-                let s_host = 0.0f64;
-                let s_origin = 0.0f64;
-
-                let w = &self.rt.scoring;
-                let score = w.w_md5 * s_md5
-                    + w.w_name * s_name
-                    + w.w_coh * s_coh
-                    + w.w_stab * s_stab
-                    + w.w_rec * s_rec
-                    + w.w_pop_bin * s_pop_bin
-                    + w.w_host * s_host
-                    + w.w_origin * s_origin;
-
-                if score > best_score {
-                    best_score = score;
-                    best_idx = idx;
-                } else if (score - best_score).abs() < 1e-12 {
-                    // tie-breakers: prefer md5 match, then newer
-                    let mut cur_md5 = 0.0f64;
-                    if let Some(md5q) = ctx.md5 {
-                        if let Some(st) = self.rt.ctx_index.get_key_md5_stats(k, &md5q)? {
-                            if st.last_version_id == versions[idx].1 {
-                                cur_md5 = 1.0;
-                            }
-                        }
-                    }
-                    let mut best_md5_sig = 0.0f64;
-                    if let Some(md5q) = ctx.md5 {
-                        if let Some(st) = self.rt.ctx_index.get_key_md5_stats(k, &md5q)? {
-                            if st.last_version_id == versions[best_idx].1 {
-                                best_md5_sig = 1.0;
-                            }
-                        }
-                    }
-                    if cur_md5 > best_md5_sig {
-                        best_idx = idx;
-                    } else if (cur_md5 - best_md5_sig).abs() < 1e-12 {
-                        // prefer newer
-                        if versions[idx].0.ts_sec > versions[best_idx].0.ts_sec {
-                            best_idx = idx;
-                        }
-                    }
-                }
-            }
-
-            let rec = &versions[best_idx].0;
-            results.push(Some((
-                rec.popularity,
-                rec.len_bytes,
-                rec.name.clone(),
-                rec.data.clone(),
-            )));
+            let selected = select_from_versions(
+                &self.rt,
+                versions,
+                &scoring_ctx,
+                ts_min,
+                ts_max,
+                max_total_obs,
+                max_bins,
+            )?;
+            results.push(selected.map(|selection| {
+                (
+                    selection.popularity,
+                    selection.data.len() as u32,
+                    selection.name,
+                    selection.data,
+                )
+            }));
         }
 
         METRICS.inc_scoring_versions(versions_considered_total);
@@ -1184,31 +1776,904 @@ impl Database {
             .fetch_add(start.elapsed().as_nanos() as u64, Relaxed);
         Ok(results)
     }
+
+    pub fn list_keys(&self, limit: Option<usize>) -> Vec<u128> {
+        let iter = self.rt.index.iter_keys().map(|(key, _)| key);
+        match limit {
+            Some(limit) => iter.take(limit).collect(),
+            None => iter.collect(),
+        }
+    }
+
+    pub async fn replay_select_for_key(
+        &self,
+        key: u128,
+        options: &ReplayCaseOptions,
+    ) -> io::Result<Option<ReplayCaseResult>> {
+        let max_versions = options.max_versions.max(2);
+        let mut versions = Self::collect_versions_sync(&self.rt, key, max_versions)?;
+        if versions.len() < 2 {
+            return Ok(None);
+        }
+
+        let holdout = versions.remove(0);
+        let requested_mdkeys =
+            replay_requested_mdkeys(&holdout.analysis.metadata, options.request_mode);
+        let holdout_data = shape_metadata_for_request(&holdout.rec.data, &requested_mdkeys);
+        let canonical_hint = self
+            .rt
+            .ctx_index
+            .get_canonical_version(key)?
+            .and_then(|canonical| {
+                if canonical.version_id == holdout.version_id {
+                    None
+                } else {
+                    Some(canonical.version_id)
+                }
+            });
+        let (md5, basename, hostname, origin_token) =
+            replay_query_context(&self.rt, &holdout.version_id)?;
+        let pmd5 = build_family_posterior(&self.rt, &[key])?;
+        let (ts_min, ts_max, max_total_obs, max_bins) =
+            version_population_bounds(&self.rt, &versions);
+
+        let empty_weights: HashMap<String, f64> = HashMap::new();
+        let mut anchor_token_weights: HashMap<String, f64> = HashMap::new();
+        let initial_ctx = CandidateScoringContext {
+            key,
+            md5,
+            basename: basename.as_deref(),
+            hostname: hostname.as_deref(),
+            origin_token: origin_token.as_deref(),
+            requested_mdkeys: &requested_mdkeys,
+            pmd5: &pmd5,
+            anchor_token_weights: &empty_weights,
+            canonical_hint,
+        };
+        let mut first_pass: Vec<(usize, f64)> = versions
+            .iter()
+            .enumerate()
+            .map(|(idx, version)| {
+                Ok((
+                    idx,
+                    score_candidate_version(
+                        &self.rt,
+                        version,
+                        &initial_ctx,
+                        ts_min,
+                        ts_max,
+                        max_total_obs,
+                        max_bins,
+                    )?,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        first_pass.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let anchor = match first_pass.as_slice() {
+            [] => None,
+            [top] => Some(top.0),
+            [top, second, ..] if top.1 - second.1 >= 1.0 => Some(top.0),
+            _ => None,
+        };
+        if let Some(anchor_idx) = anchor {
+            for token in &versions[anchor_idx].analysis.fingerprint.tokens {
+                *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 1.0;
+            }
+            for token in &versions[anchor_idx].analysis.fingerprint.prototype_tokens {
+                *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 0.5;
+            }
+            for token in &versions[anchor_idx].analysis.fingerprint.frame_tokens {
+                *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 0.35;
+            }
+            for token in &versions[anchor_idx].analysis.fingerprint.comment_tokens {
+                *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 0.25;
+            }
+            for token in &versions[anchor_idx].analysis.fingerprint.operand_tokens {
+                *anchor_token_weights.entry(token.clone()).or_insert(0.0) += 0.2;
+            }
+        }
+        let max_anchor_weight = anchor_token_weights
+            .values()
+            .copied()
+            .fold(0.0f64, f64::max);
+        if max_anchor_weight > 0.0 {
+            for value in anchor_token_weights.values_mut() {
+                *value /= max_anchor_weight;
+            }
+        }
+
+        let semantic_ctx = CandidateScoringContext {
+            key,
+            md5,
+            basename: basename.as_deref(),
+            hostname: hostname.as_deref(),
+            origin_token: origin_token.as_deref(),
+            requested_mdkeys: &requested_mdkeys,
+            pmd5: &pmd5,
+            anchor_token_weights: &anchor_token_weights,
+            canonical_hint,
+        };
+        let Some(semantic_selection) = select_from_versions(
+            &self.rt,
+            &versions,
+            &semantic_ctx,
+            ts_min,
+            ts_max,
+            max_total_obs,
+            max_bins,
+        )?
+        else {
+            return Ok(None);
+        };
+
+        let baseline_version = &versions[0];
+        let baseline = ReplaySelectorResult {
+            base_version_id: baseline_version.version_id,
+            name: baseline_version.rec.name.clone(),
+            data: shape_metadata_for_request(&baseline_version.rec.data, &requested_mdkeys),
+            score: 0.0,
+            margin: 0.0,
+            entropy: 1.0,
+            used_synthesis: false,
+        };
+        let semantic = ReplaySelectorResult {
+            base_version_id: semantic_selection.best_version_id,
+            name: semantic_selection.name,
+            data: semantic_selection.data,
+            score: semantic_selection.best_score,
+            margin: semantic_selection.margin,
+            entropy: semantic_selection.entropy,
+            used_synthesis: semantic_selection.used_synthesis,
+        };
+
+        Ok(Some(ReplayCaseResult {
+            key,
+            holdout_version_id: holdout.version_id,
+            holdout_name: holdout.rec.name,
+            holdout_data,
+            requested_mdkeys,
+            candidate_count: versions.len(),
+            baseline,
+            semantic,
+        }))
+    }
 }
 
 // Helper functions
+
+fn select_from_versions(
+    rt: &EngineRuntime,
+    versions: &[AnalyzedVersion],
+    scoring_ctx: &CandidateScoringContext<'_>,
+    ts_min: u64,
+    ts_max: u64,
+    max_total_obs: u32,
+    max_bins: u32,
+) -> io::Result<Option<SelectionOutcome>> {
+    if versions.is_empty() {
+        return Ok(None);
+    }
+
+    let mut scored: Vec<(usize, f64)> = versions
+        .iter()
+        .enumerate()
+        .map(|(idx, version)| {
+            Ok((
+                idx,
+                score_candidate_version(
+                    rt,
+                    version,
+                    scoring_ctx,
+                    ts_min,
+                    ts_max,
+                    max_total_obs,
+                    max_bins,
+                )?,
+            ))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let best_idx = scored[0].0;
+    let best_version = &versions[best_idx];
+    let best_score = scored[0].1;
+    let second_score = scored
+        .get(1)
+        .map(|entry| entry.1)
+        .unwrap_or(f64::NEG_INFINITY);
+    let margin = best_score - second_score;
+    let entropy = score_entropy(&scored);
+    let use_synthesis =
+        versions.len() > 1 && (!scoring_ctx.requested_mdkeys.is_empty() || margin < 1.25);
+
+    let mut top_inputs = Vec::new();
+    for (idx, score) in scored.iter().take(3) {
+        let version = &versions[*idx];
+        top_inputs.push(SynthesisInput {
+            score: *score,
+            name: &version.rec.name,
+            raw_data: &version.rec.data,
+            metadata: &version.analysis.metadata,
+        });
+    }
+
+    let chosen_name = choose_canonical_name(&top_inputs).to_string();
+    let fallback_data =
+        shape_metadata_for_request(&best_version.rec.data, scoring_ctx.requested_mdkeys);
+    let chosen_data = if use_synthesis {
+        let synthesized = synthesize_metadata(&top_inputs, scoring_ctx.requested_mdkeys);
+        if synthesized.is_empty() {
+            fallback_data
+        } else {
+            synthesized
+        }
+    } else {
+        fallback_data
+    };
+
+    Ok(Some(SelectionOutcome {
+        popularity: best_version.rec.popularity,
+        name: if chosen_name.is_empty() {
+            best_version.rec.name.clone()
+        } else {
+            chosen_name
+        },
+        data: chosen_data,
+        best_score,
+        margin,
+        entropy,
+        used_synthesis: use_synthesis,
+        best_version_id: best_version.version_id,
+    }))
+}
+
+fn replay_requested_mdkeys(
+    metadata: &crate::protocol::lumina::FunctionMetadata,
+    mode: ReplayRequestMode,
+) -> Vec<u32> {
+    let all = normalize_requested_mdkeys(
+        &metadata
+            .raw_chunks
+            .iter()
+            .map(|chunk| chunk.raw_key)
+            .collect::<Vec<_>>(),
+    );
+    if all.is_empty() {
+        return all;
+    }
+
+    let wanted = match mode {
+        ReplayRequestMode::Full => all.clone(),
+        ReplayRequestMode::Structure => all
+            .iter()
+            .copied()
+            .filter(|raw_key| {
+                matches!(
+                    crate::protocol::lumina::MdKey::from(*raw_key),
+                    crate::protocol::lumina::MdKey::Type
+                        | crate::protocol::lumina::MdKey::FrameDesc
+                        | crate::protocol::lumina::MdKey::UserStkpnts
+                )
+            })
+            .collect(),
+        ReplayRequestMode::Comments => all
+            .iter()
+            .copied()
+            .filter(|raw_key| {
+                matches!(
+                    crate::protocol::lumina::MdKey::from(*raw_key),
+                    crate::protocol::lumina::MdKey::Fcmt
+                        | crate::protocol::lumina::MdKey::Frptcmt
+                        | crate::protocol::lumina::MdKey::Cmts
+                        | crate::protocol::lumina::MdKey::Rptcmts
+                        | crate::protocol::lumina::MdKey::Extracmts
+                )
+            })
+            .collect(),
+        ReplayRequestMode::Operands => all
+            .iter()
+            .copied()
+            .filter(|raw_key| {
+                matches!(
+                    crate::protocol::lumina::MdKey::from(*raw_key),
+                    crate::protocol::lumina::MdKey::UserStkpnts
+                        | crate::protocol::lumina::MdKey::Ops
+                        | crate::protocol::lumina::MdKey::OpsEx
+                )
+            })
+            .collect(),
+    };
+    if wanted.is_empty() {
+        all
+    } else {
+        normalize_requested_mdkeys(&wanted)
+    }
+}
+
+fn build_family_posterior(rt: &EngineRuntime, keys: &[u128]) -> io::Result<HashMap<[u8; 16], f64>> {
+    let mut vote: HashMap<[u8; 16], f64> = HashMap::new();
+    for &key in keys {
+        let md5_list = rt.ctx_index.get_md5_bins_for_key(key)?;
+        if md5_list.is_empty() {
+            continue;
+        }
+        let df = md5_list.len() as f64;
+        let w_k = 1.0f64 / (1.0 + (1.0 + df).ln());
+        for entry in md5_list {
+            *vote.entry(entry.md5).or_insert(0.0) += w_k * (entry.obs_count as f64);
+        }
+    }
+    let sum_votes: f64 = vote.values().copied().sum();
+    if sum_votes > 0.0 {
+        Ok(vote
+            .into_iter()
+            .map(|(md5, v)| (md5, v / sum_votes))
+            .collect())
+    } else {
+        Ok(HashMap::new())
+    }
+}
+
+fn version_population_bounds(
+    rt: &EngineRuntime,
+    versions: &[AnalyzedVersion],
+) -> (u64, u64, u32, u32) {
+    let ts_min = versions
+        .iter()
+        .map(|version| version.rec.ts_sec)
+        .min()
+        .unwrap_or(0);
+    let ts_max = versions
+        .iter()
+        .map(|version| version.rec.ts_sec)
+        .max()
+        .unwrap_or(ts_min);
+    let max_total_obs = versions
+        .iter()
+        .filter_map(|version| {
+            rt.ctx_index
+                .get_version_stats(&version.version_id)
+                .ok()
+                .flatten()
+        })
+        .map(|stats| stats.total_obs.max(1))
+        .max()
+        .unwrap_or(1);
+    let max_bins = versions
+        .iter()
+        .filter_map(|version| {
+            rt.ctx_index
+                .get_version_stats(&version.version_id)
+                .ok()
+                .flatten()
+        })
+        .map(|stats| stats.num_binaries.max(stats.top_md5s.len() as u32).max(1))
+        .max()
+        .unwrap_or(1);
+    (ts_min, ts_max, max_total_obs, max_bins)
+}
+
+fn replay_query_context(
+    rt: &EngineRuntime,
+    version_id: &[u8; 32],
+) -> io::Result<(
+    Option<[u8; 16]>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+)> {
+    let Some(version_stats) = rt.ctx_index.get_version_stats(version_id)? else {
+        return Ok((None, None, None, None));
+    };
+    let Some(top_md5) = version_stats.top_md5s.first().map(|entry| entry.md5) else {
+        return Ok((None, None, None, None));
+    };
+    let Some(meta) = rt.ctx_index.get_binary_meta(&top_md5)? else {
+        return Ok((Some(top_md5), None, None, None));
+    };
+    Ok((
+        Some(top_md5),
+        (!meta.basename.is_empty()).then_some(meta.basename),
+        (!meta.hostname.is_empty()).then_some(meta.hostname),
+        (!meta.origin_token.is_empty()).then_some(meta.origin_token),
+    ))
+}
+
+fn score_entropy(scored: &[(usize, f64)]) -> f64 {
+    if scored.len() <= 1 {
+        return 0.0;
+    }
+    let max_score = scored
+        .iter()
+        .map(|(_, score)| *score)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let weights: Vec<f64> = scored
+        .iter()
+        .map(|(_, score)| (score - max_score).exp())
+        .collect();
+    let sum: f64 = weights.iter().sum();
+    if sum <= f64::EPSILON {
+        return 1.0;
+    }
+    let mut entropy = 0.0;
+    for weight in weights {
+        let p = weight / sum;
+        if p > f64::EPSILON {
+            entropy -= p * p.ln();
+        }
+    }
+    let denom = (scored.len() as f64).ln();
+    if denom <= f64::EPSILON {
+        0.0
+    } else {
+        (entropy / denom).clamp(0.0, 1.0)
+    }
+}
+
+fn semantic_neighbor_similarity(
+    seed_analysis: &SemanticAnalysis,
+    seed_doc: &SearchDocument,
+    candidate_analysis: &SemanticAnalysis,
+    candidate_doc: &SearchDocument,
+    family_ctx: &NeighborFamilyContext,
+    candidate_binary_metas: &[crate::engine::BinaryMeta],
+    lexical_prior: f64,
+) -> Option<SemanticNeighborScore> {
+    let semantic_overlap = semantic_token_dice_score(
+        &seed_analysis.fingerprint.tokens,
+        &candidate_analysis.fingerprint.tokens,
+    );
+    let prototype_overlap = semantic_token_dice_score(
+        &seed_analysis.fingerprint.prototype_tokens,
+        &candidate_analysis.fingerprint.prototype_tokens,
+    );
+    let frame_overlap = semantic_token_dice_score(
+        &seed_analysis.fingerprint.frame_tokens,
+        &candidate_analysis.fingerprint.frame_tokens,
+    );
+    let comment_overlap = semantic_token_dice_score(
+        &seed_analysis.fingerprint.comment_tokens,
+        &candidate_analysis.fingerprint.comment_tokens,
+    );
+    let operand_overlap = semantic_token_dice_score(
+        &seed_analysis.fingerprint.operand_tokens,
+        &candidate_analysis.fingerprint.operand_tokens,
+    );
+    let origin_overlap = token_dice_score(&seed_doc.origin_tokens, &candidate_doc.origin_tokens);
+    let binary_overlap = token_dice_score(&seed_doc.binary_names, &candidate_doc.binary_names);
+    let lexical = (lexical_prior / 10.0).clamp(0.0, 1.0);
+    let (
+        direct_binary_score,
+        related_binary_score,
+        direct_family_binaries,
+        related_family_binaries,
+    ) = family_support_rationale(family_ctx, candidate_binary_metas);
+    let family_score = direct_binary_score.max(related_binary_score * 0.92);
+
+    let intersection = semantic_token_intersection_count(
+        &seed_analysis.fingerprint.tokens,
+        &candidate_analysis.fingerprint.tokens,
+    );
+    if intersection < 2
+        && prototype_overlap < 0.12
+        && frame_overlap < 0.12
+        && comment_overlap < 0.12
+        && operand_overlap < 0.12
+        && origin_overlap < 0.2
+        && binary_overlap < 0.2
+        && family_score < 0.18
+    {
+        return None;
+    }
+
+    if family_score < 0.08
+        && semantic_overlap < 0.22
+        && prototype_overlap < 0.18
+        && frame_overlap < 0.18
+        && comment_overlap < 0.18
+        && operand_overlap < 0.18
+    {
+        return None;
+    }
+
+    let language_match = !seed_analysis.fingerprint.language.is_empty()
+        && !candidate_analysis.fingerprint.language.is_empty()
+        && seed_analysis.fingerprint.language == candidate_analysis.fingerprint.language;
+    let language_bonus = match (
+        seed_analysis.fingerprint.language.is_empty(),
+        candidate_analysis.fingerprint.language.is_empty(),
+        language_match,
+    ) {
+        (false, false, true) => 0.08,
+        (false, false, false) => -0.03,
+        _ => 0.0,
+    };
+
+    let candidate_consistency = candidate_analysis.consistency_score.clamp(0.0, 1.0);
+    let final_score = (0.28 * semantic_overlap
+        + 0.18 * prototype_overlap
+        + 0.1 * frame_overlap
+        + 0.08 * comment_overlap
+        + 0.07 * operand_overlap
+        + 0.04 * origin_overlap
+        + 0.03 * binary_overlap
+        + 0.04 * lexical
+        + 0.14 * family_score
+        + 0.08 * candidate_consistency
+        + language_bonus)
+        .clamp(0.0, 1.0);
+
+    Some(SemanticNeighborScore {
+        final_score,
+        rationale: SemanticNeighborRationale {
+            family_score: family_score as f32,
+            direct_binary_score: direct_binary_score as f32,
+            related_binary_score: related_binary_score as f32,
+            lexical_prior: lexical as f32,
+            semantic_overlap: semantic_overlap as f32,
+            prototype_overlap: prototype_overlap as f32,
+            frame_overlap: frame_overlap as f32,
+            comment_overlap: comment_overlap as f32,
+            operand_overlap: operand_overlap as f32,
+            origin_overlap: origin_overlap as f32,
+            binary_name_overlap: binary_overlap as f32,
+            candidate_consistency: candidate_consistency as f32,
+            language_match,
+            shared_semantic_tokens: shared_ranked_tokens(
+                &seed_analysis.fingerprint.tokens,
+                &candidate_analysis.fingerprint.tokens,
+                6,
+            ),
+            shared_prototype_tokens: shared_ranked_tokens(
+                &seed_analysis.fingerprint.prototype_tokens,
+                &candidate_analysis.fingerprint.prototype_tokens,
+                4,
+            ),
+            shared_frame_tokens: shared_ranked_tokens(
+                &seed_analysis.fingerprint.frame_tokens,
+                &candidate_analysis.fingerprint.frame_tokens,
+                4,
+            ),
+            shared_comment_tokens: shared_ranked_tokens(
+                &seed_analysis.fingerprint.comment_tokens,
+                &candidate_analysis.fingerprint.comment_tokens,
+                4,
+            ),
+            shared_operand_tokens: shared_ranked_tokens(
+                &seed_analysis.fingerprint.operand_tokens,
+                &candidate_analysis.fingerprint.operand_tokens,
+                4,
+            ),
+            direct_family_binaries,
+            related_family_binaries,
+        },
+    })
+}
+
+fn token_dice_score(lhs: &[String], rhs: &[String]) -> f64 {
+    if lhs.is_empty() || rhs.is_empty() {
+        return 0.0;
+    }
+    let lhs_set: HashSet<&str> = lhs.iter().map(String::as_str).collect();
+    let rhs_set: HashSet<&str> = rhs.iter().map(String::as_str).collect();
+    let intersection = lhs_set.intersection(&rhs_set).count();
+    if intersection == 0 {
+        0.0
+    } else {
+        (2.0 * intersection as f64) / ((lhs_set.len() + rhs_set.len()) as f64)
+    }
+}
+
+fn semantic_token_dice_score(lhs: &[String], rhs: &[String]) -> f64 {
+    let lhs_set = filtered_neighbor_token_set(lhs);
+    let rhs_set = filtered_neighbor_token_set(rhs);
+    if lhs_set.is_empty() || rhs_set.is_empty() {
+        return 0.0;
+    }
+    let intersection = lhs_set.intersection(&rhs_set).count();
+    if intersection == 0 {
+        0.0
+    } else {
+        (2.0 * intersection as f64) / ((lhs_set.len() + rhs_set.len()) as f64)
+    }
+}
+
+fn token_intersection_count(lhs: &[String], rhs: &[String]) -> usize {
+    let lhs_set: HashSet<&str> = lhs.iter().map(String::as_str).collect();
+    let rhs_set: HashSet<&str> = rhs.iter().map(String::as_str).collect();
+    lhs_set.intersection(&rhs_set).count()
+}
+
+fn semantic_token_intersection_count(lhs: &[String], rhs: &[String]) -> usize {
+    let lhs_set = filtered_neighbor_token_set(lhs);
+    let rhs_set = filtered_neighbor_token_set(rhs);
+    lhs_set.intersection(&rhs_set).count()
+}
+
+fn family_support_rationale(
+    family_ctx: &NeighborFamilyContext,
+    candidate_binary_metas: &[crate::engine::BinaryMeta],
+) -> (f64, f64, Vec<BinaryRefHit>, Vec<BinaryRefHit>) {
+    let mut direct_binary_score: f64 = 0.0;
+    let mut related_binary_score: f64 = 0.0;
+    let mut direct_family_binaries = Vec::new();
+    let mut related_family_binaries = Vec::new();
+
+    for meta in candidate_binary_metas.iter().take(8) {
+        if let Some(weight) = family_ctx.direct_weights.get(&meta.md5) {
+            direct_binary_score = direct_binary_score.max(*weight);
+            direct_family_binaries.push(binary_ref_hit_from_meta(meta));
+            continue;
+        }
+        if let Some(weight) = family_ctx.related_weights.get(&meta.md5) {
+            related_binary_score = related_binary_score.max(*weight);
+            related_family_binaries.push(binary_ref_hit_from_meta(meta));
+        }
+    }
+
+    dedup_binary_refs(&mut direct_family_binaries);
+    dedup_binary_refs(&mut related_family_binaries);
+    direct_family_binaries.truncate(3);
+    related_family_binaries.truncate(3);
+
+    (
+        direct_binary_score,
+        related_binary_score,
+        direct_family_binaries,
+        related_family_binaries,
+    )
+}
+
+fn shared_ranked_tokens(lhs: &[String], rhs: &[String], limit: usize) -> Vec<String> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let lhs_set: HashSet<&str> = lhs.iter().map(String::as_str).collect();
+    let rhs_set: HashSet<&str> = rhs.iter().map(String::as_str).collect();
+    let mut shared: Vec<String> = lhs_set
+        .intersection(&rhs_set)
+        .copied()
+        .filter(|token| !is_generic_neighbor_token(token))
+        .map(|token| (*token).to_string())
+        .collect();
+    shared.sort_by(|a, b| {
+        neighbor_token_rank(b)
+            .partial_cmp(&neighbor_token_rank(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.len().cmp(&a.len()))
+            .then_with(|| a.cmp(b))
+    });
+    shared.truncate(limit);
+    shared
+}
+
+fn filtered_neighbor_token_set<'a>(tokens: &'a [String]) -> HashSet<&'a str> {
+    tokens
+        .iter()
+        .map(String::as_str)
+        .filter(|token| !is_generic_neighbor_token(token))
+        .collect()
+}
+
+fn is_generic_neighbor_token(token: &str) -> bool {
+    let raw_lower = token.trim().to_ascii_lowercase();
+    let normalized = normalize_neighbor_token(token);
+    normalized.len() < 3
+        || normalized.chars().all(|ch| ch.is_ascii_digit())
+        || GENERIC_NEIGHBOR_TOKENS.contains(&raw_lower.as_str())
+        || GENERIC_NEIGHBOR_TOKENS.contains(&normalized.as_str())
+        || (normalized.starts_with("__") && normalized.ends_with("call"))
+        || is_arch_neighbor_token(&normalized)
+        || is_simd_neighbor_token(&normalized)
+}
+
+fn normalize_neighbor_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|ch: char| !ch.is_ascii_alphanumeric())
+        .to_ascii_lowercase()
+}
+
+fn is_arch_neighbor_token(token: &str) -> bool {
+    matches!(
+        token,
+        "x86" | "x64" | "x86_64" | "amd64" | "arm" | "arm64" | "aarch64" | "mips" | "ppc"
+    )
+}
+
+fn is_simd_neighbor_token(token: &str) -> bool {
+    let Some(rest) = token.strip_prefix("__m") else {
+        return false;
+    };
+    !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn neighbor_token_rank(token: &str) -> f64 {
+    let mut score = match token.len() {
+        0..=3 => 0.4,
+        4..=5 => 0.7,
+        6..=9 => 1.0,
+        10..=15 => 1.25,
+        _ => 1.45,
+    };
+    if token.contains('_') {
+        score += 0.12;
+    }
+    if token.chars().any(|ch| ch.is_ascii_digit()) {
+        score += 0.04;
+    }
+    score
+}
+
+fn binary_ref_hit_from_meta(meta: &crate::engine::BinaryMeta) -> BinaryRefHit {
+    BinaryRefHit {
+        md5_hex: hex_md5(&meta.md5),
+        short_id: short_md5(&meta.md5),
+        basename: basename_only(&meta.basename),
+        display_name: format!("{}#{}", basename_only(&meta.basename), short_md5(&meta.md5)),
+    }
+}
+
+fn dedup_binary_refs(items: &mut Vec<BinaryRefHit>) {
+    let mut seen = HashSet::new();
+    items.retain(|item| seen.insert(item.md5_hex.clone()));
+}
+
+struct CandidateScoringContext<'a> {
+    key: u128,
+    md5: Option<[u8; 16]>,
+    basename: Option<&'a str>,
+    hostname: Option<&'a str>,
+    origin_token: Option<&'a str>,
+    requested_mdkeys: &'a [u32],
+    pmd5: &'a HashMap<[u8; 16], f64>,
+    anchor_token_weights: &'a HashMap<String, f64>,
+    canonical_hint: Option<[u8; 32]>,
+}
+
+fn score_candidate_version(
+    rt: &EngineRuntime,
+    version: &AnalyzedVersion,
+    ctx: &CandidateScoringContext<'_>,
+    ts_min: u64,
+    ts_max: u64,
+    max_total_obs: u32,
+    max_bins: u32,
+) -> io::Result<f64> {
+    let version_stats = rt.ctx_index.get_version_stats(&version.version_id)?;
+
+    let s_md5 = if let Some(md5q) = ctx.md5 {
+        match rt.ctx_index.get_key_md5_stats(ctx.key, &md5q)? {
+            Some(st) if st.last_version_id == version.version_id => 1.0,
+            Some(_) => version_stats
+                .as_ref()
+                .map(|vs| {
+                    if vs.top_md5s.iter().any(|entry| entry.md5 == md5q) {
+                        0.5
+                    } else {
+                        0.0
+                    }
+                })
+                .unwrap_or(0.0),
+            None => 0.0,
+        }
+    } else {
+        0.0
+    };
+
+    let mut s_name = 0.0f64;
+    let mut s_host = 0.0f64;
+    let mut s_origin = 0.0f64;
+    let normalized_origin = ctx.origin_token.map(normalize_origin_token);
+    if let Some(vs) = &version_stats {
+        for entry in vs.top_md5s.iter().take(rt.scoring.max_md5_per_version) {
+            if let Ok(Some(meta)) = rt.ctx_index.get_binary_meta(&entry.md5) {
+                if let Some(bq) = ctx.basename {
+                    s_name = s_name.max(name_suffix_similarity(&meta.basename, bq));
+                }
+                if let Some(hq) = ctx.hostname {
+                    s_host = s_host.max(name_suffix_similarity(&meta.hostname, hq));
+                }
+                if let Some(oq) = normalized_origin.as_deref() {
+                    s_origin = s_origin.max(name_suffix_similarity(&meta.origin_token, oq));
+                }
+            }
+        }
+    }
+
+    let s_coh = if !ctx.pmd5.is_empty() {
+        version_stats
+            .as_ref()
+            .map(|vs| {
+                vs.top_md5s
+                    .iter()
+                    .take(rt.scoring.max_md5_per_version)
+                    .map(|entry| ctx.pmd5.get(&entry.md5).copied().unwrap_or(0.0))
+                    .sum::<f64>()
+            })
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    let s_stab = version_stats
+        .as_ref()
+        .map(|vs| (vs.total_obs as f64) / ((max_total_obs as f64) + f64::EPSILON))
+        .unwrap_or(0.5);
+
+    let s_rec = if ts_max == ts_min {
+        1.0
+    } else {
+        (version.rec.ts_sec.saturating_sub(ts_min) as f64) / ((ts_max - ts_min) as f64)
+    };
+
+    let s_pop_bin = version_stats
+        .as_ref()
+        .map(|vs| {
+            let nb = if vs.num_binaries == 0 {
+                vs.top_md5s.len() as u32
+            } else {
+                vs.num_binaries
+            };
+            let denom = (1.0 + (max_bins as f64)).ln();
+            if denom > 0.0 {
+                ((1.0 + (nb as f64)).ln()) / denom
+            } else {
+                0.5
+            }
+        })
+        .unwrap_or(0.5);
+
+    let s_req = if ctx.requested_mdkeys.is_empty() {
+        if version.analysis.metadata.raw_chunks.is_empty() {
+            0.0
+        } else {
+            1.0
+        }
+    } else {
+        (version
+            .analysis
+            .metadata
+            .requested_coverage(ctx.requested_mdkeys) as f64)
+            / (ctx.requested_mdkeys.len() as f64)
+    };
+
+    let s_sem = (version.analysis.quality_score / 8.0).clamp(0.0, 1.0);
+    let s_cons = version.analysis.consistency_score.clamp(0.0, 1.0);
+    let s_anchor = fingerprint_similarity(
+        &version.analysis.fingerprint.tokens,
+        ctx.anchor_token_weights,
+    )
+    .clamp(0.0, 1.0);
+    let s_can = if ctx.canonical_hint == Some(version.version_id) {
+        1.0
+    } else {
+        0.0
+    };
+
+    let w = &rt.scoring;
+    let score = w.w_md5 * s_md5
+        + w.w_name * s_name
+        + w.w_coh * s_coh
+        + w.w_stab * s_stab
+        + w.w_rec * s_rec
+        + w.w_pop_bin * s_pop_bin
+        + w.w_host * s_host
+        + w.w_origin * s_origin
+        + 1.25 * s_req
+        + 0.75 * s_sem
+        + 0.85 * s_cons
+        + 0.75 * s_anchor
+        + 0.5 * s_can;
+
+    Ok(score)
+}
 
 fn now_ts_sec() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-/// Compute version ID from key, name, and data.
-fn version_id(key: u128, name: &str, data: &[u8]) -> [u8; 32] {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    key.hash(&mut h);
-    name.hash(&mut h);
-    data.hash(&mut h);
-    let hash = h.finish();
-    let mut out = [0u8; 32];
-    out[0..8].copy_from_slice(&key.to_le_bytes()[0..8]);
-    out[8..16].copy_from_slice(&key.to_le_bytes()[8..16]);
-    out[16..24].copy_from_slice(&hash.to_le_bytes());
-    out[24..32].copy_from_slice(&(name.len() as u64).to_le_bytes());
-    out
 }
 
 fn name_suffix_similarity(a: &str, b: &str) -> f64 {
@@ -1266,7 +2731,8 @@ fn score_binary_meta(meta: &crate::engine::BinaryMeta, norm_query: &str) -> f32 
     } else {
         0.0
     };
-    base + (meta.function_count.min(10_000) as f32).ln_1p() * 6.0 + (meta.obs_count.min(1_000_000) as f32).ln_1p()
+    base + (meta.function_count.min(10_000) as f32).ln_1p() * 6.0
+        + (meta.obs_count.min(1_000_000) as f32).ln_1p()
 }
 
 fn binary_summary_from_meta(meta: &crate::engine::BinaryMeta, score: f32) -> BinarySummary {
@@ -1302,8 +2768,11 @@ fn metadata_richness(data: &[u8]) -> usize {
         + usize::from(parsed.frame_desc.is_some())
         + usize::from(parsed.fcmt.is_some() || parsed.frptcmt.is_some())
         + usize::from(!parsed.insn_cmts.is_empty() || !parsed.rpt_insn_cmts.is_empty())
-        + usize::from(!parsed.errors.is_empty())
+        + usize::from(!parsed.extra_cmts.is_empty())
+        + usize::from(parsed.user_stkpnts.is_some())
+        + usize::from(parsed.ops.is_some() || parsed.ops_ex.is_some())
         + usize::from(parsed.vd_elapsed.is_some())
+        + usize::from(parsed.errors.is_empty())
 }
 
 fn sort_compare_items(items: &mut [BinaryCompareItem]) {

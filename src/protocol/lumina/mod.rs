@@ -17,8 +17,9 @@ mod wire;
 pub use crate::common::error::LuminaError;
 pub use builder::*;
 pub use metadata::{
-    parse_metadata, FrameDesc, FrameMem, FunctionMetadata, InsnCmt, MdKey, MdTypeParts,
-    MetadataParser,
+    parse_metadata, serialize_metadata_chunks, split_metadata_chunks, FrameDesc, FrameMem,
+    FunctionMetadata, InsnCmt, MdKey, MdTypeParts, MetadataChunk, MetadataParser,
+    OpaqueMetadataBlob, SerializedTinfo,
 };
 pub use parser::*;
 pub use types::*;

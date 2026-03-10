@@ -1167,6 +1167,286 @@ pub const HOME: &str = r#"<!doctype html>
             gap: 6px;
         }
 
+        .neighbor-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 40px;
+            padding: 8px 12px;
+            border: 1px solid var(--border-dim);
+            background: var(--bg-base);
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+        }
+
+        .neighbor-toggle:hover {
+            border-color: rgba(0, 255, 136, 0.22);
+            color: var(--text-primary);
+        }
+
+        .neighbor-toggle.active {
+            border-color: rgba(0, 255, 136, 0.34);
+            color: var(--accent);
+            background: rgba(0, 255, 136, 0.08);
+            box-shadow: inset 0 0 0 1px rgba(0, 255, 136, 0.08);
+        }
+
+        .neighbor-toggle-track {
+            width: 42px;
+            height: 22px;
+            border-radius: 999px;
+            border: 1px solid var(--border-focus);
+            background: rgba(255, 255, 255, 0.04);
+            position: relative;
+            transition: border-color 0.16s ease, background 0.16s ease;
+            flex: 0 0 auto;
+        }
+
+        .neighbor-toggle.active .neighbor-toggle-track {
+            border-color: rgba(0, 255, 136, 0.38);
+            background: rgba(0, 255, 136, 0.18);
+        }
+
+        .neighbor-toggle-thumb {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+            transition: transform 0.16s ease, background 0.16s ease;
+        }
+
+        .neighbor-toggle.active .neighbor-toggle-thumb {
+            transform: translateX(20px);
+            background: var(--accent);
+        }
+
+        .neighbor-toggle-copy {
+            display: inline-flex;
+            flex-direction: column;
+            gap: 2px;
+            text-align: left;
+        }
+
+        .neighbor-toggle-copy .secondary {
+            color: var(--text-dim);
+            font-size: 9px;
+            letter-spacing: 0.16em;
+        }
+
+        .neighbor-toggle.active .neighbor-toggle-copy .secondary {
+            color: rgba(0, 255, 136, 0.7);
+        }
+
+        .neighbor-results {
+            display: grid;
+            gap: var(--space-sm);
+        }
+
+        .neighbor-card {
+            border: 1px solid var(--border-dim);
+            background: var(--bg-base);
+            padding: 14px 16px;
+            display: grid;
+            gap: 10px;
+            transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+        }
+
+        .neighbor-card:hover {
+            border-color: rgba(0, 255, 136, 0.18);
+            background: var(--bg-element);
+        }
+
+        .neighbor-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .neighbor-card-main {
+            min-width: 0;
+            display: grid;
+            gap: 6px;
+        }
+
+        .neighbor-card-link {
+            display: grid;
+            gap: 6px;
+            color: inherit;
+            text-decoration: none;
+            min-width: 0;
+        }
+
+        .neighbor-card-main.clickable {
+            cursor: pointer;
+        }
+
+        .neighbor-card-main.clickable:hover .neighbor-card-title,
+        .neighbor-card-link:hover .neighbor-card-title {
+            text-shadow: 0 0 12px rgba(0, 255, 136, 0.16);
+        }
+
+        .neighbor-card-title {
+            color: var(--accent);
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
+
+        .neighbor-card-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            color: var(--text-dim);
+            font-size: 11px;
+        }
+
+        .neighbor-card-key {
+            color: var(--text-tertiary);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            overflow-wrap: anywhere;
+        }
+
+        .detail-name-stack {
+            display: grid;
+            gap: 8px;
+        }
+
+        .detail-name-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .neighbor-card-actions {
+            display: grid;
+            justify-items: end;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
+
+        .neighbor-pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 6px;
+        }
+
+        .neighbor-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border: 1px solid var(--border-dim);
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-secondary);
+            font-size: 10px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .neighbor-pill.accent {
+            border-color: rgba(0, 255, 136, 0.3);
+            background: rgba(0, 255, 136, 0.08);
+            color: var(--accent);
+        }
+
+        .neighbor-pill.info {
+            border-color: rgba(0, 136, 255, 0.28);
+            background: rgba(0, 136, 255, 0.1);
+            color: var(--state-info);
+        }
+
+        .neighbor-pill.warn {
+            border-color: rgba(255, 170, 0, 0.28);
+            background: rgba(255, 170, 0, 0.1);
+            color: var(--state-caution);
+        }
+
+        .neighbor-rationale {
+            border-top: 1px solid var(--border-dim);
+            padding-top: 10px;
+        }
+
+        .neighbor-rationale summary {
+            list-style: none;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            user-select: none;
+        }
+
+        .neighbor-rationale summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .neighbor-rationale summary::before {
+            content: ">";
+            color: var(--text-dim);
+            transition: transform 0.14s ease;
+        }
+
+        .neighbor-rationale[open] summary::before {
+            transform: rotate(90deg);
+            color: var(--accent);
+        }
+
+        .neighbor-rationale-title {
+            font-size: 10px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--text-tertiary);
+        }
+
+        .neighbor-rationale-content {
+            display: grid;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .neighbor-rationale-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+            gap: 8px;
+        }
+
+        .neighbor-metric {
+            border: 1px solid var(--border-dim);
+            background: var(--bg-base);
+            padding: 10px 12px;
+            min-width: 0;
+        }
+
+        .neighbor-metric .label {
+            font-size: 9px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+        }
+
+        .neighbor-metric .value {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+
         .binary-graph-hint {
             grid-column: 1 / -1;
             color: var(--text-dim);
@@ -4047,6 +4327,7 @@ pub const HOME: &str = r#"<!doctype html>
             .compare-item-row,
             .result-key,
             .result-meta,
+            .neighbor-card-header,
             .metadata-header,
             .telemetry-left,
             .telemetry-center,
@@ -4060,6 +4341,15 @@ pub const HOME: &str = r#"<!doctype html>
             .compare-list-column,
             .metadata-content {
                 min-width: 0;
+            }
+
+            .neighbor-card-actions {
+                justify-items: start;
+                width: 100%;
+            }
+
+            .neighbor-pill-row {
+                justify-content: flex-start;
             }
 
             .header-grid {
@@ -5290,6 +5580,10 @@ pub const HOME: &str = r#"<!doctype html>
             return 'dazhbog.compareState.v1';
         }
 
+        function semanticNeighborPrefsStorageKey() {
+            return 'dazhbog.semanticNeighbors.v1';
+        }
+
         function loadCompareSets() {
             try {
                 return JSON.parse(localStorage.getItem(compareStorageKey()) || '{}') || {};
@@ -5322,6 +5616,30 @@ pub const HOME: &str = r#"<!doctype html>
                     if (typeof k === 'string' && k) compareKeys.push(k);
                 });
                 compareBaselineKey = typeof state.baseline === 'string' ? state.baseline : (compareKeys[0] || null);
+            } catch (_) {}
+        }
+
+        function persistSemanticNeighborPrefs() {
+            try {
+                localStorage.setItem(semanticNeighborPrefsStorageKey(), JSON.stringify({
+                    limit: currentSemanticNeighborLimit,
+                    strictFamily: currentSemanticNeighborStrictFamily,
+                }));
+            } catch (_) {}
+        }
+
+        function restoreSemanticNeighborPrefs() {
+            try {
+                const raw = localStorage.getItem(semanticNeighborPrefsStorageKey());
+                if (!raw) return;
+                const prefs = JSON.parse(raw);
+                if (!prefs || typeof prefs !== 'object') return;
+                if (Number.isFinite(Number(prefs.limit))) {
+                    currentSemanticNeighborLimit = Math.max(1, Math.min(24, Number.parseInt(prefs.limit, 10) || 8));
+                }
+                if (typeof prefs.strictFamily === 'boolean') {
+                    currentSemanticNeighborStrictFamily = prefs.strictFamily;
+                }
             } catch (_) {}
         }
 
@@ -5659,7 +5977,7 @@ pub const HOME: &str = r#"<!doctype html>
             return {
                 typeDecl: m && m.type_parts && m.type_parts.declaration ? m.type_parts.declaration : '-',
                 frameMembers: m && m.frame_desc && m.frame_desc.members ? m.frame_desc.members.length : 0,
-                comments: m ? ((m.insn_cmts || []).length + (m.rpt_insn_cmts || []).length) : 0,
+                comments: m ? ((m.insn_cmts || []).length + (m.rpt_insn_cmts || []).length + (m.extra_cmts || []).length) : 0,
                 parseState: m && m.errors && m.errors.length > 0 ? 'partial' : 'parsed',
                 parseErrors: m && m.errors ? m.errors.length : 0,
                 vdElapsed: m && m.vd_elapsed !== null && m.vd_elapsed !== undefined ? m.vd_elapsed : null,
@@ -6284,6 +6602,8 @@ pub const HOME: &str = r#"<!doctype html>
             html += renderCompareSection('Parser', [
                 renderMatrixRow('Bytes Parsed', metas.map(m => String(m.bytes_parsed || 0))),
                 renderMatrixRow('Raw Size', metas.map(m => fmtBytes(m.raw_size || 0))),
+                renderMatrixRow('Raw Chunks', metas.map(m => String(m.raw_chunk_count || ((m.raw_chunks || []).length || 0))), { jumps: multiJump('section-semantic') }),
+                renderMatrixRow('Extra Comments', metas.map(m => String((m.extra_cmts || []).length)), { jumps: multiJump('section-semantic') }),
                 renderMatrixRow('Error List', metas.map(m => (m.errors || []).join(' | ') || '-'), { mode: 'comment' }),
             ]);
 
@@ -6387,6 +6707,222 @@ pub const HOME: &str = r#"<!doctype html>
 
             html += '</div></div>';
             html += '</div>';
+            return html;
+        }
+
+        function renderSemanticTextList(items, emptyLabel) {
+            const values = Array.isArray(items) ? items.filter(Boolean) : [];
+            if (!values.length) {
+                return '<div class="metadata-empty">' + esc(emptyLabel) + '</div>';
+            }
+            return '<div class="metadata-list">'
+                + values.map(value => '<div class="metadata-item"><div class="info" style="white-space: pre-wrap;">' + esc(String(value)) + '</div></div>').join('')
+                + '</div>';
+        }
+
+        function renderOpaqueBlobDetail(title, blob) {
+            if (!blob) return '';
+            const texts = Array.isArray(blob.printable_texts) ? blob.printable_texts : [];
+            let html = '<div class="detail-section"><div class="detail-label">' + esc(title) + '</div>';
+            html += '<div class="detail-grid" style="margin-bottom: var(--space-sm);">';
+            html += '<div class="detail-stat"><div class="label">Raw Size</div><div class="value">' + fmtBytes(blob.size || 0) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Fragments</div><div class="value">' + esc(String(texts.length)) + '</div></div>';
+            html += '</div>';
+            html += renderSemanticTextList(texts, 'No printable fragments');
+            html += '</div>';
+            return html;
+        }
+
+        function renderRawChunkCatalog(chunks) {
+            const list = Array.isArray(chunks) ? chunks : [];
+            if (!list.length) {
+                return '<div class="metadata-empty">No raw metadata chunks preserved</div>';
+            }
+            return '<div class="metadata-list">'
+                + list.map(chunk => {
+                    const keyName = chunk && chunk.key_name ? String(chunk.key_name) : ('MDK_' + String(chunk && chunk.raw_key !== undefined ? chunk.raw_key : '?'));
+                    const rawKey = chunk && chunk.raw_key !== undefined ? String(chunk.raw_key) : '?';
+                    const size = fmtBytes(chunk && chunk.size ? chunk.size : 0);
+                    const previewTexts = Array.isArray(chunk && chunk.printable_texts) ? chunk.printable_texts : [];
+                    const preview = previewTexts.length ? previewTexts.join(' | ') : 'no printable preview';
+                    return '<div class="metadata-item"><div><div class="name">'
+                        + esc(keyName) + ' · key ' + esc(rawKey) + ' · ' + esc(size)
+                        + '</div><div class="info" style="white-space: pre-wrap;">'
+                        + esc(preview)
+                        + '</div></div></div>';
+                }).join('')
+                + '</div>';
+        }
+
+        function renderSemanticMetadata(metadata) {
+            const m = metadata || {};
+            const extraCmts = Array.isArray(m.extra_cmts) ? m.extra_cmts : [];
+            const rawChunks = Array.isArray(m.raw_chunks) ? m.raw_chunks : [];
+            const rawChunkCount = Number.isFinite(Number(m.raw_chunk_count)) ? Number(m.raw_chunk_count) : rawChunks.length;
+            const hasSemantic = rawChunkCount > 0 || extraCmts.length > 0 || !!m.user_stkpnts || !!m.ops || !!m.ops_ex;
+            if (!hasSemantic) return '';
+
+            let html = '<div class="metadata-section detail-anchor" id="section-semantic"><div class="metadata-header"><span>Semantic Metadata</span><span class="badge nominal">' + esc(String(rawChunkCount)) + ' CHUNKS</span></div><div class="metadata-content" style="display:flex; flex-direction:column; gap: var(--space-md);">';
+            html += '<div class="detail-grid">';
+            html += '<div class="detail-stat"><div class="label">Raw Chunks</div><div class="value">' + esc(String(rawChunkCount)) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Extra Comments</div><div class="value">' + esc(String(extraCmts.length)) + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Stack Points</div><div class="value">' + (m.user_stkpnts ? 'PRESENT' : 'NONE') + '</div></div>';
+            html += '<div class="detail-stat"><div class="label">Operand Blobs</div><div class="value">' + esc(String((m.ops ? 1 : 0) + (m.ops_ex ? 1 : 0))) + '</div></div>';
+            html += '</div>';
+
+            if (extraCmts.length > 0) {
+                html += '<div class="detail-section"><div class="detail-label">Extra Comments</div>' + renderSemanticTextList(extraCmts, 'No extra comments') + '</div>';
+            }
+            if (m.user_stkpnts) {
+                html += renderOpaqueBlobDetail('User Stack Points', m.user_stkpnts);
+            }
+            if (m.ops) {
+                html += renderOpaqueBlobDetail('Operand Renderings', m.ops);
+            }
+            if (m.ops_ex) {
+                html += renderOpaqueBlobDetail('Extended Operand Renderings', m.ops_ex);
+            }
+
+            html += '<div class="detail-section"><div class="detail-label">Raw Chunk Catalog</div>' + renderRawChunkCatalog(rawChunks) + '</div>';
+            html += '</div></div>';
+            return html;
+        }
+
+        function renderSemanticNeighborSection() {
+            const currentSig = semanticNeighborRequestSig(currentDetailKeyHex);
+            const loading = currentSemanticNeighborLoadingSig === currentSig;
+            const ready = currentSemanticNeighborLoadedSig === currentSig;
+            const error = ready ? currentSemanticNeighborError : null;
+            const results = ready && Array.isArray(currentSemanticNeighbors) ? currentSemanticNeighbors : [];
+
+            let html = '<div class="metadata-section detail-anchor" id="section-neighbors"><div class="metadata-header"><span>Semantic Neighbors</span><span class="badge nominal">';
+            if (loading) html += 'LOADING';
+            else if (error) html += 'ERROR';
+            else html += esc(String(results.length));
+            html += '</span></div><div class="metadata-content">';
+            html += '<div class="binary-graph-toolbar">';
+            html += '<label class="binary-graph-field"><span class="detail-label">Limit</span><input class="comment-search" type="number" min="1" max="24" value="' + esc(String(currentSemanticNeighborLimit)) + '" onchange="setSemanticNeighborLimit(this.value)"></label>';
+            html += '<div class="binary-graph-field"><span class="detail-label">Strict Family</span>';
+            html += '<button type="button" class="neighbor-toggle' + (currentSemanticNeighborStrictFamily ? ' active' : '') + '" onclick="toggleSemanticNeighborStrictFamily()">';
+            html += '<span class="neighbor-toggle-track"><span class="neighbor-toggle-thumb"></span></span>';
+            html += '<span class="neighbor-toggle-copy"><span>' + (currentSemanticNeighborStrictFamily ? 'Enabled' : 'Disabled') + '</span><span class="secondary">Family Locked</span></span>';
+            html += '</button></div>';
+            html += '<div class="binary-graph-hint">Suggestions only. Strict family keeps only direct or related family matches.</div>';
+            html += '</div>';
+
+            if (loading && !ready) {
+                html += '<div class="metadata-empty">Loading semantic neighbors...</div>';
+            } else if (error) {
+                html += '<div class="metadata-empty">' + esc(error) + '</div>';
+            } else if (!results.length) {
+                html += '<div class="metadata-empty">No semantic neighbors found</div>';
+            } else {
+                html += '<div class="neighbor-results">';
+                results.forEach(hit => {
+                    const displayName = renderCompactSignatureText(hit.func_name_demangled || hit.func_name, false);
+                    const binSummary = Array.isArray(hit.binary_names) && hit.binary_names.length
+                        ? hit.binary_names.slice(0, 4).join(', ') + (hit.binary_names.length > 4 ? ' ...' : '')
+                        : 'no binary aliases';
+                    const href = functionDetailHref(hit.key_hex, 'section-overview');
+                    const rationale = hit.semantic_neighbor || {};
+                    const pills = [];
+                    pills.push('<span class="neighbor-pill accent">SIM ' + esc((Number(hit.score || 0)).toFixed(3)) + '</span>');
+                    if (Number(rationale.direct_binary_score || 0) > 0) pills.push('<span class="neighbor-pill accent">Direct Family</span>');
+                    else if (Number(rationale.related_binary_score || 0) > 0) pills.push('<span class="neighbor-pill info">Related Family</span>');
+                    if (rationale.language_match) pills.push('<span class="neighbor-pill info">Lang Match</span>');
+                    if (Number(rationale.origin_overlap || 0) > 0.18) pills.push('<span class="neighbor-pill warn">Origin Overlap</span>');
+
+                    html += '<article class="neighbor-card">';
+                    html += '<div class="neighbor-card-header">';
+                    html += '<div class="neighbor-card-main clickable">';
+                    html += '<a class="neighbor-card-link" href="' + esc(href) + '" onclick="event.preventDefault();showFunctionDetail(\'' + esc(hit.key_hex) + '\', \"section-neighbors\")">';
+                    html += '<div class="neighbor-card-title">' + displayName + '</div>';
+                    html += '<div class="neighbor-card-meta"><span>' + esc(fmtRelativeTs(hit.ts)) + '</span><span>' + esc(binSummary) + '</span></div>';
+                    html += '<div class="neighbor-card-key">KEY ' + esc(hit.key_hex) + '</div>';
+                    html += '</a>';
+                    html += '</div>';
+                    html += '<div class="neighbor-card-actions"><div class="neighbor-pill-row">' + pills.join('') + '</div></div>';
+                    html += '</div>';
+                    html += renderSemanticNeighborRationale(rationale);
+                    html += '</article>';
+                });
+                html += '</div>';
+            }
+
+            html += '</div></div>';
+            return html;
+        }
+
+        function renderNeighborTokenRow(label, tokens) {
+            const values = Array.isArray(tokens) ? tokens.filter(Boolean) : [];
+            if (!values.length) return '';
+            return '<div class="detail-section"><div class="detail-label">' + esc(label) + '</div><div class="result-bins">'
+                + values.map(token => '<span class="bin-tag">' + esc(token) + '</span>').join('')
+                + '</div></div>';
+        }
+
+        function renderNeighborBinaryRow(label, bins) {
+            const values = Array.isArray(bins) ? bins.filter(Boolean) : [];
+            if (!values.length) return '';
+            return '<div class="detail-section"><div class="detail-label">' + esc(label) + '</div><div class="result-bins">'
+                + values.map(bin => '<span class="bin-tag">' + esc(bin.basename || bin.short_id || 'binary') + '<span class="accent">#' + esc(bin.short_id || '') + '</span></span>').join('')
+                + '</div></div>';
+        }
+
+        function renderSemanticNeighborRationale(rationale) {
+            const r = rationale || {};
+            const hasEvidence = Number(r.family_score || 0) > 0
+                || Number(r.semantic_overlap || 0) > 0
+                || Number(r.prototype_overlap || 0) > 0
+                || Number(r.frame_overlap || 0) > 0
+                || Number(r.comment_overlap || 0) > 0
+                || Number(r.operand_overlap || 0) > 0
+                || (Array.isArray(r.shared_semantic_tokens) && r.shared_semantic_tokens.length > 0);
+            if (!hasEvidence) return '';
+
+            const summaryParts = ['Why this matched'];
+            if (Number(r.family_score || 0) > 0) summaryParts.push('family ' + Number(r.family_score || 0).toFixed(2));
+            if (Number(r.semantic_overlap || 0) > 0) summaryParts.push('semantic ' + Number(r.semantic_overlap || 0).toFixed(2));
+            if (r.language_match) summaryParts.push('lang match');
+
+            const metrics = [
+                ['Semantic', r.semantic_overlap],
+                ['Prototype', r.prototype_overlap],
+                ['Frame', r.frame_overlap],
+                ['Comments', r.comment_overlap],
+                ['Operands', r.operand_overlap],
+                ['Family', r.family_score],
+                ['Consistency', r.candidate_consistency],
+                ['Lexical', r.lexical_prior],
+            ].filter(entry => Number(entry[1] || 0) > 0 || entry[0] === 'Family' || entry[0] === 'Consistency');
+
+            let html = '<details class="neighbor-rationale" onclick="event.stopPropagation()">';
+            html += '<summary><span class="neighbor-rationale-title">' + esc(summaryParts.join(' · ')) + '</span></summary>';
+            html += '<div class="neighbor-rationale-content">';
+            html += '<div class="neighbor-rationale-grid">';
+            metrics.forEach(entry => {
+                html += '<div class="neighbor-metric"><div class="label">' + esc(entry[0]) + '</div><div class="value">' + esc((Number(entry[1] || 0)).toFixed(3)) + '</div></div>';
+            });
+            html += '</div>';
+
+            const badges = [];
+            if (r.language_match) badges.push('LANG MATCH');
+            if (Number(r.direct_binary_score || 0) > 0) badges.push('DIRECT FAMILY');
+            else if (Number(r.related_binary_score || 0) > 0) badges.push('RELATED FAMILY');
+            if (Number(r.origin_overlap || 0) > 0.15) badges.push('ORIGIN OVERLAP');
+            if (Number(r.binary_name_overlap || 0) > 0.15) badges.push('BINARY OVERLAP');
+            if (badges.length) {
+                html += '<div class="result-bins">' + badges.map(b => '<span class="bin-tag">' + esc(b) + '</span>').join('') + '</div>';
+            }
+
+            html += renderNeighborBinaryRow('Direct Family Binaries', r.direct_family_binaries);
+            html += renderNeighborBinaryRow('Related Family Binaries', r.related_family_binaries);
+            html += renderNeighborTokenRow('Distinctive Semantic Tokens', r.shared_semantic_tokens);
+            html += renderNeighborTokenRow('Distinctive Prototype Tokens', r.shared_prototype_tokens);
+            html += renderNeighborTokenRow('Distinctive Frame Tokens', r.shared_frame_tokens);
+            html += renderNeighborTokenRow('Distinctive Comment Tokens', r.shared_comment_tokens);
+            html += renderNeighborTokenRow('Distinctive Operand Tokens', r.shared_operand_tokens);
+            html += '</div></details>';
             return html;
         }
 
@@ -7113,6 +7649,12 @@ pub const HOME: &str = r#"<!doctype html>
         let activeCommentMarkerTimer = null;
         let currentDetailData = null;
         let currentDetailKeyHex = null;
+        let currentSemanticNeighbors = null;
+        let currentSemanticNeighborLoadedSig = null;
+        let currentSemanticNeighborLoadingSig = null;
+        let currentSemanticNeighborError = null;
+        let currentSemanticNeighborLimit = 8;
+        let currentSemanticNeighborStrictFamily = false;
         let currentDetailSection = null;
         let detailScrollSyncRaf = null;
         let copiedKeyHex = null;
@@ -7806,6 +8348,7 @@ pub const HOME: &str = r#"<!doctype html>
         fetchMetrics();
         setInterval(fetchMetrics, 5000);
         restoreCompareState();
+        restoreSemanticNeighborPrefs();
         updateCompareTray();
         hydrateCompareItems(compareKeys);
         refreshCompareLoadOptions();
@@ -7823,6 +8366,10 @@ pub const HOME: &str = r#"<!doctype html>
             currentDetailKind = 'function';
             currentDetailData = null;
             currentDetailKeyHex = keyHex;
+            currentSemanticNeighbors = null;
+            currentSemanticNeighborLoadedSig = null;
+            currentSemanticNeighborLoadingSig = null;
+            currentSemanticNeighborError = null;
             currentBinaryMd5 = null;
             currentBinaryCompareData = null;
             currentGraphHoverMd5 = null;
@@ -7849,6 +8396,87 @@ pub const HOME: &str = r#"<!doctype html>
                 .then(data => renderFunctionDetail(data))
                 .catch(err => {
                     el.modalBody.innerHTML = '<div class="state-message"><div class="icon">!</div><h3>FETCH ERROR</h3><p>' + esc(err.message) + '</p></div>';
+                });
+        }
+
+        function semanticNeighborRequestSig(keyHex) {
+            return String(keyHex || '') + '|' + String(currentSemanticNeighborLimit) + '|' + (currentSemanticNeighborStrictFamily ? '1' : '0');
+        }
+
+        function functionDetailHref(keyHex, sectionId = '') {
+            const state = parseHash();
+            const params = new URLSearchParams();
+            const mode = (state && state.m) ? state.m : currentSearchMode;
+            const query = (state && state.q) ? state.q : currentQuery;
+            const page = state && state.page ? state.page : currentPage;
+            if (mode && mode !== 'functions') params.set('m', mode);
+            if (query) params.set('q', query);
+            if (query && page > 1) params.set('page', String(page));
+            if (keyHex) params.set('f', keyHex);
+            if (sectionId) params.set('s', sectionId);
+            const hash = params.toString();
+            return hash ? ('#' + hash) : '#';
+        }
+
+        function reloadSemanticNeighbors() {
+            if (currentDetailKind !== 'function' || !currentDetailKeyHex) return;
+            currentSemanticNeighbors = null;
+            currentSemanticNeighborLoadedSig = null;
+            currentSemanticNeighborError = null;
+            ensureSemanticNeighborsLoaded(currentDetailKeyHex);
+            if (currentDetailData && currentDetailData.key_hex === currentDetailKeyHex) {
+                renderFunctionDetail(currentDetailData);
+            }
+        }
+
+        function setSemanticNeighborLimit(value) {
+            const parsed = Math.max(1, Math.min(24, Number.parseInt(value, 10) || 8));
+            if (parsed === currentSemanticNeighborLimit) return;
+            currentSemanticNeighborLimit = parsed;
+            persistSemanticNeighborPrefs();
+            reloadSemanticNeighbors();
+        }
+
+        function setSemanticNeighborStrictFamily(enabled) {
+            const next = !!enabled;
+            if (next === currentSemanticNeighborStrictFamily) return;
+            currentSemanticNeighborStrictFamily = next;
+            persistSemanticNeighborPrefs();
+            reloadSemanticNeighbors();
+        }
+
+        function toggleSemanticNeighborStrictFamily() {
+            setSemanticNeighborStrictFamily(!currentSemanticNeighborStrictFamily);
+        }
+
+        function ensureSemanticNeighborsLoaded(keyHex) {
+            if (!keyHex) return;
+            const requestSig = semanticNeighborRequestSig(keyHex);
+            if (currentSemanticNeighborLoadingSig === requestSig) return;
+            if (currentSemanticNeighborLoadedSig === requestSig && (Array.isArray(currentSemanticNeighbors) || currentSemanticNeighborError)) return;
+
+            currentSemanticNeighborLoadingSig = requestSig;
+            currentSemanticNeighborError = null;
+            fetch('/api/function/' + encodeURIComponent(keyHex) + '/neighbors?limit=' + encodeURIComponent(currentSemanticNeighborLimit) + '&strict_family=' + (currentSemanticNeighborStrictFamily ? '1' : '0'))
+                .then(r => {
+                    if (!r.ok) throw new Error('Failed to fetch neighbors: ' + r.status);
+                    return r.json();
+                })
+                .then(data => {
+                    if (currentDetailKind !== 'function' || currentDetailKeyHex !== keyHex || semanticNeighborRequestSig(keyHex) !== requestSig) return;
+                    currentSemanticNeighborLoadingSig = null;
+                    currentSemanticNeighborLoadedSig = requestSig;
+                    currentSemanticNeighbors = Array.isArray(data && data.results) ? data.results : [];
+                    currentSemanticNeighborError = null;
+                    if (currentDetailData && currentDetailData.key_hex === keyHex) renderFunctionDetail(currentDetailData);
+                })
+                .catch(err => {
+                    if (currentDetailKind !== 'function' || currentDetailKeyHex !== keyHex || semanticNeighborRequestSig(keyHex) !== requestSig) return;
+                    currentSemanticNeighborLoadingSig = null;
+                    currentSemanticNeighborLoadedSig = requestSig;
+                    currentSemanticNeighbors = [];
+                    currentSemanticNeighborError = err.message || String(err);
+                    if (currentDetailData && currentDetailData.key_hex === keyHex) renderFunctionDetail(currentDetailData);
                 });
         }
 
@@ -8727,6 +9355,7 @@ pub const HOME: &str = r#"<!doctype html>
 
             currentDetailData = data;
             currentDetailKeyHex = data.key_hex || currentDetailKeyHex;
+            ensureSemanticNeighborsLoaded(currentDetailKeyHex);
 
             const m = data.metadata || {};
             const parseBadge = (m.errors && m.errors.length > 0) ? 'PARTIAL' : 'PARSED';
@@ -8738,6 +9367,8 @@ pub const HOME: &str = r#"<!doctype html>
             if (m.type_parts) sections.push({ id: 'section-type', label: 'Type' });
             if (m.frame_desc) sections.push({ id: 'section-frame', label: 'Frame' });
             if (m.control_flow && ((m.control_flow.switches || []).length > 0 || (m.control_flow.jumptables || []).length > 0)) sections.push({ id: 'section-controlflow', label: 'Switches' });
+            if ((m.raw_chunk_count || (m.raw_chunks || []).length || (m.extra_cmts || []).length) > 0 || m.user_stkpnts || m.ops || m.ops_ex) sections.push({ id: 'section-semantic', label: 'Semantic' });
+            sections.push({ id: 'section-neighbors', label: 'Neighbors' });
             if (((m.insn_cmts || []).length + (m.rpt_insn_cmts || []).length) > 0) sections.push({ id: 'section-comments', label: 'Comments' });
             if ((m.errors || []).length > 0) sections.push({ id: 'section-errors', label: 'Errors' });
 
@@ -8751,7 +9382,18 @@ pub const HOME: &str = r#"<!doctype html>
 
             // Function name
             const overviewName = renderOverviewFunctionName(data, m);
-            html += '<div class="detail-section detail-anchor" id="section-overview"><div class="detail-label">Function Name</div><div class="detail-value accent">' + overviewName + '</div></div>';
+            html += '<div class="detail-section detail-anchor" id="section-overview"><div class="detail-label">Function Name</div><div class="detail-name-stack">';
+            html += '<div class="detail-value accent">' + overviewName + '</div>';
+            html += '<div class="detail-name-meta">';
+            if (data.lang) {
+                html += '<span class="lang-badge">' + esc(String(data.lang).toUpperCase()) + '</span>';
+            }
+            html += '<span class="version-badge age">' + esc(fmtRelativeTs(data.ts)) + '</span>';
+            html += '</div>';
+            if (data.raw_name) {
+                html += '<div class="result-mangled" title="Stored raw symbol name">' + esc(data.raw_name) + '</div>';
+            }
+            html += '</div></div>';
 
             // Key
             html += '<div class="detail-section"><div class="detail-label">Function Key</div><div class="detail-value mono">' + esc(data.key_hex) + '</div></div>';
@@ -8823,6 +9465,13 @@ pub const HOME: &str = r#"<!doctype html>
                     html += renderControlFlowMetadata(m.control_flow);
                     html += '</div></div>';
                 }
+
+                const semanticSection = renderSemanticMetadata(m);
+                if (semanticSection) {
+                    html += semanticSection;
+                }
+
+                html += renderSemanticNeighborSection();
 
                 // Instruction Comments Timeline
                 const regCount = Array.isArray(m.insn_cmts) ? m.insn_cmts.length : 0;

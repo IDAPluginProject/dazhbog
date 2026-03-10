@@ -18,6 +18,7 @@ pub struct PushContext<'a> {
     pub md5: Option<[u8; 16]>,
     pub basename: Option<&'a str>,
     pub hostname: Option<&'a str>,
+    pub origin_token: Option<&'a str>,
 }
 
 /// Owned version of PushContext for use in spawn_blocking.
@@ -26,16 +27,55 @@ pub struct OwnedPushContext {
     pub md5: Option<[u8; 16]>,
     pub basename: Option<String>,
     pub hostname: Option<String>,
+    pub origin_token: Option<String>,
 }
 
 /// Context information for query operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct QueryContext<'a> {
     pub keys: &'a [u128],
+    pub requested_mdkeys: &'a [u32],
     pub md5: Option<[u8; 16]>,
     pub basename: Option<&'a str>,
-    #[allow(dead_code)]
     pub hostname: Option<&'a str>,
+    pub origin_token: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ReplayRequestMode {
+    Full,
+    Structure,
+    Comments,
+    Operands,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplayCaseOptions {
+    pub request_mode: ReplayRequestMode,
+    pub max_versions: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplaySelectorResult {
+    pub base_version_id: [u8; 32],
+    pub name: String,
+    pub data: Vec<u8>,
+    pub score: f64,
+    pub margin: f64,
+    pub entropy: f64,
+    pub used_synthesis: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplayCaseResult {
+    pub key: u128,
+    pub holdout_version_id: [u8; 32],
+    pub holdout_name: String,
+    pub holdout_data: Vec<u8>,
+    pub requested_mdkeys: Vec<u32>,
+    pub candidate_count: usize,
+    pub baseline: ReplaySelectorResult,
+    pub semantic: ReplaySelectorResult,
 }
 
 /// Summary row for binary search and binary detail views.

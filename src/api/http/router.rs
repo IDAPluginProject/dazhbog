@@ -22,7 +22,8 @@ use crate::net::tls::NegotiatedProtocol;
 
 use super::handlers::{
     handle_binary_compare, handle_binary_detail, handle_binary_functions, handle_binary_graph,
-    handle_binary_overlap, handle_function_detail, handle_search, json_response, metrics_snapshot,
+    handle_binary_overlap, handle_function_detail, handle_function_neighbors, handle_search,
+    json_response, metrics_snapshot,
 };
 use super::templates::HOME;
 use crate::api::metrics::METRICS;
@@ -51,6 +52,10 @@ async fn router(
             let mut r = Response::new(Full::new(Bytes::from(s)));
             *r.status_mut() = StatusCode::OK;
             r
+        }
+        (&Method::GET, p) if p.starts_with("/api/function/") && p.ends_with("/neighbors") => {
+            let key_hex = &p["/api/function/".len()..p.len() - "/neighbors".len()];
+            handle_function_neighbors(db.clone(), key_hex, req).await
         }
         (&Method::GET, p) if p.starts_with("/api/function/") => {
             let key_hex = &p["/api/function/".len()..];

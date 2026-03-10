@@ -5,7 +5,7 @@
 //! sequence of key-value pairs (mdkey_t).
 
 use super::type_decoder::decode_tinfo_decl;
-use super::wire::{unpack_dd, unpack_dq, unpack_dw, unpack_ea64, unpack_var_bytes_capped};
+use super::wire::{pack_dd, unpack_dd, unpack_dq, unpack_dw, unpack_ea64, unpack_var_bytes_capped};
 
 /// Known Lumina metadata keys (mdkey_t).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -24,6 +24,26 @@ pub enum MdKey {
     Ops = 10,
     OpsEx = 11,
     Other(u32),
+}
+
+impl MdKey {
+    pub fn raw(self) -> u32 {
+        match self {
+            MdKey::None => 0,
+            MdKey::Type => 1,
+            MdKey::VdElapsed => 2,
+            MdKey::Fcmt => 3,
+            MdKey::Frptcmt => 4,
+            MdKey::Cmts => 5,
+            MdKey::Rptcmts => 6,
+            MdKey::Extracmts => 7,
+            MdKey::UserStkpnts => 8,
+            MdKey::FrameDesc => 9,
+            MdKey::Ops => 10,
+            MdKey::OpsEx => 11,
+            MdKey::Other(v) => v,
+        }
+    }
 }
 
 impl From<u32> for MdKey {
@@ -49,15 +69,15 @@ impl From<u32> for MdKey {
 /// Extracted type information from `MDK_TYPE` (Key 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MdTypeParts {
-    /// True if this is a user-defined type
+    /// True if this is a user-defined type.
     pub userti: bool,
-    /// Raw IDA type_t bytes
+    /// Raw IDA type_t bytes.
     pub type_bytes: Vec<u8>,
-    /// Raw IDA p_list bytes
+    /// Raw IDA p_list bytes.
     pub fields_bytes: Vec<u8>,
-    /// Decoded declaration rendered from the raw bytes
+    /// Decoded declaration rendered from the raw bytes.
     pub declaration: Option<String>,
-    /// Decode failure, if any
+    /// Decode failure, if any.
     pub decode_error: Option<String>,
 }
 
@@ -100,25 +120,48 @@ pub struct InsnCmt {
     pub cmt: String,
 }
 
+/// Raw metadata chunk preserved verbatim for semantic reconstruction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataChunk {
+    pub raw_key: u32,
+    pub key: MdKey,
+    pub data: Vec<u8>,
+}
+
+/// Partially decoded opaque metadata blob.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OpaqueMetadataBlob {
+    pub raw: Vec<u8>,
+    pub printable_texts: Vec<String>,
+}
+
 /// Complete parsed function metadata.
 #[derive(Debug, Clone, Default)]
 pub struct FunctionMetadata {
     pub raw_size: usize,
-    /// Parsed MDK_TYPE data if present
+    pub raw_chunks: Vec<MetadataChunk>,
+    /// Parsed MDK_TYPE data if present.
     pub type_parts: Option<MdTypeParts>,
-    /// Parsed MDK_FRAME_DESC data if present
+    /// Parsed MDK_FRAME_DESC data if present.
     pub frame_desc: Option<FrameDesc>,
-    /// Decompile time in seconds (MDK_VD_ELAPSED)
+    /// Decompile time in seconds (MDK_VD_ELAPSED).
     pub vd_elapsed: Option<u64>,
-    /// Function regular comment (MDK_FCMT)
+    /// Function regular comment (MDK_FCMT).
     pub fcmt: Option<String>,
-    /// Function repeatable comment (MDK_FRPTCMT)
+    /// Function repeatable comment (MDK_FRPTCMT).
     pub frptcmt: Option<String>,
-    /// Instruction regular comments (MDK_CMTS)
+    /// Instruction regular comments (MDK_CMTS).
     pub insn_cmts: Vec<InsnCmt>,
-    /// Instruction repeatable comments (MDK_RPTCMTS)
+    /// Instruction repeatable comments (MDK_RPTCMTS).
     pub rpt_insn_cmts: Vec<InsnCmt>,
-    /// Other metadata parts could be added here
+    /// Extra comments extracted heuristically from MDK_EXTRACMTS.
+    pub extra_cmts: Vec<String>,
+    /// User stack points preserved as raw bytes plus printable fragments.
+    pub user_stkpnts: Option<OpaqueMetadataBlob>,
+    /// Operand renderings preserved as raw bytes plus printable fragments.
+    pub ops: Option<OpaqueMetadataBlob>,
+    /// Extended operand renderings preserved as raw bytes plus printable fragments.
+    pub ops_ex: Option<OpaqueMetadataBlob>,
     pub bytes_parsed: usize,
     pub errors: Vec<String>,
 }
@@ -138,9 +181,35 @@ impl FunctionMetadata {
             count += 1;
         }
         if let Some(fd) = &self.frame_desc {
-            count += fd.members.len();
+            count += 1 + fd.members.len();
         }
+        count += usize::from(self.fcmt.is_some());
+        count += usize::from(self.frptcmt.is_some());
+        count += self.insn_cmts.len();
+        count += self.rpt_insn_cmts.len();
+        count += self.extra_cmts.len();
+        count += usize::from(self.user_stkpnts.is_some());
+        count += usize::from(self.ops.is_some());
+        count += usize::from(self.ops_ex.is_some());
         count
+    }
+
+    pub fn has_chunk(&self, mdkey: MdKey) -> bool {
+        self.raw_chunks.iter().any(|chunk| chunk.key == mdkey)
+    }
+
+    pub fn chunk(&self, mdkey: MdKey) -> Option<&MetadataChunk> {
+        self.raw_chunks.iter().find(|chunk| chunk.key == mdkey)
+    }
+
+    pub fn requested_coverage(&self, requested_mdkeys: &[u32]) -> usize {
+        if requested_mdkeys.is_empty() {
+            return self.raw_chunks.len();
+        }
+        requested_mdkeys
+            .iter()
+            .filter(|&&raw_key| self.raw_chunks.iter().any(|chunk| chunk.raw_key == raw_key))
+            .count()
     }
 }
 
@@ -185,7 +254,7 @@ impl<'a> MetadataParser<'a> {
             };
             let mdkey = MdKey::from(key_val);
             if mdkey == MdKey::None {
-                break; // 0 marks end or invalid
+                break;
             }
 
             let len = match self.read_dd() {
@@ -202,6 +271,11 @@ impl<'a> MetadataParser<'a> {
 
             let chunk = &self.data[self.offset..self.offset + len];
             self.offset += len;
+            self.result.raw_chunks.push(MetadataChunk {
+                raw_key: key_val,
+                key: mdkey,
+                data: chunk.to_vec(),
+            });
 
             match mdkey {
                 MdKey::Type => {
@@ -244,6 +318,27 @@ impl<'a> MetadataParser<'a> {
                             .push("Failed to parse MDK_RPTCMTS".into());
                     }
                 }
+                MdKey::Extracmts => {
+                    self.result.extra_cmts = extract_printable_texts(chunk);
+                }
+                MdKey::UserStkpnts => {
+                    self.result.user_stkpnts = Some(OpaqueMetadataBlob {
+                        raw: chunk.to_vec(),
+                        printable_texts: extract_printable_texts(chunk),
+                    });
+                }
+                MdKey::Ops => {
+                    self.result.ops = Some(OpaqueMetadataBlob {
+                        raw: chunk.to_vec(),
+                        printable_texts: extract_printable_texts(chunk),
+                    });
+                }
+                MdKey::OpsEx => {
+                    self.result.ops_ex = Some(OpaqueMetadataBlob {
+                        raw: chunk.to_vec(),
+                        printable_texts: extract_printable_texts(chunk),
+                    });
+                }
                 MdKey::VdElapsed => {
                     let (val, consumed) = unpack_dq(chunk);
                     if consumed > 0 {
@@ -251,7 +346,7 @@ impl<'a> MetadataParser<'a> {
                     }
                 }
                 _ => {
-                    // Ignore other keys for now
+                    // Preserve unknown keys through raw_chunks for future decoders.
                 }
             }
         }
@@ -299,8 +394,7 @@ fn parse_frame_desc(data: &[u8]) -> Option<FrameDesc> {
     let frregs = parser.read_dw()?;
     let n = parser.read_dd()?;
 
-    // Sanity check to avoid OOM on malformed payloads
-    if n > 10000 {
+    if n > 10_000 {
         return None;
     }
 
@@ -320,8 +414,6 @@ fn parse_frame_desc(data: &[u8]) -> Option<FrameDesc> {
 
 fn parse_insn_cmts(data: &[u8]) -> Option<Vec<InsnCmt>> {
     let mut offset = 0;
-
-    // unpack initial chunk number
     let (mut fchunk_nr, consumed) = unpack_dd(&data[offset..]);
     if consumed == 0 {
         return None;
@@ -340,7 +432,6 @@ fn parse_insn_cmts(data: &[u8]) -> Option<Vec<InsnCmt>> {
         offset += consumed;
 
         if !first_in_fchunk && delta == 0 {
-            // switch to new fchunk
             let (nr, consumed) = unpack_dd(&data[offset..]);
             if consumed == 0 {
                 break;
@@ -354,8 +445,7 @@ fn parse_insn_cmts(data: &[u8]) -> Option<Vec<InsnCmt>> {
 
         fchunk_off += delta;
 
-        // read string (var bytes)
-        let (val, consumed) = unpack_var_bytes_capped(&data[offset..], 65536).ok()?;
+        let (val, consumed) = unpack_var_bytes_capped(&data[offset..], 65_536).ok()?;
         offset += consumed;
 
         let cmt = String::from_utf8_lossy(val).into_owned();
@@ -401,15 +491,6 @@ impl<'a> FrameParser<'a> {
         Some(v)
     }
 
-    fn read_dq(&mut self) -> Option<u64> {
-        let (v, consumed) = unpack_dq(&self.data[self.offset..]);
-        if consumed == 0 {
-            return None;
-        }
-        self.offset += consumed;
-        Some(v)
-    }
-
     fn read_ea64(&mut self) -> Option<u64> {
         let (v, consumed) = unpack_ea64(&self.data[self.offset..]);
         if consumed == 0 {
@@ -426,7 +507,7 @@ impl<'a> FrameParser<'a> {
             end += 1;
         }
         if end >= self.data.len() {
-            return None; // No null terminator
+            return None;
         }
         let s = self.data[start..end].to_vec();
         self.offset = end + 1;
@@ -456,9 +537,8 @@ impl<'a> FrameParser<'a> {
         let start_offset = self.offset;
         let flags = self.read_db()?;
         if (flags & 0x0F) == 0x05 {
-            // consume 7 varints
             for _ in 0..7 {
-                self.read_dd()?; // read_dd skips the bytes correctly for any dd
+                self.read_dd()?;
             }
         }
         Some(self.data[start_offset..self.offset].to_vec())
@@ -487,11 +567,49 @@ impl<'a> FrameParser<'a> {
             mem.info = Some(self.skip_oprepr()?);
         }
         if (greedy_bits & (1 << 6)) != 0 {
-            mem.nbytes = Some(self.read_ea64()?); // safe_unpack_asize
+            mem.nbytes = Some(self.read_ea64()?);
         }
 
         Some(mem)
     }
+}
+
+fn extract_printable_texts(data: &[u8]) -> Vec<String> {
+    let mut texts = Vec::new();
+    let mut current = Vec::new();
+    for &byte in data {
+        if byte.is_ascii_graphic() || byte == b' ' {
+            current.push(byte);
+        } else if current.len() >= 3 {
+            texts.push(String::from_utf8_lossy(&current).into_owned());
+            current.clear();
+        } else {
+            current.clear();
+        }
+    }
+    if current.len() >= 3 {
+        texts.push(String::from_utf8_lossy(&current).into_owned());
+    }
+    texts.sort();
+    texts.dedup();
+    texts
+}
+
+pub fn serialize_metadata_chunks(chunks: &[MetadataChunk]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for chunk in chunks {
+        if chunk.raw_key == 0 || chunk.key == MdKey::None {
+            continue;
+        }
+        out.extend_from_slice(&pack_dd(chunk.raw_key));
+        out.extend_from_slice(&pack_dd(chunk.data.len() as u32));
+        out.extend_from_slice(&chunk.data);
+    }
+    out
+}
+
+pub fn split_metadata_chunks(data: &[u8]) -> Vec<MetadataChunk> {
+    parse_metadata(data).raw_chunks
 }
 
 pub fn parse_metadata(data: &[u8]) -> FunctionMetadata {

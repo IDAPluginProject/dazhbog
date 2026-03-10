@@ -12,4 +12,4 @@ mod types;
 
 pub use index::SearchIndex;
 pub use rebuild::rebuild_from_engine;
-pub use types::{BinaryRefHit, SearchDocument, SearchHit};
+pub use types::{BinaryRefHit, SearchDocument, SearchHit, SemanticNeighborRationale};

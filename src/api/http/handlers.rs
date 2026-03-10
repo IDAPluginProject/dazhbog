@@ -10,9 +10,13 @@ use std::sync::Arc;
 
 use crate::api::metrics::METRICS;
 use crate::common::demangle;
-use crate::db::{BinaryCompareBucket, BinaryCompareItem, BinaryFacetSummary, BinarySummary, Database};
+use crate::db::{
+    BinaryCompareBucket, BinaryCompareItem, BinaryFacetSummary, BinarySummary, Database,
+};
 use crate::engine::SearchHit;
-use crate::protocol::lumina::metadata::{parse_metadata, InsnCmt};
+use crate::protocol::lumina::metadata::{
+    parse_metadata, InsnCmt, MdKey, MetadataChunk, OpaqueMetadataBlob,
+};
 
 fn parse_jumptable_addr(cmt: &str) -> Option<(&str, &str)> {
     let rest = cmt.strip_prefix("jumptable ")?;
@@ -139,7 +143,13 @@ fn normalize_case_labels(labels: &[String]) -> Vec<String> {
 
     let mut out = merged
         .into_iter()
-        .map(|(a, b)| if a == b { a.to_string() } else { format!("{a}-{b}") })
+        .map(|(a, b)| {
+            if a == b {
+                a.to_string()
+            } else {
+                format!("{a}-{b}")
+            }
+        })
         .collect::<Vec<_>>();
     if has_default {
         out.push("default".to_string());
@@ -208,9 +218,13 @@ fn classify_source_role(relation: &str, labels: &[String]) -> &'static str {
     "entry"
 }
 
-fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Option<ControlFlowJson> {
+fn derive_control_flow(
+    insn_cmts: &[InsnCmt],
+    rpt_insn_cmts: &[InsnCmt],
+) -> Option<ControlFlowJson> {
     let mut switches = Vec::new();
-    let mut tables: std::collections::BTreeMap<String, JumpTableJson> = std::collections::BTreeMap::new();
+    let mut tables: std::collections::BTreeMap<String, JumpTableJson> =
+        std::collections::BTreeMap::new();
 
     for (kind, items) in [("REG", insn_cmts), ("RPT", rpt_insn_cmts)] {
         for c in items {
@@ -224,15 +238,17 @@ fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Opti
                 });
             }
             if let Some((addr, relation)) = parse_jumptable_addr(text) {
-                let entry = tables.entry(addr.to_string()).or_insert_with(|| JumpTableJson {
-                    addr: addr.to_string(),
-                    refs: Vec::new(),
-                    case_count: 0,
-                    has_default: false,
-                    all_case_labels: Vec::new(),
-                    coverage_runs: Vec::new(),
-                    sparse: false,
-                });
+                let entry = tables
+                    .entry(addr.to_string())
+                    .or_insert_with(|| JumpTableJson {
+                        addr: addr.to_string(),
+                        refs: Vec::new(),
+                        case_count: 0,
+                        has_default: false,
+                        all_case_labels: Vec::new(),
+                        coverage_runs: Vec::new(),
+                        sparse: false,
+                    });
                 let case_labels = normalize_case_labels(&extract_case_labels(relation));
                 entry.refs.push(JumpTableRefJson {
                     kind: kind.to_string(),
@@ -281,8 +297,12 @@ fn derive_control_flow(insn_cmts: &[InsnCmt], rpt_insn_cmts: &[InsnCmt]) -> Opti
             a.fchunk_nr
                 .cmp(&b.fchunk_nr)
                 .then(a.fchunk_off.cmp(&b.fchunk_off))
-                .then(sort_case_label_key(a.case_labels.first().map(String::as_str).unwrap_or(""))
-                    .cmp(&sort_case_label_key(b.case_labels.first().map(String::as_str).unwrap_or(""))))
+                .then(
+                    sort_case_label_key(a.case_labels.first().map(String::as_str).unwrap_or(""))
+                        .cmp(&sort_case_label_key(
+                            b.case_labels.first().map(String::as_str).unwrap_or(""),
+                        )),
+                )
         });
     }
 
@@ -370,6 +390,20 @@ pub struct InsnCmtJson {
 }
 
 #[derive(Serialize)]
+pub struct OpaqueMetadataBlobJson {
+    pub size: usize,
+    pub printable_texts: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct MetadataChunkJson {
+    pub raw_key: u32,
+    pub key_name: String,
+    pub size: usize,
+    pub printable_texts: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct SwitchSiteJson {
     pub kind: String,
     pub fchunk_nr: u32,
@@ -421,11 +455,17 @@ pub struct ParsedMetadataJson {
     pub raw_size: usize,
     pub bytes_parsed: usize,
     pub errors: Vec<String>,
+    pub raw_chunk_count: usize,
+    pub raw_chunks: Vec<MetadataChunkJson>,
     pub type_parts: Option<TypePartsJson>,
     pub frame_desc: Option<FrameDescJson>,
     pub vd_elapsed: Option<u64>,
     pub fcmt: Option<String>,
     pub frptcmt: Option<String>,
+    pub extra_cmts: Vec<String>,
+    pub user_stkpnts: Option<OpaqueMetadataBlobJson>,
+    pub ops: Option<OpaqueMetadataBlobJson>,
+    pub ops_ex: Option<OpaqueMetadataBlobJson>,
     pub control_flow: Option<ControlFlowJson>,
     pub insn_cmts: Vec<InsnCmtJson>,
     pub rpt_insn_cmts: Vec<InsnCmtJson>,
@@ -437,12 +477,21 @@ pub struct FunctionDetailResponse {
     pub key_hex: String,
     pub name: String,
     pub raw_name: Option<String>,
+    pub lang: Option<String>,
     pub popularity: u32,
     pub ts: u64,
     pub data_size: usize,
     pub metadata: Option<ParsedMetadataJson>,
     pub binary_names: Vec<String>,
     pub binaries: Vec<crate::engine::BinaryRefHit>,
+}
+
+#[derive(Serialize)]
+pub struct SemanticNeighborsResponse {
+    pub key_hex: String,
+    pub limit: usize,
+    pub strict_family: bool,
+    pub results: Vec<SearchHit>,
 }
 
 #[derive(Serialize)]
@@ -655,6 +704,85 @@ pub fn json_response<T: Serialize>(value: &T, status: StatusCode) -> Response<Fu
     }
 }
 
+fn trim_preview_text(text: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    let mut chars = text.trim().chars();
+    for _ in 0..max_chars {
+        let Some(ch) = chars.next() else {
+            return out;
+        };
+        out.push(ch);
+    }
+    if chars.next().is_some() {
+        out.push_str("...");
+    }
+    out
+}
+
+fn compact_preview_texts(items: &[String]) -> Vec<String> {
+    items
+        .iter()
+        .map(|item| trim_preview_text(item, 160))
+        .filter(|item| !item.is_empty())
+        .take(8)
+        .collect()
+}
+
+fn extract_chunk_printable_texts(data: &[u8]) -> Vec<String> {
+    let mut texts = Vec::new();
+    let mut current = Vec::new();
+    for &byte in data {
+        if byte.is_ascii_graphic() || byte == b' ' {
+            current.push(byte);
+        } else if current.len() >= 3 {
+            texts.push(String::from_utf8_lossy(&current).into_owned());
+            current.clear();
+        } else {
+            current.clear();
+        }
+    }
+    if current.len() >= 3 {
+        texts.push(String::from_utf8_lossy(&current).into_owned());
+    }
+    texts.sort();
+    texts.dedup();
+    compact_preview_texts(&texts)
+}
+
+fn mdkey_name(mdkey: MdKey, raw_key: u32) -> String {
+    match mdkey {
+        MdKey::None => "MDK_NONE".to_string(),
+        MdKey::Type => "MDK_TYPE".to_string(),
+        MdKey::VdElapsed => "MDK_VD_ELAPSED".to_string(),
+        MdKey::Fcmt => "MDK_FCMT".to_string(),
+        MdKey::Frptcmt => "MDK_FRPTCMT".to_string(),
+        MdKey::Cmts => "MDK_CMTS".to_string(),
+        MdKey::Rptcmts => "MDK_RPTCMTS".to_string(),
+        MdKey::Extracmts => "MDK_EXTRACMTS".to_string(),
+        MdKey::UserStkpnts => "MDK_USER_STKPNTS".to_string(),
+        MdKey::FrameDesc => "MDK_FRAME_DESC".to_string(),
+        MdKey::Ops => "MDK_OPS".to_string(),
+        MdKey::OpsEx => "MDK_OPS_EX".to_string(),
+        MdKey::Other(_) => format!("MDK_OTHER_{raw_key}"),
+    }
+}
+
+fn metadata_chunk_to_json(chunk: &MetadataChunk) -> MetadataChunkJson {
+    MetadataChunkJson {
+        raw_key: chunk.raw_key,
+        key_name: mdkey_name(chunk.key, chunk.raw_key),
+        size: chunk.data.len(),
+        printable_texts: extract_chunk_printable_texts(&chunk.data),
+    }
+}
+
+fn opaque_blob_to_json(blob: OpaqueMetadataBlob) -> OpaqueMetadataBlobJson {
+    OpaqueMetadataBlobJson {
+        size: blob.raw.len(),
+        printable_texts: compact_preview_texts(&blob.printable_texts),
+    }
+}
+
 /// Handle function detail API request.
 pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Response<Full<Bytes>> {
     // Parse the key from hex
@@ -674,14 +802,30 @@ pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Respons
             // Parse the metadata
             let parsed = parse_metadata(&func.data);
             let control_flow = derive_control_flow(&parsed.insn_cmts, &parsed.rpt_insn_cmts);
+            let raw_chunk_count = parsed.raw_chunks.len();
+            let raw_chunks = parsed
+                .raw_chunks
+                .iter()
+                .map(metadata_chunk_to_json)
+                .collect();
+            let extra_cmts = compact_preview_texts(&parsed.extra_cmts);
+            let user_stkpnts = parsed.user_stkpnts.map(opaque_blob_to_json);
+            let ops = parsed.ops.map(opaque_blob_to_json);
+            let ops_ex = parsed.ops_ex.map(opaque_blob_to_json);
 
             let metadata = Some(ParsedMetadataJson {
                 raw_size: parsed.raw_size,
                 bytes_parsed: parsed.bytes_parsed,
                 errors: parsed.errors,
+                raw_chunk_count,
+                raw_chunks,
                 vd_elapsed: parsed.vd_elapsed,
                 fcmt: parsed.fcmt,
                 frptcmt: parsed.frptcmt,
+                extra_cmts,
+                user_stkpnts,
+                ops,
+                ops_ex,
                 control_flow,
                 insn_cmts: parsed
                     .insn_cmts
@@ -739,7 +883,12 @@ pub async fn handle_function_detail(db: Arc<Database>, key_hex: &str) -> Respons
                 &FunctionDetailResponse {
                     key_hex: format!("{:032x}", key),
                     name: demangle_result.name,
-                    raw_name: if demangle_result.demangled { Some(func.name) } else { None },
+                    raw_name: if demangle_result.demangled {
+                        Some(func.name)
+                    } else {
+                        None
+                    },
+                    lang: demangle_result.lang.map(|lang| lang.to_string()),
                     popularity: func.popularity,
                     ts: func.ts_sec,
                     data_size: func.data.len(),
@@ -843,6 +992,52 @@ pub async fn handle_search(db: Arc<Database>, req: Request<Incoming>) -> Respons
     }
 }
 
+pub async fn handle_function_neighbors(
+    db: Arc<Database>,
+    key_hex: &str,
+    req: Request<Incoming>,
+) -> Response<Full<Bytes>> {
+    let key = match u128::from_str_radix(key_hex, 16) {
+        Ok(k) => k,
+        Err(_) => {
+            return json_response(
+                &serde_json::json!({"error": "invalid key format"}),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+
+    let limit = parse_query_param(&req, "limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(8)
+        .clamp(1, 24);
+    let strict_family = parse_query_param(&req, "strict_family")
+        .map(|s| matches!(s.as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+
+    match db
+        .semantic_neighbors_for_key(key, limit, strict_family)
+        .await
+    {
+        Ok(results) => json_response(
+            &SemanticNeighborsResponse {
+                key_hex: format!("{:032x}", key),
+                limit,
+                strict_family,
+                results,
+            },
+            StatusCode::OK,
+        ),
+        Err(err) => {
+            error!("semantic neighbors failed for {}: {}", key_hex, err);
+            json_response(
+                &serde_json::json!({"error": "semantic neighbors unavailable"}),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    }
+}
+
 pub async fn handle_binary_detail(db: Arc<Database>, md5_hex: &str) -> Response<Full<Bytes>> {
     let md5 = match parse_md5_hex(md5_hex) {
         Some(md5) => md5,
@@ -873,41 +1068,66 @@ pub async fn handle_binary_detail(db: Arc<Database>, md5_hex: &str) -> Response<
                 .await
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(target, shared_functions, shared_observations, known_overlap_pct, observed_overlap_pct)| BinaryOverlapEdge {
-                    target,
-                    shared_functions,
-                    shared_observations,
-                    known_overlap_pct,
-                    observed_overlap_pct,
-                })
+                .map(
+                    |(
+                        target,
+                        shared_functions,
+                        shared_observations,
+                        known_overlap_pct,
+                        observed_overlap_pct,
+                    )| BinaryOverlapEdge {
+                        target,
+                        shared_functions,
+                        shared_observations,
+                        known_overlap_pct,
+                        observed_overlap_pct,
+                    },
+                )
                 .collect();
             let graph = match db.get_binary_graph(md5, 2, 6).await {
                 Ok((nodes, edges)) => BinaryGraphResponse {
-                    nodes: nodes.into_iter().map(|binary| BinaryGraphNode { binary }).collect(),
+                    nodes: nodes
+                        .into_iter()
+                        .map(|binary| BinaryGraphNode { binary })
+                        .collect(),
                     edges: edges
                         .into_iter()
-                        .map(|(source_md5, target_md5, shared_functions)| BinaryGraphEdge {
-                            source_md5,
-                            target_md5,
-                            shared_functions,
-                        })
+                        .map(
+                            |(source_md5, target_md5, shared_functions)| BinaryGraphEdge {
+                                source_md5,
+                                target_md5,
+                                shared_functions,
+                            },
+                        )
                         .collect(),
                 },
-                Err(_) => BinaryGraphResponse { nodes: Vec::new(), edges: Vec::new() },
+                Err(_) => BinaryGraphResponse {
+                    nodes: Vec::new(),
+                    edges: Vec::new(),
+                },
             };
             let timeline = db
                 .get_binary_family_timeline(md5, 12)
                 .await
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(binary, shared_functions, shared_observations, known_overlap_pct, observed_overlap_pct, is_root)| BinaryTimelineItem {
-                    binary,
-                    shared_functions,
-                    shared_observations,
-                    known_overlap_pct,
-                    observed_overlap_pct,
-                    is_root,
-                })
+                .map(
+                    |(
+                        binary,
+                        shared_functions,
+                        shared_observations,
+                        known_overlap_pct,
+                        observed_overlap_pct,
+                        is_root,
+                    )| BinaryTimelineItem {
+                        binary,
+                        shared_functions,
+                        shared_observations,
+                        known_overlap_pct,
+                        observed_overlap_pct,
+                        is_root,
+                    },
+                )
                 .collect();
             json_response(
                 &BinaryDetailResponse {
@@ -1011,13 +1231,21 @@ pub async fn handle_binary_overlap(
         Ok(edges) => json_response(
             &edges
                 .into_iter()
-                .map(|(target, shared_functions, shared_observations, known_overlap_pct, observed_overlap_pct)| BinaryOverlapEdge {
-                    target,
-                    shared_functions,
-                    shared_observations,
-                    known_overlap_pct,
-                    observed_overlap_pct,
-                })
+                .map(
+                    |(
+                        target,
+                        shared_functions,
+                        shared_observations,
+                        known_overlap_pct,
+                        observed_overlap_pct,
+                    )| BinaryOverlapEdge {
+                        target,
+                        shared_functions,
+                        shared_observations,
+                        known_overlap_pct,
+                        observed_overlap_pct,
+                    },
+                )
                 .collect::<Vec<_>>(),
             StatusCode::OK,
         ),
@@ -1059,14 +1287,19 @@ pub async fn handle_binary_graph(
                 depth,
                 limit,
                 graph: BinaryGraphResponse {
-                    nodes: nodes.into_iter().map(|binary| BinaryGraphNode { binary }).collect(),
+                    nodes: nodes
+                        .into_iter()
+                        .map(|binary| BinaryGraphNode { binary })
+                        .collect(),
                     edges: edges
                         .into_iter()
-                        .map(|(source_md5, target_md5, shared_functions)| BinaryGraphEdge {
-                            source_md5,
-                            target_md5,
-                            shared_functions,
-                        })
+                        .map(
+                            |(source_md5, target_md5, shared_functions)| BinaryGraphEdge {
+                                source_md5,
+                                target_md5,
+                                shared_functions,
+                            },
+                        )
                         .collect(),
                 },
             },
@@ -1074,7 +1307,10 @@ pub async fn handle_binary_graph(
         ),
         Err(e) => {
             error!("binary graph failed for {}: {}", md5_hex, e);
-            json_response(&serde_json::json!({"error": "binary graph failed"}), StatusCode::INTERNAL_SERVER_ERROR)
+            json_response(
+                &serde_json::json!({"error": "binary graph failed"}),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
         }
     }
 }
@@ -1086,23 +1322,37 @@ pub async fn handle_binary_compare(
     req: Request<Incoming>,
 ) -> Response<Full<Bytes>> {
     let Some(left) = parse_md5_hex(left_md5_hex) else {
-        return json_response(&serde_json::json!({"error": "invalid left md5 format"}), StatusCode::BAD_REQUEST);
+        return json_response(
+            &serde_json::json!({"error": "invalid left md5 format"}),
+            StatusCode::BAD_REQUEST,
+        );
     };
     let Some(right) = parse_md5_hex(right_md5_hex) else {
-        return json_response(&serde_json::json!({"error": "invalid right md5 format"}), StatusCode::BAD_REQUEST);
+        return json_response(
+            &serde_json::json!({"error": "invalid right md5 format"}),
+            StatusCode::BAD_REQUEST,
+        );
     };
     let Ok(Some(left_summary)) = db.get_binary_summary(left).await else {
-        return json_response(&serde_json::json!({"error": "left binary not found"}), StatusCode::NOT_FOUND);
+        return json_response(
+            &serde_json::json!({"error": "left binary not found"}),
+            StatusCode::NOT_FOUND,
+        );
     };
     let Ok(Some(right_summary)) = db.get_binary_summary(right).await else {
-        return json_response(&serde_json::json!({"error": "right binary not found"}), StatusCode::NOT_FOUND);
+        return json_response(
+            &serde_json::json!({"error": "right binary not found"}),
+            StatusCode::NOT_FOUND,
+        );
     };
     let sample_limit: usize = parse_query_param(&req, "limit")
         .and_then(|s| s.parse().ok())
         .unwrap_or(18)
         .clamp(1, 100);
     let bucket_mode = parse_query_param(&req, "mode").unwrap_or_else(|| "all".to_string());
-    let bucket_query = parse_query_param(&req, "q").unwrap_or_default().to_ascii_lowercase();
+    let bucket_query = parse_query_param(&req, "q")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let bucket_page: usize = parse_query_param(&req, "page")
         .and_then(|s| s.parse().ok())
         .unwrap_or(1)
@@ -1112,63 +1362,116 @@ pub async fn handle_binary_compare(
         .unwrap_or(12)
         .clamp(1, 50);
     match db.compare_binaries(left, right, sample_limit).await {
-        Ok((left_facets, right_facets, shared_count, left_only_count, right_only_count, shared, left_only, right_only, recent, metadata_rich, rare_symbols, freshest_drift)) => json_response(
+        Ok((
+            left_facets,
+            right_facets,
+            shared_count,
+            left_only_count,
+            right_only_count,
+            shared,
+            left_only,
+            right_only,
+            recent,
+            metadata_rich,
+            rare_symbols,
+            freshest_drift,
+        )) => json_response(
             &{
                 let buckets = vec![
-                    BinaryCompareBucket { label: "Shared".to_string(), items: shared.clone() },
-                    BinaryCompareBucket { label: "Left Only".to_string(), items: left_only.clone() },
-                    BinaryCompareBucket { label: "Right Only".to_string(), items: right_only.clone() },
-                    BinaryCompareBucket { label: "Recent".to_string(), items: recent.clone() },
-                    BinaryCompareBucket { label: "Metadata Rich".to_string(), items: metadata_rich.clone() },
-                    BinaryCompareBucket { label: "Rare Symbols".to_string(), items: rare_symbols.clone() },
-                    BinaryCompareBucket { label: "Freshest Drift".to_string(), items: freshest_drift.clone() },
+                    BinaryCompareBucket {
+                        label: "Shared".to_string(),
+                        items: shared.clone(),
+                    },
+                    BinaryCompareBucket {
+                        label: "Left Only".to_string(),
+                        items: left_only.clone(),
+                    },
+                    BinaryCompareBucket {
+                        label: "Right Only".to_string(),
+                        items: right_only.clone(),
+                    },
+                    BinaryCompareBucket {
+                        label: "Recent".to_string(),
+                        items: recent.clone(),
+                    },
+                    BinaryCompareBucket {
+                        label: "Metadata Rich".to_string(),
+                        items: metadata_rich.clone(),
+                    },
+                    BinaryCompareBucket {
+                        label: "Rare Symbols".to_string(),
+                        items: rare_symbols.clone(),
+                    },
+                    BinaryCompareBucket {
+                        label: "Freshest Drift".to_string(),
+                        items: freshest_drift.clone(),
+                    },
                 ];
                 let active_label = match bucket_mode.as_str() {
-                    "Shared" | "Left Only" | "Right Only" | "Recent" | "Metadata Rich" | "Rare Symbols" | "Freshest Drift" => bucket_mode.clone(),
+                    "Shared" | "Left Only" | "Right Only" | "Recent" | "Metadata Rich"
+                    | "Rare Symbols" | "Freshest Drift" => bucket_mode.clone(),
                     _ => "All".to_string(),
                 };
                 let merged_all = [shared.clone(), left_only.clone(), right_only.clone()].concat();
                 let active_source = if active_label == "All" {
                     merged_all
                 } else {
-                    buckets.iter().find(|b| b.label == active_label).map(|b| b.items.clone()).unwrap_or_default()
+                    buckets
+                        .iter()
+                        .find(|b| b.label == active_label)
+                        .map(|b| b.items.clone())
+                        .unwrap_or_default()
                 };
-                let filtered: Vec<BinaryCompareItem> = active_source.into_iter().filter(|item| {
-                    bucket_query.is_empty()
-                        || item.name.to_ascii_lowercase().contains(&bucket_query)
-                        || item.key_hex.to_ascii_lowercase().contains(&bucket_query)
-                }).collect();
+                let filtered: Vec<BinaryCompareItem> = active_source
+                    .into_iter()
+                    .filter(|item| {
+                        bucket_query.is_empty()
+                            || item.name.to_ascii_lowercase().contains(&bucket_query)
+                            || item.key_hex.to_ascii_lowercase().contains(&bucket_query)
+                    })
+                    .collect();
                 let active_bucket_total = filtered.len();
-                let active_bucket_total_pages = active_bucket_total.div_ceil(bucket_per_page).max(1);
+                let active_bucket_total_pages =
+                    active_bucket_total.div_ceil(bucket_per_page).max(1);
                 let active_bucket_page = bucket_page.min(active_bucket_total_pages);
                 let start = (active_bucket_page - 1) * bucket_per_page;
-                let active_bucket_items = filtered.into_iter().skip(start).take(bucket_per_page).collect();
+                let active_bucket_items = filtered
+                    .into_iter()
+                    .skip(start)
+                    .take(bucket_per_page)
+                    .collect();
                 BinaryCompareResponse {
-                left: left_summary,
-                right: right_summary,
-                left_facets,
-                right_facets,
-                shared_count,
-                left_only_count,
-                right_only_count,
-                sample_limit,
-                active_bucket: active_label,
-                active_bucket_total,
-                active_bucket_page,
-                active_bucket_total_pages,
-                active_bucket_query: bucket_query,
-                active_bucket_items,
-                shared,
-                left_only,
-                right_only,
-                buckets,
-            }
+                    left: left_summary,
+                    right: right_summary,
+                    left_facets,
+                    right_facets,
+                    shared_count,
+                    left_only_count,
+                    right_only_count,
+                    sample_limit,
+                    active_bucket: active_label,
+                    active_bucket_total,
+                    active_bucket_page,
+                    active_bucket_total_pages,
+                    active_bucket_query: bucket_query,
+                    active_bucket_items,
+                    shared,
+                    left_only,
+                    right_only,
+                    buckets,
+                }
             },
             StatusCode::OK,
         ),
         Err(e) => {
-            error!("binary compare failed for {} vs {}: {}", left_md5_hex, right_md5_hex, e);
-            json_response(&serde_json::json!({"error": "binary compare failed"}), StatusCode::INTERNAL_SERVER_ERROR)
+            error!(
+                "binary compare failed for {} vs {}: {}",
+                left_md5_hex, right_md5_hex, e
+            );
+            json_response(
+                &serde_json::json!({"error": "binary compare failed"}),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
         }
     }
 }

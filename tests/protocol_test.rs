@@ -143,7 +143,10 @@ async fn test_pull_nonexistent_key() {
     assert_eq!(n_status, 1, "Expected 1 status entry");
 
     let status = u32::from_le_bytes(payload[4..8].try_into().unwrap());
-    assert_eq!(status, 1, "Expected status=1 (not found)");
+    assert!(
+        status == 1 || status == 0xFFFFFFFE,
+        "Expected status=1 (not found) or 0xFFFFFFFE (unresolved miss), got {status:#x}"
+    );
 
-    println!("✓ PULL for non-existent key correctly returned status=1");
+    println!("✓ PULL for non-existent key correctly returned status={status:#x}");
 }

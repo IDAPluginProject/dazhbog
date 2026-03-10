@@ -8,6 +8,7 @@ pub struct BinaryMeta {
     pub md5: [u8; 16],
     pub basename: String,
     pub hostname: String,
+    pub origin_token: String,
     pub first_seen_ts: u64,
     pub last_seen_ts: u64,
     pub obs_count: u64,
@@ -52,6 +53,13 @@ pub struct BinaryOverlapEntry {
     pub shared_functions: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct CanonicalVersion {
+    pub version_id: [u8; 32],
+    pub score: f64,
+    pub ts_sec: u64,
+}
+
 pub struct ContextIndex {
     #[allow(dead_code)]
     db: sled::Db, // Keep db handle alive
@@ -66,6 +74,7 @@ pub struct ContextIndex {
     t_binary_facets: sled::Tree,     // md5 -> cached BinaryFacetSummary
     t_binary_overlap: sled::Tree,    // md5 -> cached overlap rows
     t_key_basenames: sled::Tree,     // key -> Vec<String>
+    t_key_canonical: sled::Tree,     // key -> CanonicalVersion
     t_pop_val: sled::Tree,           // key -> u32 (popularity)
     t_pop_rank: sled::Tree,          // [u32::MAX - pop][key] -> []
 }
@@ -147,6 +156,9 @@ impl ContextIndex {
         let t_key_basenames = db
             .open_tree("key_basenames")
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")))?;
+        let t_key_canonical = db
+            .open_tree("key_canonical")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")))?;
         let t_pop_val = db
             .open_tree("pop_val")
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("open_tree: {e}")))?;
@@ -167,6 +179,7 @@ impl ContextIndex {
             t_binary_facets: t_binary_facets?,
             t_binary_overlap: t_binary_overlap?,
             t_key_basenames,
+            t_key_canonical,
             t_pop_val,
             t_pop_rank,
         };
@@ -282,9 +295,11 @@ impl ContextIndex {
         md5: [u8; 16],
         basename: &str,
         hostname: &str,
+        origin_token: &str,
         ts_sec: u64,
     ) -> io::Result<()> {
         let clean_basename = sanitize_basename(basename);
+        let clean_origin = normalize_lookup(origin_token);
         let key = md5;
         let val = self
             .t_binary_meta
@@ -295,6 +310,7 @@ impl ContextIndex {
                 md5,
                 basename: String::new(),
                 hostname: String::new(),
+                origin_token: String::new(),
                 first_seen_ts: ts_sec,
                 last_seen_ts: ts_sec,
                 obs_count: 0,
@@ -307,6 +323,7 @@ impl ContextIndex {
                 md5,
                 basename: String::new(),
                 hostname: String::new(),
+                origin_token: String::new(),
                 first_seen_ts: ts_sec,
                 last_seen_ts: ts_sec,
                 obs_count: 0,
@@ -322,6 +339,9 @@ impl ContextIndex {
         }
         if meta.hostname.is_empty() {
             meta.hostname = hostname.to_string();
+        }
+        if meta.origin_token.is_empty() && !clean_origin.is_empty() {
+            meta.origin_token = clean_origin;
         }
         self.record_binary_name_alias(md5, &clean_basename)?;
         self.record_binary_host(md5, hostname, ts_sec)?;
@@ -543,6 +563,39 @@ impl ContextIndex {
         }
 
         Ok(())
+    }
+
+    pub fn set_canonical_version(
+        &self,
+        key: u128,
+        version_id: [u8; 32],
+        score: f64,
+        ts_sec: u64,
+    ) -> io::Result<()> {
+        let key_only = key.to_le_bytes();
+        self.t_key_canonical
+            .insert(
+                &key_only,
+                encode_canonical_version(&CanonicalVersion {
+                    version_id,
+                    score,
+                    ts_sec,
+                }),
+            )
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled insert: {e}")))?;
+        Ok(())
+    }
+
+    pub fn get_canonical_version(&self, key: u128) -> io::Result<Option<CanonicalVersion>> {
+        let key_only = key.to_le_bytes();
+        match self.t_key_canonical.get(&key_only) {
+            Ok(Some(v)) => Ok(decode_canonical_version(&v)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("sled get: {e}"),
+            )),
+        }
     }
 
     pub fn get_md5_bins_for_key(&self, key: u128) -> io::Result<Vec<KeyMd5Entry>> {
@@ -1057,13 +1110,15 @@ fn decode_binary_overlap_entries(mut bytes: &[u8]) -> Option<Vec<BinaryOverlapEn
 }
 
 fn encode_binary_meta(m: &BinaryMeta) -> Vec<u8> {
-    let mut v = Vec::with_capacity(88 + m.basename.len() + m.hostname.len());
+    let mut v =
+        Vec::with_capacity(112 + m.basename.len() + m.hostname.len() + m.origin_token.len());
     v.extend_from_slice(&m.md5);
     put_u64_le(m.first_seen_ts, &mut v);
     put_u64_le(m.last_seen_ts, &mut v);
     put_u64_le(m.obs_count, &mut v);
     put_str(&mut v, &m.basename);
     put_str(&mut v, &m.hostname);
+    put_str(&mut v, &m.origin_token);
     put_u64_le(m.function_count, &mut v);
     put_u64_le(m.version_count, &mut v);
     put_u64_le(m.host_count, &mut v);
@@ -1076,16 +1131,64 @@ fn decode_binary_meta(mut b: &[u8]) -> Option<BinaryMeta> {
     let mut md5 = [0u8; 16];
     md5.copy_from_slice(&b[..16]);
     b = &b[16..];
+    let first_seen_ts = get_u64_le(&mut b)?;
+    let last_seen_ts = get_u64_le(&mut b)?;
+    let obs_count = get_u64_le(&mut b)?;
+    let basename = get_str(&mut b)?;
+    let hostname = get_str(&mut b)?;
+
+    let mut origin_token = String::new();
+    if b.len() > 24 {
+        let mut probe = b;
+        if let Some(n) = get_u16_le(&mut probe) {
+            let n = n as usize;
+            if probe.len() >= n + 24 {
+                origin_token = std::str::from_utf8(&probe[..n])
+                    .ok()
+                    .unwrap_or("")
+                    .to_string();
+                b = &probe[n..];
+            }
+        }
+    }
+
     Some(BinaryMeta {
         md5,
-        first_seen_ts: get_u64_le(&mut b)?,
-        last_seen_ts: get_u64_le(&mut b)?,
-        obs_count: get_u64_le(&mut b)?,
-        basename: get_str(&mut b)?,
-        hostname: get_str(&mut b)?,
+        first_seen_ts,
+        last_seen_ts,
+        obs_count,
+        basename,
+        hostname,
+        origin_token,
         function_count: get_u64_le(&mut b).unwrap_or(0),
         version_count: get_u64_le(&mut b).unwrap_or(0),
         host_count: get_u64_le(&mut b).unwrap_or(0),
+    })
+}
+
+fn encode_canonical_version(cv: &CanonicalVersion) -> Vec<u8> {
+    let mut v = Vec::with_capacity(32 + 8 + 8);
+    v.extend_from_slice(&cv.version_id);
+    v.extend_from_slice(&cv.score.to_le_bytes());
+    put_u64_le(cv.ts_sec, &mut v);
+    v
+}
+
+fn decode_canonical_version(mut b: &[u8]) -> Option<CanonicalVersion> {
+    let version_id = {
+        let bytes = get_bytes(&mut b, 32)?;
+        let mut out = [0u8; 32];
+        out.copy_from_slice(bytes);
+        out
+    };
+    let score = {
+        let bytes = get_bytes(&mut b, 8)?;
+        f64::from_le_bytes(bytes.try_into().ok()?)
+    };
+    Some(CanonicalVersion {
+        version_id,
+        score,
+        ts_sec: get_u64_le(&mut b).unwrap_or(0),
     })
 }
 
