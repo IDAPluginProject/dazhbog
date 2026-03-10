@@ -360,6 +360,48 @@ fn is_generic_neighbor_token(token: &str) -> bool {
             normalized.as_str(),
             "x86" | "x64" | "x86_64" | "amd64" | "arm" | "arm64" | "aarch64" | "mips" | "ppc"
         )
+        || matches!(
+            normalized.as_str(),
+            "rax"
+                | "rbx"
+                | "rcx"
+                | "rdx"
+                | "rsi"
+                | "rdi"
+                | "rbp"
+                | "rsp"
+                | "eax"
+                | "ebx"
+                | "ecx"
+                | "edx"
+                | "esi"
+                | "edi"
+                | "ebp"
+                | "esp"
+                | "ax"
+                | "bx"
+                | "cx"
+                | "dx"
+                | "si"
+                | "di"
+                | "bp"
+                | "sp"
+                | "lr"
+                | "pc"
+                | "fp"
+        )
+        || normalized
+            .strip_prefix('r')
+            .map(|rest| rest.chars().all(|ch| ch.is_ascii_digit()) && !rest.is_empty())
+            .unwrap_or(false)
+        || normalized
+            .strip_prefix('x')
+            .map(|rest| rest.chars().all(|ch| ch.is_ascii_digit()) && !rest.is_empty())
+            .unwrap_or(false)
+        || normalized
+            .strip_prefix('w')
+            .map(|rest| rest.chars().all(|ch| ch.is_ascii_digit()) && !rest.is_empty())
+            .unwrap_or(false)
         || normalized
             .strip_prefix("__m")
             .map(|rest| !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit()))

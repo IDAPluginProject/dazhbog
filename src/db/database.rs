@@ -2464,6 +2464,7 @@ fn is_generic_neighbor_token(token: &str) -> bool {
         || GENERIC_NEIGHBOR_TOKENS.contains(&normalized.as_str())
         || (normalized.starts_with("__") && normalized.ends_with("call"))
         || is_arch_neighbor_token(&normalized)
+        || is_register_neighbor_token(&normalized)
         || is_simd_neighbor_token(&normalized)
 }
 
@@ -2479,6 +2480,50 @@ fn is_arch_neighbor_token(token: &str) -> bool {
         token,
         "x86" | "x64" | "x86_64" | "amd64" | "arm" | "arm64" | "aarch64" | "mips" | "ppc"
     )
+}
+
+fn is_register_neighbor_token(token: &str) -> bool {
+    matches!(
+        token,
+        "rax"
+            | "rbx"
+            | "rcx"
+            | "rdx"
+            | "rsi"
+            | "rdi"
+            | "rbp"
+            | "rsp"
+            | "eax"
+            | "ebx"
+            | "ecx"
+            | "edx"
+            | "esi"
+            | "edi"
+            | "ebp"
+            | "esp"
+            | "ax"
+            | "bx"
+            | "cx"
+            | "dx"
+            | "si"
+            | "di"
+            | "bp"
+            | "sp"
+            | "lr"
+            | "pc"
+            | "fp"
+    ) || token
+        .strip_prefix('r')
+        .map(|rest| rest.chars().all(|ch| ch.is_ascii_digit()) && !rest.is_empty())
+        .unwrap_or(false)
+        || token
+            .strip_prefix('x')
+            .map(|rest| rest.chars().all(|ch| ch.is_ascii_digit()) && !rest.is_empty())
+            .unwrap_or(false)
+        || token
+            .strip_prefix('w')
+            .map(|rest| rest.chars().all(|ch| ch.is_ascii_digit()) && !rest.is_empty())
+            .unwrap_or(false)
 }
 
 fn is_simd_neighbor_token(token: &str) -> bool {

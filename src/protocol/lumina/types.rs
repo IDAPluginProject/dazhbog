@@ -1,10 +1,29 @@
 //! Lumina protocol type definitions.
 
+/// Sentinel license ID that marks a connection as read-only (no database mutations).
+///
+/// When a Lumina client sends this 6-byte license ID in the hello handshake,
+/// the server will serve pull/hist/info/stats requests normally but will silently
+/// reject all push, delete, and context-recording operations.
+///
+/// Value: `FF-FFFF-FF00-00` — the `0xFF` prefix byte is outside the range used by
+/// real IDA license IDs, and the trailing null bytes create a visually distinctive
+/// pattern that cannot be produced by accident.
+pub const READONLY_LICENSE_ID: [u8; 6] = [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00];
+
 /// Hello message from client.
 pub struct LuminaHello {
     pub protocol_version: u32,
+    pub license_id: [u8; 6],
     pub username: String,
     pub password: String,
+}
+
+impl LuminaHello {
+    /// Returns `true` if the client presented the read-only sentinel license ID.
+    pub fn is_readonly(&self) -> bool {
+        self.license_id == READONLY_LICENSE_ID
+    }
 }
 
 /// Raw hello data for debug dumps.

@@ -159,11 +159,15 @@ pub async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unp
     let hello = if is_lumina {
         debug!("Detected Lumina Hello message (0x0d)");
         match lumina::parse_lumina_hello(payload) {
-            Ok(v) => HelloReq {
-                protocol_version: v.protocol_version,
-                username: v.username,
-                password: v.password,
-            },
+            Ok(v) => {
+                let read_only = v.is_readonly();
+                HelloReq {
+                    protocol_version: v.protocol_version,
+                    username: v.username,
+                    password: v.password,
+                    read_only,
+                }
+            }
             Err(e) => {
                 error!("Failed to parse Lumina Hello: {}", e);
                 write_all(&mut stream, &encode_fail(0, "invalid hello")).await?;
@@ -213,6 +217,13 @@ pub async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unp
             write_all(&mut stream, &encode_fail(1, &msg)).await?;
         }
         return Ok(());
+    }
+
+    let read_only = hello.read_only;
+    if read_only {
+        info!(
+            "Read-only session: client presented READONLY_LICENSE_ID (all mutations will be suppressed)"
+        );
     }
 
     // Send hello response
@@ -332,9 +343,9 @@ pub async fn handle_client<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unp
         );
 
         if is_lumina {
-            handle_lumina_command(&mut stream, &cfg, &db, typ, pld).await?;
+            handle_lumina_command(&mut stream, &cfg, &db, typ, pld, read_only).await?;
         } else {
-            handle_rpc_command(&mut stream, &cfg, &db, typ, pld).await?;
+            handle_rpc_command(&mut stream, &cfg, &db, typ, pld, read_only).await?;
         }
     }
 }
@@ -346,14 +357,15 @@ async fn handle_lumina_command<S: tokio::io::AsyncRead + tokio::io::AsyncWrite +
     db: &Database,
     typ: u8,
     pld: &[u8],
+    read_only: bool,
 ) -> io::Result<()> {
     debug!("Lumina command received: 0x{:02x}", typ);
 
     match typ {
         0x0e => handle_lumina_pull(stream, cfg, db, pld).await,
-        0x10 => handle_lumina_push(stream, cfg, db, pld).await,
+        0x10 => handle_lumina_push(stream, cfg, db, pld, read_only).await,
         0x12 => handle_lumina_get_pop(stream, cfg, db, pld).await,
-        0x18 => handle_lumina_del(stream, cfg).await,
+        0x18 => handle_lumina_del(stream, cfg, read_only).await,
         0x2b => handle_lumina_info(stream, cfg).await,
         0x2d => handle_lumina_stats(stream, cfg, db).await,
         0x2f => handle_lumina_hist(stream, cfg, db, pld).await,
@@ -486,6 +498,10 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
                             maybe_funcs[idx] = Some((pop, len, name, data));
                         }
                     }
+                    // Always cache upstream results locally — even for read-only sessions.
+                    // db.push() uses a null context so no client-relationship records are
+                    // created; this just caches the raw function metadata to avoid
+                    // hammering the upstream on subsequent requests.
                     let new_inserts: Vec<(u128, u32, u32, &str, &[u8])> = new_inserts_owned
                         .iter()
                         .map(|(k, p, l, n, d)| (*k, *p, *l, n.as_str(), d.as_slice()))
@@ -493,8 +509,10 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
                     if !new_inserts.is_empty() {
                         match db.push(&new_inserts).await {
                             Ok(st) => {
-                                let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
-                                let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
+                                let new_funcs =
+                                    st.iter().filter(|&&v| v == 1).count() as u64;
+                                let updated_funcs =
+                                    st.iter().filter(|&&v| v == 0).count() as u64;
                                 METRICS.inc_pushes(new_funcs + updated_funcs);
                                 METRICS.inc_new_funcs(new_funcs);
                             }
@@ -533,6 +551,7 @@ async fn handle_lumina_push<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
     cfg: &Config,
     db: &Database,
     pld: &[u8],
+    read_only: bool,
 ) -> io::Result<()> {
     let caps = LuminaCaps {
         max_funcs: cfg.limits.max_push_items,
@@ -551,6 +570,17 @@ async fn handle_lumina_push<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
     };
 
     debug!("Lumina PUSH request: {} items", push_msg.funcs.len());
+
+    // Read-only sessions: accept the push message but discard it.
+    // Return all-zeros status (every item "unchanged") so the client doesn't retry.
+    if read_only {
+        debug!(
+            "Read-only session: suppressing push of {} items",
+            push_msg.funcs.len()
+        );
+        let fake_status: Vec<u32> = vec![0; push_msg.funcs.len()];
+        return lumina::send_lumina_push_result(stream, &fake_status).await;
+    }
 
     // Print push request metadata
     println!("\n=== PUSH REQUEST ===");
@@ -754,8 +784,12 @@ async fn handle_lumina_stats<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + U
 async fn handle_lumina_del<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     stream: &mut S,
     cfg: &Config,
+    read_only: bool,
 ) -> io::Result<()> {
-    if !cfg.lumina.allow_deletes {
+    if read_only || !cfg.lumina.allow_deletes {
+        if read_only {
+            debug!("Read-only session: rejecting delete request");
+        }
         return lumina::send_lumina_fail(
             stream,
             2,
@@ -874,13 +908,14 @@ async fn handle_rpc_command<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
     db: &Database,
     typ: u8,
     pld: &[u8],
+    read_only: bool,
 ) -> io::Result<()> {
     let msg_start = Instant::now();
 
     match typ {
         MSG_PULL => handle_rpc_pull(stream, cfg, db, pld, msg_start).await,
-        MSG_PUSH => handle_rpc_push(stream, cfg, db, pld, msg_start).await,
-        MSG_DEL => handle_rpc_del(stream, cfg, db, pld, msg_start).await,
+        MSG_PUSH => handle_rpc_push(stream, cfg, db, pld, msg_start, read_only).await,
+        MSG_DEL => handle_rpc_del(stream, cfg, db, pld, msg_start, read_only).await,
         MSG_HIST => handle_rpc_hist(stream, cfg, db, pld, msg_start).await,
         _ => {
             debug!(
@@ -986,6 +1021,10 @@ async fn handle_rpc_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
                             db.failure_cache.insert(key);
                         }
                     }
+                    // Always cache upstream results locally — even for read-only sessions.
+                    // db.push() uses a null context so no client-relationship records are
+                    // created; this just caches the raw function metadata to avoid
+                    // hammering the upstream on subsequent requests.
                     let new_inserts: Vec<(u128, u32, u32, &str, &[u8])> = new_inserts_owned
                         .iter()
                         .map(|(k, p, l, n, d)| (*k, *p, *l, n.as_str(), d.as_slice()))
@@ -993,8 +1032,10 @@ async fn handle_rpc_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
                     if !new_inserts_owned.is_empty() {
                         match db.push(&new_inserts).await {
                             Ok(st) => {
-                                let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
-                                let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
+                                let new_funcs =
+                                    st.iter().filter(|&&v| v == 1).count() as u64;
+                                let updated_funcs =
+                                    st.iter().filter(|&&v| v == 0).count() as u64;
                                 METRICS.inc_pushes(new_funcs + updated_funcs);
                                 METRICS.inc_new_funcs(new_funcs);
                             }
@@ -1035,6 +1076,7 @@ async fn handle_rpc_push<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
     db: &Database,
     pld: &[u8],
     msg_start: Instant,
+    read_only: bool,
 ) -> io::Result<()> {
     let caps = PushCaps {
         max_items: cfg.limits.max_push_items,
@@ -1051,6 +1093,18 @@ async fn handle_rpc_push<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
     };
 
     debug!("PUSH request: {} items", items.len());
+
+    // Read-only sessions: accept the push message but discard it.
+    // Return all-unchanged statuses so the client doesn't retry.
+    if read_only {
+        debug!(
+            "Read-only session: suppressing push of {} items (took {:?})",
+            items.len(),
+            msg_start.elapsed()
+        );
+        let fake_status: Vec<u32> = vec![2; items.len()];
+        return write_all(stream, &encode_push_ok(&fake_status)).await;
+    }
 
     if log_enabled!(log::Level::Debug) {
         for (i, item) in items.iter().enumerate().take(5) {
@@ -1118,8 +1172,12 @@ async fn handle_rpc_del<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>
     db: &Database,
     pld: &[u8],
     msg_start: Instant,
+    read_only: bool,
 ) -> io::Result<()> {
-    if !cfg.lumina.allow_deletes {
+    if read_only || !cfg.lumina.allow_deletes {
+        if read_only {
+            debug!("Read-only session: rejecting delete request");
+        }
         return write_all(
             stream,
             &encode_fail(

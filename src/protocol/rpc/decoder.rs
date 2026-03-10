@@ -24,6 +24,7 @@ pub fn decode_hello(payload: &[u8]) -> Result<HelloReq, CodecError> {
         protocol_version: pv,
         username: user,
         password: pass,
+        read_only: false, // RPC protocol has no license ID; read-only mode is Lumina-only
     })
 }
 

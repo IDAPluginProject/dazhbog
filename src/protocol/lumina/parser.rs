@@ -58,9 +58,17 @@ pub fn parse_lumina_hello_raw(payload: &[u8]) -> Result<LuminaHelloRaw, LuminaEr
 /// Parse a Lumina Hello message.
 pub fn parse_lumina_hello(payload: &[u8]) -> Result<LuminaHello, LuminaError> {
     let raw = parse_lumina_hello_raw(payload)?;
-    debug!("Lumina Hello: protocol_version={}", raw.protocol_version);
+    debug!(
+        "Lumina Hello: protocol_version={}, license_id={}",
+        raw.protocol_version,
+        raw.license_id
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>()
+    );
     Ok(LuminaHello {
         protocol_version: raw.protocol_version,
+        license_id: raw.license_id,
         username: raw.username,
         password: raw.password,
     })

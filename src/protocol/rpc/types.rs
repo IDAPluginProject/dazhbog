@@ -7,6 +7,9 @@ pub struct HelloReq {
     pub username: String,
     #[allow(dead_code)]
     pub password: String,
+    /// When true, this connection will not cause any database mutations
+    /// (no pushes, no deletes, no context observations, no upstream cache-through writes).
+    pub read_only: bool,
 }
 
 /// Push item in a push request.
