@@ -11,5 +11,9 @@ mod rebuild;
 mod types;
 
 pub use index::SearchIndex;
-pub use rebuild::rebuild_from_engine;
+#[allow(unused_imports)]
+pub use rebuild::{
+    rebuild_from_engine, rebuild_from_engine_with_progress, RebuildProgress, RebuildProgressPhase,
+    SearchRebuildSummary,
+};
 pub use types::{BinaryRefHit, SearchDocument, SearchHit, SemanticNeighborRationale};

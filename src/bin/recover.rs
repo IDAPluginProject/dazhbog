@@ -4,9 +4,13 @@ use std::io::Write;
 use std::time::Instant;
 use std::{io, path::PathBuf};
 
-use dazhbog::common::demangle::demangle as shared_demangle;
+use dazhbog::engine::search::{
+    rebuild_from_engine_with_progress, RebuildProgressPhase, SearchIndex,
+};
+use dazhbog::engine::{migrate_legacy_index_files, ContextIndex, OpenSegments, ShardedIndex};
 
 const MAGIC: u32 = 0x4C4D4E31;
+const RECOVER_SEG_BYTES: u64 = 1024 * 1024 * 1024;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Progress Reporting
@@ -135,35 +139,24 @@ fn log_step(step: u32, total: u32, msg: &str) {
     println!("{}", "─".repeat(60));
 }
 
-/// Decode basenames from context index format.
-/// Format: count:u8, then for each: len:u16_le, bytes
-fn decode_basenames(mut b: &[u8]) -> Option<Vec<String>> {
-    if b.is_empty() {
-        return Some(Vec::new());
-    }
-    let count = b[0] as usize;
-    b = &b[1..];
-
-    let mut out = Vec::with_capacity(count);
-    for _ in 0..count {
-        if b.len() < 2 {
-            return None;
-        }
-        let len = u16::from_le_bytes([b[0], b[1]]) as usize;
-        b = &b[2..];
-        if b.len() < len {
-            return None;
-        }
-        let s = std::str::from_utf8(&b[..len]).ok()?.to_string();
-        b = &b[len..];
-        out.push(s);
-    }
-    Some(out)
-}
-
 /// Pack segment ID, offset, and flags into a single 64-bit address.
 const fn pack_addr(seg_id: u16, offset: u64, flags: u8) -> u64 {
     ((seg_id as u64) << 48) | ((offset & ((1u64 << 40) - 1)) << 8) | (flags as u64)
+}
+
+fn open_latest_index(data_dir: &PathBuf) -> io::Result<(sled::Db, ShardedIndex)> {
+    let index_dir = data_dir.join("index");
+    std::fs::create_dir_all(&index_dir)?;
+    migrate_legacy_index_files(&index_dir)?;
+
+    let index_db = sled::Config::default()
+        .path(&index_dir)
+        .cache_capacity(64 * 1024 * 1024)
+        .flush_every_ms(Some(500))
+        .open()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open index db: {}", e)))?;
+    let index = ShardedIndex::new(&index_db)?;
+    Ok((index_db, index))
 }
 
 mod crc32c_impl {
@@ -1108,12 +1101,6 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
     Ok(())
 }
 
-/// Demangle a symbol name, returning (demangled_name, language) or (original, "")
-fn demangle_symbol(name: &str) -> (String, &'static str) {
-    let result = shared_demangle(name);
-    (result.name, result.lang.unwrap_or(""))
-}
-
 fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
     let seg_db_dir = data_dir.join("segments_db");
     let search_dir = data_dir.join("search_index");
@@ -1133,317 +1120,161 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
 
     log_info(&format!("Data directory: {}", data_dir.display()));
 
-    // ─────────────────────────────────────────────────────────────────────────
-    log_step(1, 5, "Opening databases");
-    // ─────────────────────────────────────────────────────────────────────────
+    log_step(1, 5, "Opening engine data");
 
-    let ctx_basenames_tree: Option<sled::Tree> = if ctx_db_dir.exists() {
-        log_info(&format!("Opening context_db at {}", ctx_db_dir.display()));
-        let ctx_db = sled::open(&ctx_db_dir).map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("sled open context_db: {}", e))
-        })?;
-        match ctx_db.open_tree("key_basenames") {
-            Ok(tree) => {
-                let count = tree.len();
-                if count == 0 {
-                    log_info("[WARN] key_basenames is empty, run --rebuild-basenames first");
-                    None
-                } else {
-                    log_info(&format!(
-                        "Opened key_basenames tree ({} entries)",
-                        fmt_num(count as u64)
-                    ));
-                    Some(tree)
-                }
-            }
-            Err(e) => {
-                log_info(&format!("[WARN] Could not open key_basenames: {}", e));
-                None
-            }
-        }
-    } else {
-        log_info("[WARN] No context_db found, binary names will be empty");
-        log_info("       Run --migrate-context first to create context_db");
-        None
-    };
-
-    log_info("Opening segments database...");
-    let seg_db = sled::open(&seg_db_dir)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled open segments: {}", e)))?;
-
-    // ─────────────────────────────────────────────────────────────────────────
-    log_step(2, 5, "Scanning segment records");
-    // ─────────────────────────────────────────────────────────────────────────
-
-    let mut tree_names: Vec<_> = seg_db
-        .tree_names()
-        .into_iter()
-        .map(|name| String::from_utf8_lossy(&name).to_string())
-        .filter(|name| name.starts_with("seg."))
-        .collect();
-    tree_names.sort();
-
-    log_info(&format!("Found {} segment trees", tree_names.len()));
-
-    let total_expected: u64 = tree_names
-        .iter()
-        .filter_map(|name| seg_db.open_tree(name).ok())
-        .map(|t| t.len() as u64)
-        .sum();
-    log_info(&format!(
-        "Total records to scan: {}",
-        fmt_num(total_expected)
-    ));
-
-    let mut latest_by_key: HashMap<u128, (u64, String)> = HashMap::new();
-    let mut total_records = 0u64;
-    let mut progress = Progress::new("Scanning", total_expected);
-
-    for (tree_idx, name) in tree_names.iter().enumerate() {
-        let tree = seg_db.open_tree(name).map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("open tree {}: {}", name, e))
-        })?;
-
-        let tree_len = tree.len() as u64;
-        println!(
-            "\n  [{}/{}] {} ({} records)",
-            tree_idx + 1,
-            tree_names.len(),
-            name,
-            fmt_num(tree_len)
-        );
-
-        let mut tree_progress = Progress::new("  Records", tree_len);
-
-        for item in tree.iter() {
-            tree_progress.inc(1);
-            progress.inc(1);
-
-            let (_, record_bytes) = match item {
-                Ok(i) => i,
-                Err(_) => continue,
-            };
-
-            if record_bytes.len() < 12 {
-                continue;
-            }
-
-            let hdr: &[u8] = &record_bytes[0..12];
-            let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
-            if magic != MAGIC {
-                continue;
-            }
-
-            let stored_crc = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
-            let body = &record_bytes[12..];
-
-            let computed_crc = crc32c_impl::crc32c(0, body);
-            let crc_valid = if computed_crc == stored_crc {
-                true
-            } else {
-                let computed_crc_legacy = crc32c_impl::crc32c_legacy(0, body);
-                computed_crc_legacy == stored_crc
-            };
-
-            if !crc_valid || body.len() < 52 {
-                continue;
-            }
-
-            let lo = u64::from_le_bytes(body[0..8].try_into().unwrap());
-            let hi = u64::from_le_bytes(body[8..16].try_into().unwrap());
-            let key = ((hi as u128) << 64) | (lo as u128);
-            let ts_sec = u64::from_le_bytes(body[16..24].try_into().unwrap());
-            let flags = body[46];
-
-            if flags & 0x01 == 0x01 {
-                continue;
-            }
-
-            let name_len = u16::from_le_bytes(body[40..42].try_into().unwrap()) as usize;
-            let name_start = 52;
-            if name_start + name_len > body.len() {
-                continue;
-            }
-            let name = match std::str::from_utf8(&body[name_start..name_start + name_len]) {
-                Ok(s) => s.to_string(),
-                Err(_) => continue,
-            };
-
-            match latest_by_key.get(&key) {
-                Some(&(existing_ts, _)) if existing_ts >= ts_sec => {}
-                _ => {
-                    latest_by_key.insert(key, (ts_sec, name));
-                }
-            }
-
-            total_records += 1;
-        }
-        tree_progress.finish();
+    let (mut index_db, mut latest_index) = open_latest_index(data_dir)?;
+    if latest_index.entry_count() == 0 {
+        log_info("[WARN] latest key->addr index is empty; rebuilding it first");
+        log_info("       canonical version selection needs the latest index to be present");
+        drop(latest_index);
+        drop(index_db);
+        rebuild_index(data_dir)?;
+        let reopened = open_latest_index(data_dir)?;
+        index_db = reopened.0;
+        latest_index = reopened.1;
     }
-
-    println!();
     log_info(&format!(
-        "Valid records scanned: {}",
-        fmt_num(total_records)
-    ));
-    log_info(&format!(
-        "Unique keys to index: {}",
-        fmt_num(latest_by_key.len() as u64)
+        "Latest index entries: {}",
+        fmt_num(latest_index.entry_count())
     ));
 
-    // ─────────────────────────────────────────────────────────────────────────
-    log_step(3, 5, "Creating search index");
-    // ─────────────────────────────────────────────────────────────────────────
+    log_info("Opening segments...");
+    let segments = OpenSegments::open(data_dir, RECOVER_SEG_BYTES, false)?;
+    log_info(&format!(
+        "Loaded {} segment trees with {} total records",
+        segments.get_segment_count(),
+        fmt_num(segments.get_record_count())
+    ));
+
+    let ctx_index = if ctx_db_dir.exists() {
+        log_info(&format!("Opening context_db at {}", ctx_db_dir.display()));
+        let ctx = ContextIndex::open(data_dir)?;
+        log_info(&format!(
+            "Context index ready ({} unique binaries)",
+            fmt_num(ctx.unique_binaries_count())
+        ));
+        ctx
+    } else {
+        log_info("[WARN] No context_db found, binary names and origin tokens will be empty");
+        log_info("       Run --migrate-context first if you need binary/context enrichment");
+        ContextIndex::open_or_create(data_dir)?
+    };
 
     if search_dir.exists() {
         log_info("Removing old search index...");
         std::fs::remove_dir_all(&search_dir)?;
     }
-    std::fs::create_dir_all(&search_dir)?;
-    log_info(&format!("Created new index at {}", search_dir.display()));
+    let search = SearchIndex::open(&search_dir)?;
+    log_info(&format!(
+        "Created fresh search index at {}",
+        search_dir.display()
+    ));
 
-    use tantivy::schema::{IndexRecordOption, Schema, TextFieldIndexing, TextOptions, STORED};
-    use tantivy::tokenizer::{LowerCaser, RawTokenizer, SimpleTokenizer, TextAnalyzer};
-    use tantivy::{Index, IndexWriter, TantivyDocument};
+    let mut current_phase = None;
+    let mut phase_progress: Option<Progress> = None;
+    let mut commit_started_at: Option<Instant> = None;
 
-    let mut builder = Schema::builder();
+    let summary = rebuild_from_engine_with_progress(
+        &search,
+        &segments,
+        &latest_index,
+        &ctx_index,
+        |update| {
+            if current_phase != Some(update.phase) {
+                if let Some(progress) = phase_progress.take() {
+                    progress.finish();
+                }
+                current_phase = Some(update.phase);
 
-    let symbol_indexing = TextFieldIndexing::default()
-        .set_tokenizer("symbol")
-        .set_index_option(IndexRecordOption::WithFreqs);
-    let symbol_options = TextOptions::default()
-        .set_indexing_options(symbol_indexing)
-        .set_stored();
-
-    let stored_only = TextOptions::default().set_stored();
-
-    let key_options = TextOptions::default().set_stored().set_indexing_options(
-        TextFieldIndexing::default()
-            .set_tokenizer("raw")
-            .set_index_option(IndexRecordOption::Basic),
-    );
-
-    let key_hex = builder.add_text_field("key_hex", key_options);
-    let func_name = builder.add_text_field("func_name", symbol_options.clone());
-    let func_name_demangled = builder.add_text_field("func_name_demangled", symbol_options.clone());
-    let lang = builder.add_text_field("lang", stored_only);
-    let binary_name = builder.add_text_field("binary_name", symbol_options);
-    let ts = builder.add_u64_field("ts", STORED);
-
-    let schema = builder.build();
-
-    let index = Index::create_in_dir(&search_dir, schema)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("create index: {}", e)))?;
-
-    let symbol = TextAnalyzer::builder(SimpleTokenizer::default())
-        .filter(LowerCaser)
-        .build();
-    let raw = TextAnalyzer::builder(RawTokenizer::default()).build();
-    index.tokenizers().register("symbol", symbol);
-    index.tokenizers().register("raw", raw);
-
-    let mut writer: IndexWriter = index
-        .writer(50_000_000)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("writer: {}", e)))?;
-
-    log_info("Index created, tokenizers registered");
-
-    // ─────────────────────────────────────────────────────────────────────────
-    log_step(4, 5, "Indexing functions");
-    // ─────────────────────────────────────────────────────────────────────────
-
-    let total_funcs = latest_by_key.len() as u64;
-    log_info(&format!("Functions to index: {}", fmt_num(total_funcs)));
-
-    let mut progress = Progress::new("Indexing", total_funcs);
-    let mut indexed = 0u64;
-    let mut with_basenames = 0u64;
-    let mut demangled_count = 0u64;
-
-    for (k, (ts_val, name)) in latest_by_key.iter() {
-        progress.inc(1);
-
-        let key_hex_str = format!("{:032x}", k);
-
-        let (demangled_name, lang_str) = demangle_symbol(name);
-        let is_demangled = !lang_str.is_empty() && demangled_name != *name;
-
-        let mut doc = TantivyDocument::new();
-        doc.add_text(key_hex, &key_hex_str);
-        doc.add_text(func_name, name);
-
-        if is_demangled {
-            doc.add_text(func_name_demangled, &demangled_name);
-            doc.add_text(lang, lang_str);
-            demangled_count += 1;
-        } else {
-            doc.add_text(func_name_demangled, "");
-            doc.add_text(lang, "");
-        }
-
-        doc.add_u64(ts, *ts_val);
-
-        if let Some(ref tree) = ctx_basenames_tree {
-            let key_bytes = k.to_le_bytes();
-            if let Ok(Some(val)) = tree.get(&key_bytes) {
-                if let Some(basenames) = decode_basenames(&val) {
-                    for bn in basenames {
-                        doc.add_text(binary_name, &bn);
+                match update.phase {
+                    RebuildProgressPhase::ScanSegments => {
+                        log_step(2, 5, "Scanning segment records");
+                        log_info(&format!("Total records to scan: {}", fmt_num(update.total)));
+                        phase_progress = Some(Progress::new("Scanning", update.total));
                     }
-                    with_basenames += 1;
+                    RebuildProgressPhase::BuildDocuments => {
+                        log_step(3, 5, "Building semantic search documents");
+                        log_info(&format!(
+                            "Unique keys to rebuild: {}",
+                            fmt_num(update.total)
+                        ));
+                        log_info(
+                            "Recomputing demangled names, basenames, origin tokens, and semantic fingerprints...",
+                        );
+                        phase_progress = Some(Progress::new("Analyzing", update.total));
+                    }
+                    RebuildProgressPhase::Commit => {
+                        log_step(4, 5, "Writing search index");
+                        log_info(&format!(
+                            "Prepared {} docs | demangled {} | basenames {} | origin tokens {} | canonical {}",
+                            fmt_num(update.indexed_docs),
+                            fmt_num(update.demangled),
+                            fmt_num(update.with_basenames),
+                            fmt_num(update.with_origin_tokens),
+                            fmt_num(update.canonical_versions)
+                        ));
+                        log_info("Committing to disk (this may take a moment)...");
+                        commit_started_at = Some(Instant::now());
+                    }
                 }
             }
-        }
 
-        writer
-            .add_document(doc)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("add doc: {}", e)))?;
+            match update.phase {
+                RebuildProgressPhase::ScanSegments | RebuildProgressPhase::BuildDocuments => {
+                    if let Some(progress) = phase_progress.as_mut() {
+                        progress.set(update.current);
+                    }
+                }
+                RebuildProgressPhase::Commit => {}
+            }
+        },
+    )?;
 
-        indexed += 1;
+    if let Some(progress) = phase_progress.take() {
+        progress.finish();
     }
-    progress.finish();
-
-    log_info(&format!(
-        "Demangled: {} ({:.1}%)",
-        fmt_num(demangled_count),
-        demangled_count as f64 / indexed as f64 * 100.0
-    ));
-    log_info(&format!(
-        "With binary names: {} ({:.1}%)",
-        fmt_num(with_basenames),
-        with_basenames as f64 / indexed as f64 * 100.0
-    ));
-
-    // ─────────────────────────────────────────────────────────────────────────
-    log_step(5, 5, "Committing index");
-    // ─────────────────────────────────────────────────────────────────────────
-
-    log_info("Committing to disk (this may take a moment)...");
-    let commit_start = Instant::now();
-    writer
-        .commit()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("commit: {}", e)))?;
-    log_info(&format!(
-        "Committed in {:.2}s",
-        commit_start.elapsed().as_secs_f64()
-    ));
+    if let Some(started_at) = commit_started_at {
+        log_info(&format!(
+            "Committed in {:.2}s",
+            started_at.elapsed().as_secs_f64()
+        ));
+    }
 
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║  SEARCH INDEX REBUILD COMPLETE                               ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
     println!(
+        "║  Records scanned:     {:>12}                         ║",
+        fmt_num(summary.total_records)
+    );
+    println!(
+        "║  Valid records:       {:>12}                         ║",
+        fmt_num(summary.valid_records)
+    );
+    println!(
         "║  Functions indexed:   {:>12}                         ║",
-        fmt_num(indexed)
+        fmt_num(summary.indexed_docs)
     );
     println!(
         "║  Demangled:           {:>12}                         ║",
-        fmt_num(demangled_count)
+        fmt_num(summary.demangled)
     );
     println!(
         "║  With binary names:   {:>12}                         ║",
-        fmt_num(with_basenames)
+        fmt_num(summary.with_basenames)
+    );
+    println!(
+        "║  With origin tokens:  {:>12}                         ║",
+        fmt_num(summary.with_origin_tokens)
+    );
+    println!(
+        "║  Canonical versions:  {:>12}                         ║",
+        fmt_num(summary.canonical_versions)
     );
     println!("╚══════════════════════════════════════════════════════════════╝");
+
+    drop(latest_index);
+    drop(index_db);
 
     Ok(())
 }

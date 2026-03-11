@@ -8,9 +8,6 @@ RUN apt-get update && \
     apt-get install -y pkg-config libssl-dev cmake clang && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy vendor directory first (for patched crates)
-COPY vendor ./vendor
-
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
 
@@ -32,6 +29,7 @@ RUN apt-get update && \
 
 # Copy the binary from builder
 COPY --from=builder /app/target/release/dazhbog /app/dazhbog
+COPY --from=builder /app/target/release/recover /app/dazhbog-recover
 
 # Copy config if needed (data should be mounted as volume)
 COPY config.toml ./

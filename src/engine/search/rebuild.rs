@@ -11,6 +11,48 @@ use log::info;
 use std::collections::{HashMap, HashSet};
 use std::io;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildProgressPhase {
+    ScanSegments,
+    BuildDocuments,
+    Commit,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub struct RebuildProgress {
+    pub phase: RebuildProgressPhase,
+    pub current: u64,
+    pub total: u64,
+    pub valid_records: u64,
+    pub unique_keys: u64,
+    pub indexed_docs: u64,
+    pub demangled: u64,
+    pub with_basenames: u64,
+    pub with_origin_tokens: u64,
+    pub canonical_versions: u64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SearchRebuildSummary {
+    pub total_records: u64,
+    pub valid_records: u64,
+    pub unique_keys: u64,
+    pub indexed_docs: u64,
+    pub demangled: u64,
+    pub with_basenames: u64,
+    pub with_origin_tokens: u64,
+    pub canonical_versions: u64,
+}
+
+struct ResolvedRecord {
+    ts: u64,
+    name: String,
+    data: Vec<u8>,
+    used_canonical: bool,
+}
+
 /// Rebuild the search index from engine data.
 pub fn rebuild_from_engine(
     search: &SearchIndex,
@@ -18,31 +60,120 @@ pub fn rebuild_from_engine(
     index: &ShardedIndex,
     ctx_index: &ContextIndex,
 ) -> io::Result<()> {
+    rebuild_from_engine_with_progress(search, segments, index, ctx_index, |_| {}).map(|_| ())
+}
+
+pub fn rebuild_from_engine_with_progress<F>(
+    search: &SearchIndex,
+    segments: &OpenSegments,
+    index: &ShardedIndex,
+    ctx_index: &ContextIndex,
+    mut progress: F,
+) -> io::Result<SearchRebuildSummary>
+where
+    F: FnMut(RebuildProgress),
+{
+    let (docs, summary) =
+        collect_rebuild_documents_with_progress(segments, index, ctx_index, &mut progress)?;
+
+    info!("rebuilding full-text index for {} functions", docs.len());
+    progress(progress_snapshot(
+        RebuildProgressPhase::Commit,
+        0,
+        summary.indexed_docs,
+        summary,
+    ));
+    search.rebuild(docs)?;
+    progress(progress_snapshot(
+        RebuildProgressPhase::Commit,
+        summary.indexed_docs,
+        summary.indexed_docs,
+        summary,
+    ));
+
+    Ok(summary)
+}
+
+fn collect_rebuild_documents_with_progress<F>(
+    segments: &OpenSegments,
+    index: &ShardedIndex,
+    ctx_index: &ContextIndex,
+    progress: &mut F,
+) -> io::Result<(Vec<SearchDocument>, SearchRebuildSummary)>
+where
+    F: FnMut(RebuildProgress),
+{
+    let total_records = segments.get_record_count();
+    let mut summary = SearchRebuildSummary {
+        total_records,
+        ..SearchRebuildSummary::default()
+    };
     let mut latest: HashMap<u128, (u64, String, Vec<u8>)> = HashMap::new();
+    let mut scanned = 0u64;
+
+    progress(progress_snapshot(
+        RebuildProgressPhase::ScanSegments,
+        0,
+        total_records,
+        summary,
+    ));
+
     segments.for_each_record(|_seg_id, _off, rec| {
-        if rec.flags & 0x01 != 0 {
-            return Ok(());
+        scanned += 1;
+        if rec.flags & 0x01 == 0 {
+            summary.valid_records += 1;
+            let entry =
+                latest
+                    .entry(rec.key)
+                    .or_insert((rec.ts_sec, rec.name.clone(), rec.data.clone()));
+            if rec.ts_sec >= entry.0 {
+                *entry = (rec.ts_sec, rec.name.clone(), rec.data.clone());
+            }
         }
-        let entry =
-            latest
-                .entry(rec.key)
-                .or_insert((rec.ts_sec, rec.name.clone(), rec.data.clone()));
-        if rec.ts_sec >= entry.0 {
-            *entry = (rec.ts_sec, rec.name.clone(), rec.data.clone());
-        }
+
+        let mut snapshot = summary;
+        snapshot.unique_keys = latest.len() as u64;
+        progress(progress_snapshot(
+            RebuildProgressPhase::ScanSegments,
+            scanned,
+            total_records,
+            snapshot,
+        ));
         Ok(())
     })?;
 
     if index.entry_count() > 0 {
         latest.retain(|k, _| index.get(*k) != 0);
     }
+    summary.unique_keys = latest.len() as u64;
+    progress(progress_snapshot(
+        RebuildProgressPhase::ScanSegments,
+        total_records,
+        total_records,
+        summary,
+    ));
+
+    let total_docs = latest.len() as u64;
+    progress(progress_snapshot(
+        RebuildProgressPhase::BuildDocuments,
+        0,
+        total_docs,
+        summary,
+    ));
 
     let mut docs = Vec::with_capacity(latest.len());
     for (key, fallback_latest) in latest.into_iter() {
-        let (ts, name, data) =
+        let resolved =
             resolve_canonical_or_latest_record(segments, index, ctx_index, key, fallback_latest)?;
+        if resolved.used_canonical {
+            summary.canonical_versions += 1;
+        }
 
         let basenames = ctx_index.resolve_basenames_for_key(key).unwrap_or_default();
+        if !basenames.is_empty() {
+            summary.with_basenames += 1;
+        }
+
         let binary_refs = ctx_index
             .get_binary_refs_for_key(key, 8)
             .unwrap_or_default();
@@ -56,9 +187,13 @@ pub fn rebuild_from_engine(
                 }
             })
             .collect();
+        if !origin_tokens.is_empty() {
+            summary.with_origin_tokens += 1;
+        }
 
-        let demangle_result = demangle(&name);
+        let demangle_result = demangle(&resolved.name);
         let (func_name_demangled, lang) = if demangle_result.demangled {
+            summary.demangled += 1;
             (
                 demangle_result.name,
                 demangle_result.lang.unwrap_or("").to_string(),
@@ -67,10 +202,10 @@ pub fn rebuild_from_engine(
             (String::new(), String::new())
         };
 
-        let analysis = analyze_function(&name, &data);
+        let analysis = analyze_function(&resolved.name, &resolved.data);
         docs.push(SearchDocument {
             key,
-            func_name: name,
+            func_name: resolved.name,
             func_name_demangled,
             lang: if lang.is_empty() {
                 analysis.fingerprint.language.clone()
@@ -84,13 +219,39 @@ pub fn rebuild_from_engine(
             comment_tokens: analysis.fingerprint.comment_tokens,
             operand_tokens: analysis.fingerprint.operand_tokens,
             semantic_tokens: analysis.fingerprint.tokens,
-            ts,
+            ts: resolved.ts,
         });
+
+        summary.indexed_docs += 1;
+        progress(progress_snapshot(
+            RebuildProgressPhase::BuildDocuments,
+            summary.indexed_docs,
+            total_docs,
+            summary,
+        ));
     }
 
-    info!("rebuilding full-text index for {} functions", docs.len());
-    search.rebuild(docs)?;
-    Ok(())
+    Ok((docs, summary))
+}
+
+fn progress_snapshot(
+    phase: RebuildProgressPhase,
+    current: u64,
+    total: u64,
+    summary: SearchRebuildSummary,
+) -> RebuildProgress {
+    RebuildProgress {
+        phase,
+        current,
+        total,
+        valid_records: summary.valid_records,
+        unique_keys: summary.unique_keys,
+        indexed_docs: summary.indexed_docs,
+        demangled: summary.demangled,
+        with_basenames: summary.with_basenames,
+        with_origin_tokens: summary.with_origin_tokens,
+        canonical_versions: summary.canonical_versions,
+    }
 }
 
 fn resolve_canonical_or_latest_record(
@@ -99,12 +260,18 @@ fn resolve_canonical_or_latest_record(
     ctx_index: &ContextIndex,
     key: u128,
     fallback_latest: (u64, String, Vec<u8>),
-) -> io::Result<(u64, String, Vec<u8>)> {
+) -> io::Result<ResolvedRecord> {
     let Some(canonical_vid) = ctx_index
         .get_canonical_version(key)?
         .map(|cv| cv.version_id)
     else {
-        return Ok(fallback_latest);
+        let (ts, name, data) = fallback_latest;
+        return Ok(ResolvedRecord {
+            ts,
+            name,
+            data,
+            used_canonical: false,
+        });
     };
 
     let mut addr = index.get(key);
@@ -121,11 +288,22 @@ fn resolve_canonical_or_latest_record(
         if rec.flags & 0x01 == 0 {
             let vid = version_id(key, &rec.name, &rec.data);
             if vid == canonical_vid {
-                return Ok((rec.ts_sec, rec.name, rec.data));
+                return Ok(ResolvedRecord {
+                    ts: rec.ts_sec,
+                    name: rec.name,
+                    data: rec.data,
+                    used_canonical: true,
+                });
             }
         }
         addr = next;
     }
 
-    Ok(fallback_latest)
+    let (ts, name, data) = fallback_latest;
+    Ok(ResolvedRecord {
+        ts,
+        name,
+        data,
+        used_canonical: false,
+    })
 }
