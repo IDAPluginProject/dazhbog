@@ -509,10 +509,8 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
                     if !new_inserts.is_empty() {
                         match db.push(&new_inserts).await {
                             Ok(st) => {
-                                let new_funcs =
-                                    st.iter().filter(|&&v| v == 1).count() as u64;
-                                let updated_funcs =
-                                    st.iter().filter(|&&v| v == 0).count() as u64;
+                                let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
+                                let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
                                 METRICS.inc_pushes(new_funcs + updated_funcs);
                                 METRICS.inc_new_funcs(new_funcs);
                             }
@@ -1032,10 +1030,8 @@ async fn handle_rpc_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
                     if !new_inserts_owned.is_empty() {
                         match db.push(&new_inserts).await {
                             Ok(st) => {
-                                let new_funcs =
-                                    st.iter().filter(|&&v| v == 1).count() as u64;
-                                let updated_funcs =
-                                    st.iter().filter(|&&v| v == 0).count() as u64;
+                                let new_funcs = st.iter().filter(|&&v| v == 1).count() as u64;
+                                let updated_funcs = st.iter().filter(|&&v| v == 0).count() as u64;
                                 METRICS.inc_pushes(new_funcs + updated_funcs);
                                 METRICS.inc_new_funcs(new_funcs);
                             }

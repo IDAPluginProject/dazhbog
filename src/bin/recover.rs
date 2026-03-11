@@ -4,6 +4,8 @@ use std::io::Write;
 use std::time::Instant;
 use std::{io, path::PathBuf};
 
+use dazhbog::common::demangle::demangle as shared_demangle;
+
 const MAGIC: u32 = 0x4C4D4E31;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1108,95 +1110,8 @@ fn rebuild_basenames(data_dir: &PathBuf) -> io::Result<()> {
 
 /// Demangle a symbol name, returning (demangled_name, language) or (original, "")
 fn demangle_symbol(name: &str) -> (String, &'static str) {
-    let name = name.trim();
-    if name.is_empty() {
-        return (name.to_string(), "");
-    }
-
-    // Try Rust
-    if name.starts_with("_R") || name.starts_with("_ZN") || name.starts_with("__RN") {
-        if let Ok(demangled) = rustc_demangle::try_demangle(name) {
-            let mut result = String::new();
-            if std::fmt::Write::write_fmt(&mut result, format_args!("{:#}", demangled)).is_ok() {
-                return (result, "rust");
-            }
-        }
-    }
-
-    // Try MSVC C++
-    if name.starts_with('?') {
-        if let Ok(demangled) =
-            msvc_demangler::demangle(name, msvc_demangler::DemangleFlags::COMPLETE)
-        {
-            return (demangled, "c++/msvc");
-        }
-    }
-
-    // Try Itanium C++ (GCC/Clang)
-    if name.starts_with("_Z") || name.starts_with("__Z") {
-        let to_demangle = if name.starts_with("__Z") {
-            &name[1..]
-        } else {
-            name
-        };
-        if let Ok(sym) = cpp_demangle::Symbol::new(to_demangle) {
-            let mut demangled = String::new();
-            if std::fmt::Write::write_fmt(&mut demangled, format_args!("{}", sym)).is_ok() {
-                return (demangled, "c++");
-            }
-        }
-    }
-
-    // Try Swift
-    if name.starts_with("_$s")
-        || name.starts_with("_$S")
-        || name.starts_with("$s")
-        || name.starts_with("$S")
-        || name.starts_with("_T")
-    {
-        match symbolic_demangle::demangle(name) {
-            std::borrow::Cow::Owned(demangled) if demangled != name => {
-                return (demangled, "swift");
-            }
-            _ => {}
-        }
-    }
-
-    // Try Go
-    if name.contains("·") || name.contains("%c2%b7") {
-        let demangled = name
-            .replace("·", ".")
-            .replace("%c2%b7", ".")
-            .replace("%2e", ".");
-        let demangled = demangled
-            .trim_start_matches("go.")
-            .trim_start_matches("type.")
-            .to_string();
-        if demangled != name {
-            return (demangled, "go");
-        }
-    }
-
-    // Try symbolic as catch-all
-    match symbolic_demangle::demangle(name) {
-        std::borrow::Cow::Owned(demangled) if demangled != name => {
-            let lang = if name.starts_with("_Z") || name.starts_with("__Z") {
-                "c++"
-            } else if name.starts_with('?') {
-                "c++/msvc"
-            } else if name.starts_with("_$") || name.starts_with("$s") {
-                "swift"
-            } else if name.starts_with("_R") {
-                "rust"
-            } else {
-                "unknown"
-            };
-            return (demangled, lang);
-        }
-        _ => {}
-    }
-
-    (name.to_string(), "")
+    let result = shared_demangle(name);
+    (result.name, result.lang.unwrap_or(""))
 }
 
 fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
