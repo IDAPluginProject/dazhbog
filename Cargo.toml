@@ -20,33 +20,30 @@ name = "dazhbog-recover"
 path = "src/bin/recover.rs"
 
 [dependencies]
-bytes = "1"
-hyper = { version = "1", features = ["http1", "http2", "server"] }
-http-body-util = "0.1"
-hyper-util = { version = "0.1", features = ["tokio", "http1", "http2", "server-auto"] }
-tokio = { version = "1", features = ["full"] }
-tokio-native-tls = "0.3"
-native-tls = "0.2"
-tokio-rustls = "0.26"
-rustls = "0.23"
-rustls-pemfile = "2"
-rustls-pki-types = "1"
-once_cell = "1"
-parking_lot = "0.12"
-pretty_env_logger = "0.5"
-log = "0.4"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-sled = "0.34"
-tokio-test = "0.4.4"
-rand = "0.8"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tantivy = { version = "0.21", default-features = false, features = ["mmap", "lz4-compression"] }
-percent-encoding = "2"
+bytes = "1.11.1"
+hyper = { version = "1.8.1", features = ["http1", "http2", "server"] }
+http-body-util = "0.1.3"
+hyper-util = { version = "0.1.20", features = ["tokio", "http1", "http2", "server-auto"] }
+tokio = { version = "1.50.0", features = ["full"] }
+tokio-native-tls = "0.3.1"
+native-tls = "0.2.18"
+tokio-rustls = "0.26.4"
+rustls = "0.23.37"
+rustls-pemfile = "2.2.0"
+rustls-pki-types = "1.14.0"
+once_cell = "1.21.3"
+parking_lot = "0.12.5"
+pretty_env_logger = "0.5.0"
+log = "0.4.29"
+chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
+sled = "0.34.7"
+tokio-test = "0.4.5"
+rand = "0.10.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tantivy = { version = "0.25.0", default-features = false, features = ["mmap", "lz4-compression"] }
+percent-encoding = "2.3.2"
 razgad = "0.1.0"
-
-[patch.crates-io]
-zstd-safe = { path = "vendor/zstd-safe" }
 
 [profile.release]
 lto = "fat"

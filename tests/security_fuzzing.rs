@@ -10,7 +10,7 @@
 //! All tests will gracefully skip if the server is not running on localhost:20667
 
 use bytes::{BufMut, BytesMut};
-use rand::{Rng, RngCore};
+use rand::RngExt;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -43,9 +43,9 @@ fn encode_hello(protocol_version: u32, username: &str, password: &str) -> BytesM
 
 /// Generate random bytes
 fn random_bytes(len: usize) -> Vec<u8> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut buf = vec![0u8; len];
-    rng.fill_bytes(&mut buf);
+    rng.fill(&mut buf[..]);
     buf
 }
 
@@ -172,13 +172,13 @@ async fn test_malformed_packet_fuzzing() {
     };
     let mut stream = stream;
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     for test_case in 0..100 {
         // Generate random malformed packets
-        let len_field = rng.gen::<u32>();
-        let msg_type = rng.gen::<u8>();
-        let payload_size = rng.gen_range(0..1024);
+        let len_field = rng.random::<u32>();
+        let msg_type = rng.random::<u8>();
+        let payload_size = rng.random_range(0..1024);
         let payload = random_bytes(payload_size);
 
         let malicious_frame = raw_frame(len_field, msg_type, &payload);
@@ -675,36 +675,36 @@ async fn test_extended_protocol_fuzzing() {
     };
     let mut stream = stream;
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Extended fuzzing with different data patterns
     let patterns: Vec<(&str, Box<dyn Fn() -> Vec<u8>>)> = vec![
         (
             "random",
             Box::new(|| {
-                let mut rng = rand::thread_rng();
-                random_bytes(rng.gen_range(1..512))
+                let mut rng = rand::rng();
+                random_bytes(rng.random_range(1..512))
             }),
         ),
         (
             "zeros",
             Box::new(|| {
-                let mut rng = rand::thread_rng();
-                vec![0u8; rng.gen_range(1..512)]
+                let mut rng = rand::rng();
+                vec![0u8; rng.random_range(1..512)]
             }),
         ),
         (
             "ones",
             Box::new(|| {
-                let mut rng = rand::thread_rng();
-                vec![0xFFu8; rng.gen_range(1..512)]
+                let mut rng = rand::rng();
+                vec![0xFFu8; rng.random_range(1..512)]
             }),
         ),
         (
             "alternating",
             Box::new(|| {
-                let mut rng = rand::thread_rng();
-                (0..rng.gen_range(1..512))
+                let mut rng = rand::rng();
+                (0..rng.random_range(1..512))
                     .map(|i| if i % 2 == 0 { 0xAA } else { 0x55 })
                     .collect()
             }),
@@ -712,15 +712,15 @@ async fn test_extended_protocol_fuzzing() {
         (
             "incrementing",
             Box::new(|| {
-                let mut rng = rand::thread_rng();
-                (0..rng.gen_range(1..512)).map(|i| i as u8).collect()
+                let mut rng = rand::rng();
+                (0..rng.random_range(1..512)).map(|i| i as u8).collect()
             }),
         ),
         (
             "decrementing",
             Box::new(|| {
-                let mut rng = rand::thread_rng();
-                (0..rng.gen_range(1..512))
+                let mut rng = rand::rng();
+                (0..rng.random_range(1..512))
                     .map(|i| (255 - i) as u8)
                     .collect()
             }),
@@ -728,9 +728,9 @@ async fn test_extended_protocol_fuzzing() {
         (
             "repeated_patterns",
             Box::new(|| {
-                let mut rng = rand::thread_rng();
-                let pattern = random_bytes(rng.gen_range(1..16));
-                let repeats = rng.gen_range(1..32);
+                let mut rng = rand::rng();
+                let pattern = random_bytes(rng.random_range(1..16));
+                let repeats = rng.random_range(1..32);
                 pattern.repeat(repeats)
             }),
         ),
@@ -741,8 +741,8 @@ async fn test_extended_protocol_fuzzing() {
 
         for test_case in 0..20 {
             let payload = pattern_fn();
-            let len_field = rng.gen::<u32>();
-            let msg_type = rng.gen::<u8>();
+            let len_field = rng.random::<u32>();
+            let msg_type = rng.random::<u8>();
 
             let frame = raw_frame(len_field, msg_type, &payload);
 
@@ -771,7 +771,7 @@ async fn test_extended_protocol_fuzzing() {
 async fn comprehensive_fuzzing_campaign() {
     println!("Starting comprehensive network fuzzing campaign...");
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut test_count = 0;
     let mut crash_count = 0;
     let mut timeout_count = 0;
@@ -798,9 +798,9 @@ async fn comprehensive_fuzzing_campaign() {
         let mut stream = stream;
 
         // Generate completely random frame
-        let len_field = rng.gen::<u32>();
-        let msg_type = rng.gen::<u8>();
-        let payload_size = rng.gen_range(0..512);
+        let len_field = rng.random::<u32>();
+        let msg_type = rng.random::<u8>();
+        let payload_size = rng.random_range(0..512);
         let payload = random_bytes(payload_size);
 
         let frame = raw_frame(len_field, msg_type, &payload);

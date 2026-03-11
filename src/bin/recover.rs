@@ -1304,7 +1304,7 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
 
     use tantivy::schema::{IndexRecordOption, Schema, TextFieldIndexing, TextOptions, STORED};
     use tantivy::tokenizer::{LowerCaser, RawTokenizer, SimpleTokenizer, TextAnalyzer};
-    use tantivy::{Index, IndexWriter};
+    use tantivy::{Index, IndexWriter, TantivyDocument};
 
     let mut builder = Schema::builder();
 
@@ -1368,7 +1368,7 @@ fn rebuild_search(data_dir: &PathBuf) -> io::Result<()> {
         let (demangled_name, lang_str) = demangle_symbol(name);
         let is_demangled = !lang_str.is_empty() && demangled_name != *name;
 
-        let mut doc = tantivy::Document::new();
+        let mut doc = TantivyDocument::new();
         doc.add_text(key_hex, &key_hex_str);
         doc.add_text(func_name, name);
 

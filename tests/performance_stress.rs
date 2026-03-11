@@ -3,7 +3,6 @@
 //! This module tests the server's performance under various stress conditions,
 //! including high load, memory pressure, and concurrent operations.
 
-use rand::{Rng, RngCore};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

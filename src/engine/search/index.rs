@@ -4,9 +4,11 @@ use super::types::{SearchDocument, SearchHit};
 use std::{io, path::Path};
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{BooleanQuery, BoostQuery, Occur, Query, QueryParser, TermQuery};
-use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, STORED};
+use tantivy::schema::{
+    Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value, STORED,
+};
 use tantivy::tokenizer::{LowerCaser, RawTokenizer, SimpleTokenizer, TextAnalyzer};
-use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, Term};
+use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 const NEIGHBOR_STOPWORDS: &[&str] = &[
     "__cdecl",
@@ -368,7 +370,7 @@ impl SearchIndex {
         let mut hits = Vec::with_capacity(top_docs.len());
         for (score, doc_addr) in top_docs {
             let doc = searcher
-                .doc(doc_addr)
+                .doc::<TantivyDocument>(doc_addr)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("fetch doc: {e}")))?;
             hits.push(self.doc_to_hit(&doc, score));
         }
@@ -380,9 +382,9 @@ impl SearchIndex {
         Ok(hits)
     }
 
-    fn build_document(&self, doc: &SearchDocument) -> tantivy::Document {
+    fn build_document(&self, doc: &SearchDocument) -> TantivyDocument {
         let key_hex = format!("{:032x}", doc.key);
-        let mut tdoc = tantivy::Document::new();
+        let mut tdoc = TantivyDocument::new();
         tdoc.add_text(self.fields.key_hex, &key_hex);
         tdoc.add_text(self.fields.func_name, &doc.func_name);
         tdoc.add_text(self.fields.func_name_demangled, &doc.func_name_demangled);
@@ -452,7 +454,7 @@ impl SearchIndex {
         let mut hits = Vec::with_capacity(limit.min(top_docs.len().saturating_sub(offset)));
         for (score, doc_addr) in top_docs.into_iter().skip(offset) {
             let doc = searcher
-                .doc(doc_addr)
+                .doc::<TantivyDocument>(doc_addr)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("fetch doc: {e}")))?;
             hits.push(self.doc_to_hit(&doc, score));
         }
@@ -460,34 +462,34 @@ impl SearchIndex {
         Ok((hits, total_count))
     }
 
-    fn doc_to_hit(&self, doc: &tantivy::Document, score: f32) -> SearchHit {
+    fn doc_to_hit(&self, doc: &TantivyDocument, score: f32) -> SearchHit {
         let key_hex = doc
             .get_first(self.fields.key_hex)
-            .and_then(|v| v.as_text())
+            .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
         let func_name = doc
             .get_first(self.fields.func_name)
-            .and_then(|v| v.as_text())
+            .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
         let func_name_demangled = doc
             .get_first(self.fields.func_name_demangled)
-            .and_then(|v| v.as_text())
+            .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
         let lang = doc
             .get_first(self.fields.lang)
-            .and_then(|v| v.as_text())
+            .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
         let binary_names: Vec<String> = doc
             .get_all(self.fields.binary_name)
-            .filter_map(|v| v.as_text())
+            .filter_map(|v| v.as_str())
             .map(sanitize_basename)
             .filter(|s| !s.is_empty())
             .collect();
@@ -622,7 +624,7 @@ impl SearchIndex {
         let mut hits = Vec::new();
         for (score, doc_addr) in top_docs {
             let doc = searcher
-                .doc(doc_addr)
+                .doc::<TantivyDocument>(doc_addr)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("fetch doc: {e}")))?;
             let hit = self.doc_to_hit(&doc, score);
             if hit.key_hex == exclude_key_hex {

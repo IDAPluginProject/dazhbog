@@ -3,7 +3,7 @@
 //! This module tests various edge cases and boundary conditions that could
 //! reveal security issues or robustness problems.
 
-use rand::{Rng, RngCore};
+use rand::RngExt;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -173,7 +173,7 @@ async fn test_frame_size_edge_cases() {
     };
     let mut stream = stream;
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Test various frame size edge cases
     let frame_size_tests = vec![
@@ -194,7 +194,7 @@ async fn test_frame_size_edge_cases() {
         (1000u32, 0x01, vec![0xAA; 999], "Large valid frame"),
         // Random size frames
         {
-            let size = rng.gen_range(1..1000);
+            let size = rng.random_range(1..1000);
             (
                 size,
                 0x01,
