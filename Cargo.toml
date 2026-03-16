@@ -43,7 +43,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tantivy = { version = "0.25.0", default-features = false, features = ["mmap", "lz4-compression"] }
 percent-encoding = "2.3.2"
-razgad = "0.1.0"
+razgad = "1.0.0"
 
 [profile.release]
 lto = "fat"
