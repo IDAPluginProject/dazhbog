@@ -357,12 +357,19 @@ impl Database {
 
             let old = rt.index.get(*key);
 
+            // Track whether the existing HEAD record is readable.  When it
+            // is not (missing segment or corrupt/missing record), we snip the
+            // dead chain so that the newly appended record starts a fresh
+            // chain instead of perpetuating a dangling prev_addr link.
+            let mut head_ok = false;
+
             if old != 0 {
                 let seg_id = addr_seg(old);
                 let off = addr_off(old);
                 match rt.segments.get_reader(seg_id) {
                     Some(reader) => match reader.read_at(off) {
                         Ok(existing) => {
+                            head_ok = true;
                             if existing.name == *name && existing.data == *data {
                                 status.push(2);
                                 let ts = now_ts_sec();
@@ -391,23 +398,32 @@ impl Database {
                         }
                         Err(e) => {
                             log::warn!(
-                                "Failed to read existing record at seg={}, off={}: {}",
+                                "Failed to read existing record at seg={}, off={}: {}; \
+                                 new record will start a fresh chain for key {:032x}",
                                 seg_id,
                                 off,
-                                e
+                                e,
+                                key
                             );
                         }
                     },
                     None => {
-                        log::warn!("Segment {} not found for existing record", seg_id);
+                        log::warn!(
+                            "Segment {} not found for existing record; \
+                             new record will start a fresh chain for key {:032x}",
+                            seg_id,
+                            key
+                        );
                     }
                 }
             }
 
+            let prev_addr = if head_ok { old } else { 0 };
+
             let rec = Record {
                 key: *key,
                 ts_sec: now_ts_sec(),
-                prev_addr: old,
+                prev_addr,
                 len_bytes: data.len() as u32,
                 popularity: *pop,
                 name: name.to_string(),
@@ -576,10 +592,15 @@ impl Database {
             let rec = match reader.read_at(off) {
                 Ok(rec) => rec,
                 Err(e) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("segment read_at failed: {e}"),
-                    ));
+                    log::warn!(
+                        "collect_versions: segment read_at failed at seg={}, off={}: {}; \
+                         truncating version chain for key {:032x}",
+                        seg_id,
+                        off,
+                        e,
+                        key
+                    );
+                    break;
                 }
             };
             let next = rec.prev_addr;
