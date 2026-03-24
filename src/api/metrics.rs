@@ -322,9 +322,33 @@ impl Metrics {
         self.persist_u64(KEY_SEARCH_DOCS, n);
     }
 
+    pub fn add_search_docs(&self, n: u64) {
+        let new_val = self.search_docs.fetch_add(n, Ordering::Relaxed) + n;
+        self.persist_u64(KEY_SEARCH_DOCS, new_val);
+    }
+
     pub fn inc_search_docs(&self) {
         let new_val = self.search_docs.fetch_add(1, Ordering::Relaxed) + 1;
         self.persist_u64(KEY_SEARCH_DOCS, new_val);
+    }
+
+    pub fn sub_search_docs(&self, n: u64) {
+        let mut current = self.search_docs.load(Ordering::Relaxed);
+        loop {
+            let next = current.saturating_sub(n);
+            match self.search_docs.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    self.persist_u64(KEY_SEARCH_DOCS, next);
+                    return;
+                }
+                Err(actual) => current = actual,
+            }
+        }
     }
 
     pub fn set_unique_binaries(&self, n: u64) {

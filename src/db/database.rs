@@ -261,17 +261,6 @@ impl Database {
         }
     }
 
-    fn refresh_live_metrics(rt: &EngineRuntime, include_unique_binaries: bool) {
-        let stats = rt.get_stats();
-        METRICS.set_indexed_funcs(stats.indexed_funcs);
-        METRICS.set_total_records(stats.total_records);
-        METRICS.set_storage_bytes(stats.storage_bytes);
-        METRICS.set_search_docs(stats.search_docs);
-        if include_unique_binaries {
-            METRICS.set_unique_binaries(stats.unique_binaries);
-        }
-    }
-
     /// Get the latest version of a function by key.
     pub async fn get_latest(&self, key: u128) -> io::Result<Option<FuncLatest>> {
         let addr = self.rt.index.get(key);
@@ -341,6 +330,7 @@ impl Database {
         ctx: &OwnedPushContext,
     ) -> io::Result<Vec<u32>> {
         let mut status = Vec::with_capacity(items.len());
+        let mut search_docs_delta = 0u64;
         for (key, pop, _len_bytes_decl, name, data) in items.iter() {
             if name.len() > u16::MAX as usize {
                 return Err(io::Error::new(
@@ -373,7 +363,9 @@ impl Database {
                             if existing.name == *name && existing.data == *data {
                                 status.push(2);
                                 let ts = now_ts_sec();
-                                Self::record_context_observation(rt, *key, name, data, ctx, ts);
+                                if Self::record_context_observation(rt, *key, name, data, ctx, ts) {
+                                    METRICS.inc_unique_binaries();
+                                }
                                 if let Some((canonical, _, _)) =
                                     Self::refresh_canonical_for_key(rt, *key)?
                                 {
@@ -431,15 +423,16 @@ impl Database {
                 flags: 0,
             };
             let addr = rt.segments.append(&rec)?;
+            METRICS.inc_total_records();
+            METRICS.add_storage_bytes(rec.encoded_len());
             match rt.index.upsert(*key, addr) {
                 Ok(UpsertResult::Inserted) => {
                     status.push(1);
                     METRICS.inc_indexed_funcs();
-                    METRICS.inc_total_records();
+                    search_docs_delta += 1;
                 }
                 Ok(UpsertResult::Replaced(_)) => {
                     status.push(0);
-                    METRICS.inc_total_records();
                 }
                 Err(IndexError::Full) => {
                     METRICS.inc_append_failures();
@@ -455,7 +448,9 @@ impl Database {
             }
 
             let ts = rec.ts_sec;
-            Self::record_context_observation(rt, *key, name, data, ctx, ts);
+            if Self::record_context_observation(rt, *key, name, data, ctx, ts) {
+                METRICS.inc_unique_binaries();
+            }
             if let Some((canonical, _, _)) = Self::refresh_canonical_for_key(rt, *key)? {
                 Self::update_search_entry_no_commit_static(
                     rt,
@@ -469,11 +464,17 @@ impl Database {
             }
         }
         // Commit all search index changes at once
-        if let Err(e) = rt.search.commit() {
-            log::warn!("failed to commit search index: {}", e);
+        match rt.search.commit() {
+            Ok(()) => {
+                if search_docs_delta != 0 {
+                    METRICS.add_search_docs(search_docs_delta);
+                }
+            }
+            Err(e) => {
+                log::warn!("failed to commit search index: {}", e);
+            }
         }
 
-        Self::refresh_live_metrics(rt, ctx.md5.is_some());
         Ok(status)
     }
 
@@ -554,24 +555,42 @@ impl Database {
         data: &[u8],
         ctx: &OwnedPushContext,
         ts: u64,
-    ) {
+    ) -> bool {
         if let Some(md5) = ctx.md5 {
             let vid = version_id(key, name, data);
-            let _ = rt.ctx_index.record_binary_meta(
+            let is_new_binary = match rt.ctx_index.record_binary_meta(
                 md5,
                 ctx.basename.as_deref().unwrap_or(""),
                 ctx.hostname.as_deref().unwrap_or(""),
                 ctx.origin_token.as_deref().unwrap_or(""),
                 ts,
-            );
-            let _ = rt.ctx_index.record_key_observation(
+            ) {
+                Ok(is_new_binary) => is_new_binary,
+                Err(e) => {
+                    log::warn!(
+                        "failed to record binary metadata for key {:032x}: {}",
+                        key,
+                        e
+                    );
+                    false
+                }
+            };
+            if let Err(e) = rt.ctx_index.record_key_observation(
                 key,
                 md5,
                 Some(vid),
                 ts,
                 ctx.basename.as_deref(),
-            );
+            ) {
+                log::warn!(
+                    "failed to record key observation for key {:032x}: {}",
+                    key,
+                    e
+                );
+            }
+            return is_new_binary;
         }
+        false
     }
 
     fn collect_versions_sync(
@@ -687,8 +706,18 @@ impl Database {
     /// Delete function metadata by keys.
     pub async fn delete_keys(&self, keys: &[u128]) -> io::Result<u32> {
         let mut deleted = 0u32;
+        let mut deleted_search_docs = 0u64;
         for &key in keys {
             let old = self.rt.index.get(key);
+            let had_live_head = if old == 0 {
+                false
+            } else {
+                self.rt
+                    .segments
+                    .read_record(old)
+                    .map(|rec| rec.flags & 0x01 == 0)
+                    .unwrap_or(false)
+            };
             let rec = Record {
                 key,
                 ts_sec: now_ts_sec(),
@@ -700,13 +729,24 @@ impl Database {
                 flags: 0x01,
             };
             let addr = self.rt.segments.append(&rec)?;
-            let _ = self.rt.index.upsert(key, addr);
-            let _ = self.rt.search.delete(key);
-            if old != 0 {
+            METRICS.inc_total_records();
+            METRICS.add_storage_bytes(rec.encoded_len());
+            match self.rt.index.upsert(key, addr) {
+                Ok(UpsertResult::Inserted) => METRICS.inc_indexed_funcs(),
+                Ok(UpsertResult::Replaced(_)) => {}
+                Err(IndexError::Full) => METRICS.inc_append_failures(),
+                Err(IndexError::Io(_)) => METRICS.inc_append_failures(),
+            }
+            if self.rt.search.delete(key).is_ok() && had_live_head {
+                deleted_search_docs += 1;
+            }
+            if had_live_head {
                 deleted += 1;
             }
         }
-        Self::refresh_live_metrics(&self.rt, false);
+        if deleted_search_docs != 0 {
+            METRICS.sub_search_docs(deleted_search_docs);
+        }
         Ok(deleted)
     }
 

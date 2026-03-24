@@ -297,7 +297,7 @@ impl ContextIndex {
         hostname: &str,
         origin_token: &str,
         ts_sec: u64,
-    ) -> io::Result<()> {
+    ) -> io::Result<bool> {
         let clean_basename = sanitize_basename(basename);
         let clean_origin = normalize_lookup(origin_token);
         let key = md5;
@@ -305,6 +305,7 @@ impl ContextIndex {
             .t_binary_meta
             .get(key)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled get: {e}")))?;
+        let is_new_binary = val.is_none();
         let mut meta = if let Some(v) = val {
             decode_binary_meta(&v).unwrap_or(BinaryMeta {
                 md5,
@@ -353,7 +354,7 @@ impl ContextIndex {
         let _ = self.t_binary_facets.remove(key);
         let _ = self.t_binary_overlap.remove(key);
 
-        Ok(())
+        Ok(is_new_binary)
     }
 
     pub fn record_key_observation(

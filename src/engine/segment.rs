@@ -30,6 +30,15 @@ pub struct Record {
     pub flags: u8,
 }
 
+impl Record {
+    pub fn encoded_len(&self) -> u64 {
+        let name_len = self.name.len() as u64;
+        let data_len = self.data.len() as u64;
+        let body_len = 8 + 8 + 8 + 8 + 4 + 4 + 2 + 4 + 1 + 5 + name_len + data_len;
+        4 + 4 + 4 + body_len
+    }
+}
+
 pub struct SegmentWriter {
     tree: sled::Tree,
     id: u16,
@@ -581,11 +590,7 @@ impl OpenSegments {
 
         // Update cached storage bytes on successful append
         if result.is_ok() {
-            let name_len = rec.name.len() as u16;
-            let data_len = rec.data.len() as u32;
-            let body_len: u64 =
-                8 + 8 + 8 + 8 + 4 + 4 + 2 + 4 + 1 + 5 + (name_len as u64) + (data_len as u64);
-            let total_len = 4 + 4 + 4 + body_len;
+            let total_len = rec.encoded_len();
             let new_total = self
                 .cached_storage_bytes
                 .fetch_add(total_len, std::sync::atomic::Ordering::Relaxed)
