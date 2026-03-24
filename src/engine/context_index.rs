@@ -635,6 +635,18 @@ impl ContextIndex {
         }
     }
 
+    pub fn list_binary_metas(&self) -> io::Result<Vec<BinaryMeta>> {
+        let mut metas = Vec::with_capacity(self.t_binary_meta.len());
+        for item in self.t_binary_meta.iter() {
+            let (_, raw_val) =
+                item.map_err(|e| io::Error::new(io::ErrorKind::Other, format!("sled iter: {e}")))?;
+            if let Some(meta) = decode_binary_meta(&raw_val) {
+                metas.push(meta);
+            }
+        }
+        Ok(metas)
+    }
+
     pub fn get_key_md5_stats(&self, key: u128, md5: &[u8; 16]) -> io::Result<Option<KeyMd5Stats>> {
         let mut k = [0u8; 32];
         k[0..16].copy_from_slice(&key.to_le_bytes());
