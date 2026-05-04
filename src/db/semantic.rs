@@ -7,8 +7,24 @@ use crate::protocol::lumina::{
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 const DEFAULT_NAME_PREFIXES: &[&str] = &[
-    "sub_", "nullsub_", "j_", "unknown_", "loc_", "__imp_", "thunk_", "func_",
+    "sub_", "nullsub_", "fun_", "j_", "unknown_", "loc_", "__imp_", "thunk_", "func_",
 ];
+
+const NAME_DISTRIBUTION_EVIDENCE_THRESHOLD_BITS: f64 = 3123.085;
+const NAME_DISTRIBUTION_MATCH_THRESHOLD: f64 = 0.1;
+const NAME_DISTRIBUTION_MATCH_MIN_LEN: usize = 32;
+const NAME_DISTRIBUTION_MATCH_MIN_EVIDENCE_BITS: f64 = 96.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NameDistributionScore {
+    pub length: usize,
+    pub unknown_characters: usize,
+    pub evidence_bits: f64,
+    pub kl_bits_per_char: f64,
+    pub match_score: f64,
+    pub cross_entropy_bits_per_char: f64,
+    pub entropy_bits_per_char: f64,
+}
 
 const CONSISTENCY_STOPWORDS: &[&str] = &[
     "arg", "argsize", "byte", "bytes", "case", "char", "chunk", "const", "default", "dword",
@@ -345,6 +361,9 @@ pub fn name_quality(name: &str) -> f64 {
     if trimmed.is_empty() {
         return -1.0;
     }
+    if is_rejected_function_name(trimmed) {
+        return -1.0;
+    }
     let lower = trimmed.to_ascii_lowercase();
     if DEFAULT_NAME_PREFIXES
         .iter()
@@ -363,6 +382,210 @@ pub fn name_quality(name: &str) -> f64 {
         return 1.0;
     }
     0.5
+}
+
+pub fn is_rejected_function_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("sub_")
+        || lower.starts_with("fun_")
+        || lower.starts_with("vftable_")
+        || lower.starts_with("unknown_")
+    {
+        return true;
+    }
+    if contains_generated_helper_or_wrapper(&lower) || ends_with_numeric_suffix(&lower) {
+        return true;
+    }
+
+    let score = character_distribution_score(trimmed);
+    score.unknown_characters != 0
+        || score.evidence_bits >= NAME_DISTRIBUTION_EVIDENCE_THRESHOLD_BITS
+        || (score.length >= NAME_DISTRIBUTION_MATCH_MIN_LEN
+            && score.match_score < NAME_DISTRIBUTION_MATCH_THRESHOLD
+            && score.evidence_bits >= NAME_DISTRIBUTION_MATCH_MIN_EVIDENCE_BITS)
+}
+
+pub fn character_distribution_score(input: &str) -> NameDistributionScore {
+    let mut counts: HashMap<u32, usize> = HashMap::new();
+    let mut length = 0usize;
+    let mut cross_entropy_bits = 0.0f64;
+    let mut unknown_characters = 0usize;
+
+    for original in input.chars() {
+        for ch in original.to_lowercase() {
+            let codepoint = ch as u32;
+            length += 1;
+            *counts.entry(codepoint).or_insert(0) += 1;
+            if let Some(p) = lumina_name_char_frequency(codepoint) {
+                cross_entropy_bits += -p.log2();
+            } else {
+                unknown_characters += 1;
+            }
+        }
+    }
+
+    if length == 0 {
+        return NameDistributionScore {
+            length: 0,
+            unknown_characters: 0,
+            evidence_bits: 0.0,
+            kl_bits_per_char: 0.0,
+            match_score: 1.0,
+            cross_entropy_bits_per_char: 0.0,
+            entropy_bits_per_char: 0.0,
+        };
+    }
+
+    let length_f = length as f64;
+    let count_log_sum = counts
+        .values()
+        .map(|&count| {
+            let count_f = count as f64;
+            count_f * count_f.log2()
+        })
+        .sum::<f64>();
+    let entropy_bits = length_f * length_f.log2() - count_log_sum;
+
+    if unknown_characters != 0 {
+        return NameDistributionScore {
+            length,
+            unknown_characters,
+            evidence_bits: f64::INFINITY,
+            kl_bits_per_char: f64::INFINITY,
+            match_score: 0.0,
+            cross_entropy_bits_per_char: f64::INFINITY,
+            entropy_bits_per_char: entropy_bits / length_f,
+        };
+    }
+
+    let evidence_bits = (cross_entropy_bits - entropy_bits).max(0.0);
+    let kl_bits_per_char = evidence_bits / length_f;
+    NameDistributionScore {
+        length,
+        unknown_characters,
+        evidence_bits,
+        kl_bits_per_char,
+        match_score: 2f64.powf(-kl_bits_per_char),
+        cross_entropy_bits_per_char: cross_entropy_bits / length_f,
+        entropy_bits_per_char: entropy_bits / length_f,
+    }
+}
+
+fn contains_generated_helper_or_wrapper(lower: &str) -> bool {
+    generated_hex_marker_len(lower, "_helper_") >= 6
+        || generated_hex_marker_len(lower, "_wrapper_") >= 6
+}
+
+fn generated_hex_marker_len(lower: &str, marker: &str) -> usize {
+    let mut search_from = 0usize;
+    while let Some(pos) = lower[search_from..].find(marker) {
+        let hex_start = search_from + pos + marker.len();
+        let hex_len = lower[hex_start..]
+            .chars()
+            .take_while(|ch| ch.is_ascii_hexdigit())
+            .count();
+        if hex_len >= 6 {
+            return hex_len;
+        }
+        search_from = hex_start.saturating_add(hex_len).saturating_add(1);
+        if search_from >= lower.len() {
+            break;
+        }
+    }
+    0
+}
+
+fn ends_with_numeric_suffix(lower: &str) -> bool {
+    let Some((_, suffix)) = lower.rsplit_once('_') else {
+        return false;
+    };
+    if suffix.is_empty() {
+        return false;
+    }
+    if suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        return true;
+    }
+    if let Some(hex) = suffix.strip_prefix("0x") {
+        return !hex.is_empty() && hex.chars().all(|ch| ch.is_ascii_hexdigit());
+    }
+    suffix.len() >= 4
+        && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
+        && suffix.chars().any(|ch| ch.is_ascii_digit())
+}
+
+fn lumina_name_char_frequency(codepoint: u32) -> Option<f64> {
+    match codepoint {
+        32 => Some(0.00154780926045719),
+        33 => Some(0.00000000164516870),
+        36 => Some(0.00706262203038824),
+        37 => Some(0.00000005922607316),
+        38 => Some(0.00004527339742472),
+        39 => Some(0.00001883553643358),
+        40 => Some(0.00019023579215860),
+        41 => Some(0.00019023579215860),
+        42 => Some(0.00000002632269918),
+        43 => Some(0.00015705109433332),
+        44 => Some(0.00000278691577592),
+        45 => Some(0.00137303311856204),
+        46 => Some(0.00236755898423336),
+        47 => Some(0.00000034054992067),
+        48 => Some(0.00815365020159897),
+        49 => Some(0.01711514897660636),
+        50 => Some(0.01143508888188413),
+        51 => Some(0.00818231233067101),
+        52 => Some(0.00751653888092993),
+        53 => Some(0.00602500426098693),
+        54 => Some(0.00574510183923280),
+        55 => Some(0.00519849947453312),
+        56 => Some(0.00534034921008870),
+        57 => Some(0.00458027304535862),
+        58 => Some(0.00668383509881870),
+        60 => Some(0.00000404711499927),
+        61 => Some(0.00000000658067480),
+        62 => Some(0.00000402079230008),
+        63 => Some(0.00692918404239007),
+        64 => Some(0.03618394894449267),
+        91 => Some(0.00168282661040628),
+        92 => Some(0.00000046393757309),
+        93 => Some(0.00168299770795097),
+        94 => Some(0.00000036029194506),
+        95 => Some(0.04349690477960991),
+        96 => Some(0.00000792971312864),
+        97 => Some(0.06752062218964057),
+        98 => Some(0.01815522298287511),
+        99 => Some(0.04232959178100041),
+        100 => Some(0.02867708694584960),
+        101 => Some(0.10491020998275205),
+        102 => Some(0.01707962320372255),
+        103 => Some(0.01615862815304807),
+        104 => Some(0.01211540397775469),
+        105 => Some(0.05354585677424534),
+        106 => Some(0.00347549126382518),
+        107 => Some(0.00983971285883597),
+        108 => Some(0.03568929607179779),
+        109 => Some(0.02149127139295117),
+        110 => Some(0.05426049173434342),
+        111 => Some(0.04711351038858227),
+        112 => Some(0.02726503371608732),
+        113 => Some(0.00331106981372084),
+        114 => Some(0.05602581203881808),
+        115 => Some(0.05209040070386898),
+        116 => Some(0.06743995134249056),
+        117 => Some(0.02219692866745942),
+        118 => Some(0.01791203908131148),
+        119 => Some(0.00672245214368772),
+        120 => Some(0.00696550772209284),
+        121 => Some(0.00999843873490476),
+        122 => Some(0.00878596092000466),
+        126 => Some(0.00000001974202439),
+        1089 => Some(0.00000000329033740),
+        _ => None,
+    }
 }
 
 pub fn tokenize_semantic_text(input: &str) -> Vec<String> {

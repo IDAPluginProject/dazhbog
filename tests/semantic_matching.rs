@@ -1,6 +1,7 @@
 use dazhbog::db::semantic::{
-    choose_canonical_name, cross_field_consistency_score, normalize_origin_token,
-    shape_metadata_for_request, synthesize_metadata, SynthesisInput,
+    character_distribution_score, choose_canonical_name, cross_field_consistency_score,
+    is_rejected_function_name, normalize_origin_token, shape_metadata_for_request,
+    synthesize_metadata, SynthesisInput,
 };
 use dazhbog::protocol::lumina::{pack_dd, parse_metadata, serialize_metadata_chunks, MdKey};
 
@@ -152,4 +153,35 @@ fn cross_field_consistency_rewards_coherent_tokens() {
         cross_field_consistency_score("http_headers", &parse_metadata(&incoherent));
 
     assert!(coherent_score > incoherent_score);
+}
+
+#[test]
+fn rejected_function_name_policy_catches_generated_names() {
+    assert!(is_rejected_function_name("sub_140001000"));
+    assert!(is_rejected_function_name("FUN_140001000"));
+    assert!(is_rejected_function_name("vftable_140001000"));
+    assert!(is_rejected_function_name("unknown_140001000"));
+    assert!(is_rejected_function_name(
+        "CEntityComponentCargoInterface::SLoadingCargoRevokedWarningActive_Helper_1413E7BC0_Wrapper_14145B750"
+    ));
+    assert!(is_rejected_function_name("NetworkParser_1413E7BC0"));
+    assert!(is_rejected_function_name("NetworkParser_12345"));
+    assert!(is_rejected_function_name(
+        "xxxJxOxHxNxxxWxIxCxKxxx7905747460165283064"
+    ));
+    assert!(is_rejected_function_name("x".repeat(6000).as_str()));
+
+    assert!(!is_rejected_function_name("NetworkParser::parse_headers"));
+    assert!(!is_rejected_function_name("x"));
+}
+
+#[test]
+fn character_distribution_score_is_length_scaled() {
+    let short = character_distribution_score("x");
+    let long = character_distribution_score("x".repeat(6000).as_str());
+
+    assert!(short.match_score < 0.1);
+    assert!(short.evidence_bits < 3123.085);
+    assert!(long.match_score < 0.1);
+    assert!(long.evidence_bits >= 3123.085);
 }

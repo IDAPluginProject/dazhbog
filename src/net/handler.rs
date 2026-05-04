@@ -14,6 +14,7 @@ use tokio::time::timeout;
 use crate::api::metrics::METRICS;
 use crate::common::hash::hex_dump;
 use crate::config::Config;
+use crate::db::semantic::is_rejected_function_name;
 use crate::db::Database;
 use crate::protocol::lumina::{self, LuminaCaps};
 use crate::protocol::rpc::{
@@ -487,6 +488,14 @@ async fn handle_lumina_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Un
                     for (j, item) in fetched.into_iter().enumerate() {
                         let idx = missing_pos[j];
                         if let Some((pop, len, name, data)) = item {
+                            if is_rejected_function_name(&name) {
+                                debug!(
+                                    "upstream returned rejected generated name '{}' for key {:032x}; treating as missing",
+                                    name,
+                                    missing_keys[j]
+                                );
+                                continue;
+                            }
                             statuses[idx] = 0;
                             new_inserts_owned.push((
                                 missing_keys[j],
@@ -1011,6 +1020,14 @@ async fn handle_rpc_pull<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin
                         let idx = missing_pos[j];
                         let key = missing_keys[j];
                         if let Some((pop, len, name, data)) = item {
+                            if is_rejected_function_name(&name) {
+                                debug!(
+                                    "upstream returned rejected generated name '{}' for key {:032x}; treating as missing",
+                                    name,
+                                    key
+                                );
+                                continue;
+                            }
                             statuses[idx] = 0;
                             new_inserts_owned.push((key, pop, len, name.clone(), data.clone()));
                             maybe_funcs[idx] = Some((pop, len, name, data));

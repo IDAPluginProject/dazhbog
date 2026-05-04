@@ -13,9 +13,9 @@ use crate::protocol::lumina::metadata::parse_metadata;
 
 use super::failure_cache::FailureCache;
 use super::semantic::{
-    analyze_function, choose_canonical_name, fingerprint_similarity, normalize_origin_token,
-    normalize_requested_mdkeys, shape_metadata_for_request, synthesize_metadata, SemanticAnalysis,
-    SynthesisInput,
+    analyze_function, choose_canonical_name, fingerprint_similarity, is_rejected_function_name,
+    normalize_origin_token, normalize_requested_mdkeys, shape_metadata_for_request,
+    synthesize_metadata, SemanticAnalysis, SynthesisInput,
 };
 use super::types::{
     BinaryCompareItem, BinaryFacetSummary, BinarySummary, FuncLatest, OwnedPushContext,
@@ -263,21 +263,9 @@ impl Database {
 
     /// Get the latest version of a function by key.
     pub async fn get_latest(&self, key: u128) -> io::Result<Option<FuncLatest>> {
-        let addr = self.rt.index.get(key);
-        if addr == 0 {
+        let Some(rec) = Self::visible_latest_record_sync(&self.rt, key)? else {
             return Ok(None);
-        }
-        let seg_id = addr_seg(addr);
-        let off = addr_off(addr);
-        let reader = self
-            .rt
-            .segments
-            .get_reader(seg_id)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "segment not found"))?;
-        let rec = reader.read_at(off)?;
-        if rec.flags & 0x01 == 0x01 {
-            return Ok(None);
-        }
+        };
         Ok(Some(FuncLatest {
             popularity: rec.popularity,
             len_bytes: rec.len_bytes,
@@ -285,6 +273,26 @@ impl Database {
             name: rec.name,
             data: rec.data,
         }))
+    }
+
+    fn visible_latest_record_sync(rt: &EngineRuntime, key: u128) -> io::Result<Option<Record>> {
+        let mut addr = rt.index.get(key);
+        let mut seen_addrs = HashSet::new();
+        while addr != 0 && seen_addrs.insert(addr) {
+            let rec = match rt.segments.read_record(addr) {
+                Ok(rec) => rec,
+                Err(e) => return Err(e),
+            };
+            if rec.flags & 0x01 == 0x01 {
+                return Ok(None);
+            }
+            let next = rec.prev_addr;
+            if !is_rejected_function_name(&rec.name) {
+                return Ok(Some(rec));
+            }
+            addr = next;
+        }
+        Ok(None)
     }
 
     /// Push function metadata without context.
@@ -332,6 +340,15 @@ impl Database {
         let mut status = Vec::with_capacity(items.len());
         let mut search_docs_delta = 0u64;
         for (key, pop, _len_bytes_decl, name, data) in items.iter() {
+            if is_rejected_function_name(name) {
+                log::debug!(
+                    "ignoring push for key {:032x}: rejected generated function name '{}'",
+                    key,
+                    name
+                );
+                status.push(2);
+                continue;
+            }
             if name.len() > u16::MAX as usize {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -623,7 +640,10 @@ impl Database {
                 }
             };
             let next = rec.prev_addr;
-            if rec.flags & 0x01 == 0 {
+            if rec.flags & 0x01 == 0x01 {
+                break;
+            }
+            if !is_rejected_function_name(&rec.name) {
                 let analysis = analyze_function(&rec.name, &rec.data);
                 versions.push(AnalyzedVersion {
                     version_id: version_id(key, &rec.name, &rec.data),
@@ -761,14 +781,15 @@ impl Database {
         }
         let mut out = Vec::new();
         let mut addr = self.rt.index.get(key);
-        while addr != 0 && limit > 0 {
+        let mut seen_addrs = HashSet::new();
+        while addr != 0 && limit > 0 && seen_addrs.insert(addr) {
             let r = self
                 .rt
                 .segments
                 .get_reader(addr_seg(addr))
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "seg"))?;
             let rec = r.read_at(addr_off(addr))?;
-            if rec.flags & 0x01 == 0 {
+            if rec.flags & 0x01 == 0 && !is_rejected_function_name(&rec.name) {
                 out.push((rec.ts_sec, rec.name, rec.data));
                 limit -= 1;
             }
@@ -779,7 +800,8 @@ impl Database {
 
     /// Search functions by query string. Returns up to `limit` results.
     pub async fn search_functions(&self, query: &str, limit: usize) -> io::Result<Vec<SearchHit>> {
-        let mut hits = self.rt.search.search(query, limit)?;
+        let hits = self.rt.search.search(query, limit)?;
+        let (mut hits, _) = self.filter_visible_search_hits(hits).await?;
         self.attach_binary_refs(&mut hits)?;
         Ok(hits)
     }
@@ -791,9 +813,62 @@ impl Database {
         offset: usize,
         limit: usize,
     ) -> io::Result<(Vec<SearchHit>, usize)> {
-        let (mut hits, total) = self.rt.search.search_paginated(query, offset, limit)?;
+        let (hits, total) = self.rt.search.search_paginated(query, offset, limit)?;
+        let (mut hits, hidden) = self.filter_visible_search_hits(hits).await?;
         self.attach_binary_refs(&mut hits)?;
-        Ok((hits, total))
+        Ok((hits, total.saturating_sub(hidden)))
+    }
+
+    async fn filter_visible_search_hits(
+        &self,
+        hits: Vec<SearchHit>,
+    ) -> io::Result<(Vec<SearchHit>, usize)> {
+        let mut out = Vec::with_capacity(hits.len());
+        let mut hidden = 0usize;
+        for mut hit in hits {
+            let Ok(key) = u128::from_str_radix(&hit.key_hex, 16) else {
+                hidden += 1;
+                continue;
+            };
+            let stale_rejected = is_rejected_function_name(&hit.func_name);
+            match self.get_latest(key).await? {
+                Some(func) => {
+                    if stale_rejected {
+                        self.update_search_entry(key, &func.name, &func.data, func.ts_sec);
+                        hidden += 1;
+                        continue;
+                    }
+                    if hit.func_name != func.name || hit.ts != func.ts_sec {
+                        self.update_search_entry(key, &func.name, &func.data, func.ts_sec);
+                        Self::apply_visible_function_to_hit(&mut hit, &func);
+                    }
+                    out.push(hit);
+                }
+                None => {
+                    if self.rt.search.delete(key).is_ok() {
+                        METRICS.sub_search_docs(1);
+                    }
+                    hidden += 1;
+                }
+            }
+        }
+        Ok((out, hidden))
+    }
+
+    fn apply_visible_function_to_hit(hit: &mut SearchHit, func: &FuncLatest) {
+        let demangle_result = demangle(&func.name);
+        let (func_name_demangled, lang) = if demangle_result.demangled {
+            (
+                Some(demangle_result.name),
+                demangle_result.lang.map(|s| s.to_string()),
+            )
+        } else {
+            (None, None)
+        };
+        hit.func_name = func.name.clone();
+        hit.func_name_demangled = func_name_demangled;
+        hit.lang = lang;
+        hit.ts = func.ts_sec;
     }
 
     pub async fn semantic_neighbors_for_key(

@@ -5,7 +5,7 @@ use super::types::SearchDocument;
 use crate::common::demangle::demangle;
 use crate::common::hash::version_id;
 use crate::common::{addr_off, addr_seg};
-use crate::db::semantic::analyze_function;
+use crate::db::semantic::{analyze_function, is_rejected_function_name};
 use crate::engine::{ContextIndex, OpenSegments, ShardedIndex};
 use log::info;
 use std::collections::{HashMap, HashSet};
@@ -122,6 +122,17 @@ where
         scanned += 1;
         if rec.flags & 0x01 == 0 {
             summary.valid_records += 1;
+            if is_rejected_function_name(&rec.name) {
+                let mut snapshot = summary;
+                snapshot.unique_keys = latest.len() as u64;
+                progress(progress_snapshot(
+                    RebuildProgressPhase::ScanSegments,
+                    scanned,
+                    total_records,
+                    snapshot,
+                ));
+                return Ok(());
+            }
             let entry =
                 latest
                     .entry(rec.key)
@@ -163,8 +174,11 @@ where
 
     let mut docs = Vec::with_capacity(latest.len());
     for (key, fallback_latest) in latest.into_iter() {
-        let resolved =
-            resolve_canonical_or_latest_record(segments, index, ctx_index, key, fallback_latest)?;
+        let Some(resolved) =
+            resolve_canonical_or_latest_record(segments, index, ctx_index, key, fallback_latest)?
+        else {
+            continue;
+        };
         if resolved.used_canonical {
             summary.canonical_versions += 1;
         }
@@ -260,22 +274,25 @@ fn resolve_canonical_or_latest_record(
     ctx_index: &ContextIndex,
     key: u128,
     fallback_latest: (u64, String, Vec<u8>),
-) -> io::Result<ResolvedRecord> {
-    let Some(canonical_vid) = ctx_index
+) -> io::Result<Option<ResolvedRecord>> {
+    let canonical_vid = ctx_index
         .get_canonical_version(key)?
-        .map(|cv| cv.version_id)
-    else {
+        .map(|cv| cv.version_id);
+
+    let head = index.get(key);
+    if head == 0 {
         let (ts, name, data) = fallback_latest;
-        return Ok(ResolvedRecord {
+        return Ok(Some(ResolvedRecord {
             ts,
             name,
             data,
             used_canonical: false,
-        });
-    };
+        }));
+    }
 
-    let mut addr = index.get(key);
+    let mut addr = head;
     let mut seen = HashSet::new();
+    let mut newest_visible = None;
     while addr != 0 && !seen.contains(&addr) {
         seen.insert(addr);
         let seg_id = addr_seg(addr);
@@ -285,25 +302,30 @@ fn resolve_canonical_or_latest_record(
         };
         let rec = reader.read_at(off)?;
         let next = rec.prev_addr;
-        if rec.flags & 0x01 == 0 {
+        if rec.flags & 0x01 == 0x01 {
+            return Ok(None);
+        }
+        if !is_rejected_function_name(&rec.name) {
             let vid = version_id(key, &rec.name, &rec.data);
-            if vid == canonical_vid {
-                return Ok(ResolvedRecord {
+            if canonical_vid == Some(vid) {
+                return Ok(Some(ResolvedRecord {
                     ts: rec.ts_sec,
                     name: rec.name,
                     data: rec.data,
                     used_canonical: true,
+                }));
+            }
+            if newest_visible.is_none() {
+                newest_visible = Some(ResolvedRecord {
+                    ts: rec.ts_sec,
+                    name: rec.name,
+                    data: rec.data,
+                    used_canonical: false,
                 });
             }
         }
         addr = next;
     }
 
-    let (ts, name, data) = fallback_latest;
-    Ok(ResolvedRecord {
-        ts,
-        name,
-        data,
-        used_canonical: false,
-    })
+    Ok(newest_visible)
 }
